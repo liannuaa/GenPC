@@ -1,0 +1,34 @@
+# Experiment
+output_path: 'workspace/waymo/ped' # output dir
+save: True # Saving intermediate files
+dataset: "redwood" # redwood, pcn, scannet
+device: "cuda"
+
+# Depth Prompting
+coords_scale: 0.5
+distance: 1.6 # 1.6 cameras distance
+fovy: 49.1 # cameras fov
+point_size: 2 #2
+mask_pixel_rate: 2
+downsample_num: 10000
+removal_radius: 100 # car 1000/ ped 500 # hidden point removal radius
+inpainter: 'DDNM_inpaint' # [‘flux’, 'DDNM_inpaint']
+camera_distribution: fibonacci_sphere # 'fibonacci_sphere','self_defined','blender'
+cam_res: 256  # 256 rendering res
+view_num: 1024 # if view_num=6, is orthogonal camera
+camera_base: 'kaolin'  # blender, kaolin
+
+# inpaint
+res: 256 # inpainting resolution
+edge_point_size: 1
+generate_res: 512
+
+# crop and rescale
+rescale: True  #
+padding: 0.15
+mask_ratio_thresh: 0.82 # 0.82 for everything else, 0.5 for diffPIR
+
+# controlnet and
+rembg_model: 'sam' # ['sam', 'rembg']
+control_model: "flux" # ['controlnet', 'adapter', flux]
+generative_model: "trellis" # ['instantmesh', 'hunyuan2.0', sf3d, trellis]
