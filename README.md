@@ -50,6 +50,7 @@ modelscope download --model Qwen/Qwen-Image-Edit-2509 --local_dir ./
 
 # Example
 ```
+# Modify configs/config.yaml according to your needs
 python3 main.py # include inference and evaluation
 # There may be a memory leak between Step 1 and Step 2, which may lead to an Out-of-Memory (OOM) error. If you encounter this, please comment out the steps and run Step 1 and Step 2 separately.
 ```
@@ -65,3 +66,4 @@ python3 main.py # include inference and evaluation
 }
 
 ```
+
