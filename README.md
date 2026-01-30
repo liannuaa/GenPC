@@ -31,11 +31,11 @@ pip install --no-build-isolation git+https://github.com/Nunchaku-AI/Nunchaku
 pip install --no-build-isolation "git+https://github.com/erikwijmans/Pointnet2_PyTorch.git#egg=pointnet2_ops&subdirectory=pointnet2_ops_lib"
 
 # Download models
-mkdir models
-cd models
-git clone https://github.com/microsoft/TRELLIS.2.git
-# install trellis2
+# 3D generator
+InstantMesh
 
+# Image generator
+Qwen-Image-Edit(Recommended) / Controlnet / FLUX-1.Dev
 cd models
 mkdir nunchaku-qwen-image-edit-2509
 cd nunchaku-qwen-image-edit-2509
@@ -63,4 +63,5 @@ python3 main.py # include inference and evaluation
   pages={1308--1318},
   year={2025}
 }
+
 ```
