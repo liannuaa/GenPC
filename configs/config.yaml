@@ -30,4 +30,5 @@ mask_ratio_thresh: 0.82 # 0.82 for everything else, 0.5 for diffPIR
 inpainter: 'cv2' # [‘flux’, 'DDNM'，cv2]
 rembg_model: 'RMBG' # ['rembg', 'RMBG']
 control_model: "qwen" # ['controlnet', 'adapter', flux, qwen]
-generative_model: "trellis_2" # ['instantmesh', 'hunyuan2.0', sf3d, trellis]
+
+generative_model: "instantmesh" # ['instantmesh', 'hunyuan2.0', sf3d, trellis]
