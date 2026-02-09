@@ -181,7 +181,6 @@ def instantmesh(cfg, flag, image):
                 save_glb(vertices, faces, vertex_colors, mesh_path_idx.replace('.obj', '.glb'))
             print(f"  Mesh saved to {mesh_path_idx.replace('.obj', '.glb')}")
 
-# configs/instant-mesh-large.yaml examples/hatsune_miku.png --save_video
 
 def pcn_instantmesh(category, save_video_flag=True):
     diffusion_steps = 75
@@ -343,42 +342,6 @@ def pcn_instantmesh(category, save_video_flag=True):
 
 if __name__ == '__main__':
     flag = 'swivel chair'
-    image = PIL.Image.open(f'workspace/{flag}/sam.png')
+    image = PIL.Image.open(f'workspace/{flag}/img_sam.png')
     # image = PIL.Image.open(f'workspace/{flag}/{flag}_gaussian.png')
     instantmesh(flag = flag,image=image,save_video_flag=True)
-    # pcn_instantmesh(category='02691156', save_video_flag=True)
-    # path = os.path.join('generative')
-    # from utils.dataUtils import get_rotate_matrix ,normalize_numpy,numpy2o3d
-    # for category in os.listdir(path):
-    #     category_path = os.path.join(path, category)
-    #     for file in os.listdir(category_path):
-    #         file_file = os.path.join(category_path, file)
-    #         # 在file_file文件夹下找到snapshotx.png
-    #         for xx in os.listdir(file_file):
-    #             if xx.startswith('snapshot'):
-    #                 img_path = os.path.join(file_file, xx)
-    #                 image = PIL.Image.open(img_path)
-    #                 flag = category+'_'+file
-    #                 # instantmesh(flag=flag, image=image, save_video_flag=True)
-    #                 pcd = o3d.io.read_triangle_mesh(f'workspace/{flag}/{flag}_instantmesh.glb')
-    #                 xyz = pcd.sample_points_uniformly(number_of_points=16384)
-    #                 # o3d.visualization.draw_geometries([pcd])
-    #                 x_rot_90 = get_rotate_matrix("x", 90)
-    #                 y_rot_90 = get_rotate_matrix("y", 90)
-    #                 np_xyz = np.asarray(xyz.points)
-    #                 np_xyz = np.dot(np_xyz, x_rot_90.T)
-    #                 np_xyz = np.dot(np_xyz, y_rot_90.T)
-    #                 np_xyz = normalize_numpy(np_xyz,range=0.5)
-    #                 # o3d.visualization.draw_geometries([numpy2o3d(np_xyz)])
-    #                 # np_color = np.asarray(xyz.colors)
-    #                 xyz = numpy2o3d(np_xyz)
-    #                 o3d.io.write_point_cloud(f'{file_file}/instantmesh.pcd', xyz)
-    # category = 'table_base'
-    # file = '2'
-    # img_path = os.path.join("generative",category,file,"snapshot12.png")
-    # image = PIL.Image.open(img_path)
-    # flag = category + '_' + file
-    # instantmesh(flag=flag, image=image, save_video_flag=True)
-    # pcd = o3d.io.read_triangle_mesh(f'workspace/{flag}/{flag}_instantmesh.glb')
-    # xyz = pcd.sample_points_uniformly(number_of_points=16384)
-    # o3d.io.write_point_cloud(f'generative/{category}/{file}/instantmesh.pcd', xyz)

@@ -8,14 +8,18 @@ import numpy as np
 
 # 加载模型
 model = AutoModelForImageSegmentation.from_pretrained(
-    "/root/shared-nvme/RMBG-2.0", 
-    trust_remote_code=True
+    "briaai/RMBG-2.0", 
+    trust_remote_code=True,
+    torch_dtype=None,
+    low_cpu_mem_usage=False,  
+    device_map=None          
 )
-model.eval()
+
 
 # 如果有GPU，使用GPU
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 model.to(device)
+model.eval()
 
 def RMBG_pred(input_path, output_path=None):
     """

@@ -505,12 +505,12 @@ def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters
     print(f"Complete 点云: {complete_xyz.shape[0]} points, Partial 点云: {partial_xyz.shape[0]} points")
 
     ref_img, ref_mask, R_cam, T_cam = render_reference_image(partial_xyz, partial_col, radius, render_size, device)
-    imageio.imsave("partial.png", (ref_img.detach().cpu() * 255).to(torch.uint8).numpy())
-    imageio.imsave("partial_mask.png", (ref_mask.detach().cpu().numpy() * 255).astype(np.uint8))
+    # imageio.imsave("partial.png", (ref_img.detach().cpu() * 255).to(torch.uint8).numpy())
+    # imageio.imsave("partial_mask.png", (ref_mask.detach().cpu().numpy() * 255).astype(np.uint8))
     
     # 保存标准化前后的对比
-    print("图像统计信息:")
-    print(f"Partial图像 - 均值: {torch.mean(ref_img, dim=(0,1))}, 标准差: {torch.std(ref_img, dim=(0,1))}")
+    # print("图像统计信息:")
+    # print(f"Partial图像 - 均值: {torch.mean(ref_img, dim=(0,1))}, 标准差: {torch.std(ref_img, dim=(0,1))}")
     if save_path is not None:
         writer = imageio.get_writer("pose.gif", mode='I', duration=0.3, loop=0)
     best_loss = float('inf')
@@ -589,8 +589,8 @@ def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters
     T_final = build_transform(R_obj, trans, scale)
     final_transform = T_final.detach().cpu().numpy()
     np.save('final_transform.npy', final_transform)
-    print("最终 4x4 变换矩阵 (complete -> partial 相机坐标系):")
-    print(final_transform)
+    # print("最终 4x4 变换矩阵 (complete -> partial 相机坐标系):")
+    # print(final_transform)
     return final_transform
 
 def main(args):

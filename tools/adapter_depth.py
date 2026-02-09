@@ -6,7 +6,6 @@ import numpy as np
 import os
 from PIL import Image
 from torchvision import transforms
-from utils.utils_2d import *
 from utils.dataUtils import *
 
 

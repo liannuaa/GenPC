@@ -215,7 +215,6 @@ def glb2ply(glb_path, ply_path=None):
     return mesh
 
 def glb2point(glb_path, down_sample=None, num_points=16384):
-    print(glb_path)
     mesh = trimesh.load(glb_path, file_type='glb')
     if isinstance(mesh, trimesh.Scene):
         mesh = mesh.dump(concatenate=True)

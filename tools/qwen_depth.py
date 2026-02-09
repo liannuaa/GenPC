@@ -19,7 +19,7 @@ class Qwen_depth:
         device,
         rank=128,
         step=8,
-        transformer_path=None,
+        transformer_path="models/ckpt-qwen-image-edit/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
         pipeline_path="Qwen/Qwen-Image-Edit-2509",
     ):
         """

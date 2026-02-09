@@ -7,6 +7,8 @@ from ScaleAdapter import *
 from utils.loss_util import Completionloss
 from fpsample import fps_sampling
 
+import warnings
+warnings.filterwarnings("ignore")
 
 def metric(flag):
     """计算CD和EMD指标"""
@@ -37,10 +39,8 @@ def metric(flag):
 
 def main(cfg):
     """主函数：处理多个样本"""
-    # flags = ['01184', '05117', '05452', '06127', '06145', '06188', '06830', '07136', '07306', '09639']
-    # flags = ['01184', '05117', '05452', '06127', '06145', '06188', '06830', '07136', '09639']
-    flags = ['05117']
-    
+    flags = ['01184', '05117', '05452', '06127', '06145', '06188', '06830', '07136', '07306', '09639']
+    flags = ['07136']
     results = []
 
     dp = DepthPrompting(cfg)
@@ -51,7 +51,7 @@ def main(cfg):
         xyz_np, rgb_np = load_xyz(f'./data/{flag}.ply')
         xyz = torch.tensor(xyz_np).to(cfg.device)
         rgb = torch.tensor(rgb_np).to(cfg.device)
-        dp.getImage(xyz=xyz, flag=flag, rgb=rgb, depth_gen=True, img_gen=True) 
+        dp.getImage(xyz=xyz, flag=flag, rgb=rgb, depth_gen=True, img_gen=False) 
 
     sa = ScaleAdapter(cfg)
     for flag in flags:

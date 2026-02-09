@@ -8,7 +8,7 @@ from utils.dataUtils import *
 from utils.camera_utils import *
 import fpsample
 from diffusers.utils import load_image
-
+import math
 warnings.filterwarnings("ignore")
 
 
@@ -55,12 +55,7 @@ class DepthPrompting:
             self.depth2Image = Flux_depth(self.device)
         elif self.cfg.control_model == "qwen":
             from tools.qwen_depth import Qwen_depth
-
-            self.depth2Image = Qwen_depth(
-                self.device,
-                transformer_path="/root/shared-nvme/genpc_open/models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-                pipeline_path="/root/shared-nvme/genpc_open/models/qwen-image-edit-2509",
-            )
+            self.depth2Image = Qwen_depth(self.device)
         else:
             raise NotImplementedError(
                 f"Control model {self.cfg.control_model} not implemented."
@@ -85,95 +80,76 @@ class DepthPrompting:
         print(f" Take {int(end-start)} seconds")
 
     def viewpoint_select(self, xyz):
-        xyz_fps_idx = fpsample.fps_sampling(
-            xyz.cpu().numpy(), self.cfg.downsample_num
-        ).astype(np.int64)
-        xyz_fps_idx = torch.from_numpy(xyz_fps_idx).long().to(xyz.device)
-        xyz_fps = xyz[xyz_fps_idx]
-        print(" Finding best viewpoint...")
-        visible_points = self.getVisiblePoints(
-            xyz_fps, self.viewpoints, self.cfg.removal_radius
+        """选择最佳视角，包含启发式防止视角翻转逻辑"""
+        # 1. 初始视角选择
+        if self.cfg.view_num == 6:
+            best_view_idx = 1
+        else:
+            xyz_fps_idx = fpsample.fps_sampling(
+                xyz.cpu().numpy(), self.cfg.downsample_num
+            ).astype(np.int64)
+            xyz_fps_idx = torch.from_numpy(xyz_fps_idx).long().to(xyz.device)
+            xyz_fps = xyz[xyz_fps_idx]
+            print(" Finding best viewpoint...")
+            visible_points = self.getVisiblePoints(
+                xyz_fps, self.viewpoints, self.cfg.removal_radius
+            )
+            best_view_idx = torch.argmax(visible_points.sum(dim=1)).item()
+
+        # 2. 启发式防止视角翻转 (Heuristic to prevent viewpoint flip)
+        original_viewpoint = self.viewpoints[best_view_idx]
+        opposite_viewpoint = -original_viewpoint  # 以(0,0,0)为中心反转
+        
+        # 计算原视角和相反视角的深度和可见性
+        up_vector = calculate_up_vector(opposite_viewpoint, np.array([0.0, 0.0, 0.0]))
+        opposite_camera = kal.render.camera.Camera.from_args(
+            eye=torch.tensor(opposite_viewpoint).float(),
+            at=torch.tensor([0.0, 0.0, 0.0]).float(),
+            up=torch.tensor(up_vector).float(),
+            fov=math.pi * self.cfg.fovy / 180,
+            width=self.cfg.cam_res,
+            height=self.cfg.cam_res,
+            device=self.device,
         )
-        best_view_idx = torch.argmax(visible_points.sum(dim=1))
+
+        # 获取两个视角的 UV 和深度数据用于对比
+        # 注意：这里只选取对比所需的两个相机
+        test_cams = [self.cameras[best_view_idx], opposite_camera]
+        _, test_depths, _ = self.getUvs(test_cams, xyz, rescale=self.cfg.rescale, padding=self.cfg.padding)
+        
+        # 获取可见点索引进行求和
+        vis_mask = self.getVisiblePoints(xyz, [original_viewpoint, opposite_viewpoint], radius=1)
+        depth_sum_1 = test_depths[0][vis_mask[0]].sum().item()
+        depth_sum_2 = test_depths[1][vis_mask[1]].sum().item()
+        
+        # print(f' Original view depth sum: {depth_sum_1:.4f}')
+        # print(f' Opposite view depth sum: {depth_sum_2:.4f}')
+
+        if depth_sum_2 > depth_sum_1:
+            # print(" Using opposite view (larger depth sum)")
+            # 将相反视角相机追加到列表中以维持索引引用
+            if isinstance(self.viewpoints, torch.Tensor):
+                self.viewpoints = torch.cat([self.viewpoints, torch.tensor(opposite_viewpoint).to(self.viewpoints).unsqueeze(0)], dim=0)
+            else:
+                self.viewpoints = np.vstack([self.viewpoints, opposite_viewpoint])
+            self.cameras.append(opposite_camera)
+            best_view_idx = len(self.cameras) - 1
+
         return best_view_idx
 
     def getDepth(self, xyz, flag, rgb):
         with torch.no_grad():
-            point_uvs, point_depths, transformed_points = self.getUvs(
-                self.cameras, xyz, rescale=self.cfg.rescale, padding=self.cfg.padding
-            )
-            if self.cfg.view_num == 6:
-                best_view_idx = 1
-            else:
-                best_view_idx = self.viewpoint_select(xyz)
+            best_view_idx = self.viewpoint_select(xyz)
+            
+            self.view = self.viewpoints[best_view_idx]
+            self.cam = self.cameras[best_view_idx]
 
-            # 创建相反视角的相机
-            original_viewpoint = self.viewpoints[best_view_idx]
-            opposite_viewpoint = -original_viewpoint  # 以(0,0,0)为中心反转
-
-            # 计算up向量
-            from utils.camera_utils import calculate_up_vector
-
-            up_vector = calculate_up_vector(
-                opposite_viewpoint, np.array([0.0, 0.0, 0.0])
-            )
-
-            # 创建相反视角的相机
-            import math
-
-            opposite_camera = kal.render.camera.Camera.from_args(
-                eye=torch.tensor(opposite_viewpoint).float(),
-                at=torch.tensor([0.0, 0.0, 0.0]).float(),
-                up=torch.tensor(up_vector).float(),
-                fov=math.pi * self.cfg.fovy / 180,
-                width=self.cfg.cam_res,
-                height=self.cfg.cam_res,
-                device=self.device,
-            )
-
-            # 计算相反视角的UV和深度
-            opposite_cameras = [opposite_camera]
-            opposite_point_uvs, opposite_point_depths, _ = self.getUvs(
-                opposite_cameras,
-                xyz,
-                rescale=self.cfg.rescale,
-                padding=self.cfg.padding,
-            )
-
-            # 获取两个视角的可见点
-            visible_point_idx_1 = self.getVisiblePoints(
-                xyz,
-                self.viewpoints[best_view_idx : best_view_idx + 1],
-                self.cfg.removal_radius,
-            )[0]
-            visible_point_idx_2 = self.getVisiblePoints(
-                xyz, [opposite_viewpoint], self.cfg.removal_radius
-            )[0]
-
-            # 计算两个视角的深度总和（使用启发式方法）
-            depth_sum_1 = point_depths[best_view_idx][visible_point_idx_1].sum().item()
-            depth_sum_2 = opposite_point_depths[0][visible_point_idx_2].sum().item()
-
-            # print(f' Original view depth sum: {depth_sum_1:.4f}')
-            # print(f' Opposite view depth sum: {depth_sum_2:.4f}')
-
-            # 选择深度总和更大的视角
-            if depth_sum_1 >= depth_sum_2:
-                selected_idx = 0
-                visible_point_idx = visible_point_idx_1
-                selected_point_uvs = point_uvs[best_view_idx]
-                selected_point_depths = point_depths[best_view_idx]
-                self.view = self.viewpoints[best_view_idx]
-                self.cam = self.cameras[best_view_idx]
-                print(" Using original view (larger depth sum)")
-            else:
-                selected_idx = 1
-                visible_point_idx = visible_point_idx_2
-                selected_point_uvs = opposite_point_uvs[0]
-                selected_point_depths = opposite_point_depths[0]
-                self.view = opposite_viewpoint
-                self.cam = opposite_camera
-                print(" Using opposite view (larger depth sum)")
+            # 渲染选中的视角
+            point_uvs, point_depths, _ = self.getUvs([self.cam], xyz, rescale=self.cfg.rescale, padding=self.cfg.padding)
+            selected_point_uvs = point_uvs[0]
+            selected_point_depths = point_depths[0]
+            
+            visible_point_idx = self.getVisiblePoints(xyz, [self.view], self.cfg.removal_radius)[0]
 
             # 渲染选中的视角
             point_pixels = (selected_point_uvs * self.cfg.res).long()
@@ -235,6 +211,7 @@ class DepthPrompting:
             )
             np.save(f"{self.cfg.output_path}/{flag}/viewpoint.npy", self.view)
             torch.save(self.cam, f"{self.cfg.output_path}/{flag}/camera.pth")
+
 
     def getUvs(self, cams, points, rescale=True, padding=0.15):
         transformed_points = torch.zeros(

@@ -26,9 +26,6 @@ class ScaleAdapter():
         if self.cfg.generative_model == "instantmesh":
             from tools.instantmesh import instantmesh
             self.generative = instantmesh
-        elif self.cfg.generative_model == 'sf3d':
-            from SF3D import sf3d
-            self.generative = sf3d
         elif self.cfg.generative_model == 'trellis':
             from trellis import trellis
             self.generative = trellis

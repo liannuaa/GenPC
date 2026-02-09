@@ -87,7 +87,7 @@ def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, in
                     best_transformation = icp_result.transformation
                     # print(f"scale:{scales},cd:{cd}")
                     # o3d.visualization.draw_geometries([source_copy.transform(icp_result.transformation), target_copy])
-    print(f"  best_scales:{best_scales},best_loss:{best_loss}")
+    # print(f"  best_scales:{best_scales},best_loss:{best_loss}")
     best_scales_transformation = np.eye(4)
     best_scales_transformation[0, 0] = best_scales[0]
     best_scales_transformation[1, 1] = best_scales[1]
@@ -101,17 +101,15 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     # transforms_target2source # 目标点云变换到源点云的坐标系下
     # 判断路径是否存在
     if not os.path.exists(f"{path}/{flag}/color_point.ply"):
-        print(f"Path {path}/{flag}/color_point.ply does not exist.")
+        # print(f"Path {path}/{flag}/color_point.ply does not exist.")
         raise FileNotFoundError(f"Path {path}/{flag}/color_point.ply does not exist.")
     if not os.path.exists(f"{path}/{flag}/{flag}_{cfg.generative_model}.glb"):
-        print(f"Path {path}/{flag}/{flag}_{cfg.generative_model}.glb does not exist.")
+        # print(f"Path {path}/{flag}/{flag}_{cfg.generative_model}.glb does not exist.")
         raise FileNotFoundError(f"Path {path}/{flag}/{flag}_{cfg.generative_model}.glb does not exist.")
     if diff_init:
-        # 使用diff_camera_pose优化相机位姿
         diff_transform = object_pose_optimization(
             glb_path=f"{path}/{flag}/{flag}_{cfg.generative_model}.glb",
             point_path=f"{path}/{flag}/color_point.ply",
-            # ref_img_path=f"{path}/{flag}/img_sam.png",
             radius=0.02,
             lr=0.01,
             iters=200,
@@ -120,7 +118,6 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
             device=cfg.device
         )
         diff_transform = np.linalg.inv(diff_transform)
-        # print(f"transform from diff_camera_pose: {diff_transform}")
     source_pcd = o3d.io.read_point_cloud(f"{path}/{flag}/color_point.ply")
     target_pcd = glb2point(f"{path}/{flag}/{flag}_{cfg.generative_model}.glb", num_points=163840)
     # 初步对齐到complete的标准坐标系下
@@ -217,10 +214,10 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     fused_pcd_color = fused_pcd_color[fused_indices]
     fused_pcd = numpy2o3d(fused_pcd_xyz,fused_pcd_color)
     fused_pcd = remove_noise_from_point_cloud(fused_pcd, std_ratio=2.5)
+    o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_fused.ply",fused_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_gen3D.ply", target_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_miss.ply",filtered_target_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_partial.ply",source_pcd)
-    o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_fused.ply",fused_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_all_fused.ply",all_fused_pcd)
     # o3d.visualization.draw_geometries([filtered_target_pcd], window_name="ICP with Scaling Result")
 
@@ -232,4 +229,4 @@ if __name__ == '__main__':
     cfg_txt = open('./configs/config.yaml', "r").read()
     cfg = Munch.fromDict(yaml.safe_load(cfg_txt))
     cfg.device = "cuda:0"
-    reg(cfg, "01184",cd_inv_weight=0.5,reg_fine_xyz=True)
+    reg(cfg, "07136",cd_inv_weight=0.5,reg_fine_xyz=True)
