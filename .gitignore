@@ -21,6 +21,7 @@ SUNRGBD/
 .ipynb_checkpoints
 *.egg-info/
 *.glb
+workspace/
 workspace/**/*.ply
 workspace/**/*.glb
 workspace/**/*.png
