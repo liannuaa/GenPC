@@ -1,12 +1,10 @@
 import os
 import sys
 
-# 获取当前文件所在目录
 current_dir = os.path.dirname(os.path.abspath(__file__))
-# 获取项目根目录（tools的上一级）
 project_root = os.path.dirname(current_dir)
-# TRELLIS.2 路径
 trellis_path = os.path.join(project_root, 'models', 'TRELLIS.2')
+default_trellis2_model_path = os.path.join(project_root, 'models', 'TRELLIS.2-4B')
 
 sys.path.insert(0, trellis_path)
 sys.path.insert(0, project_root)
@@ -22,18 +20,27 @@ from trellis2.pipelines import Trellis2ImageTo3DPipeline
 from trellis2.utils import render_utils
 from trellis2.renderers import EnvMap
 import o_voxel
-import time
-import numpy as np
-from pathlib import Path
 from utils.dataUtils import glb2point
 warnings.filterwarnings("ignore")
 
-trellis2_pipeline = Trellis2ImageTo3DPipeline.from_pretrained("microsoft/TRELLIS.2-4B")
-trellis2_pipeline.cuda()
+trellis2_pipeline = None
 
-def load_trellis2_pipeline(ckpt_path):
-    pipeline = Trellis2ImageTo3DPipeline.from_pretrained(ckpt_path)
-    return pipeline
+def load_trellis2_pipeline(ckpt_path=None):
+    global trellis2_pipeline
+
+    if trellis2_pipeline is not None:
+        return trellis2_pipeline
+
+    model_path = ckpt_path or default_trellis2_model_path
+    if not os.path.exists(os.path.join(model_path, "pipeline.json")):
+        raise FileNotFoundError(
+            f"TRELLIS.2 model not found at {model_path}. "
+            "Download microsoft/TRELLIS.2-4B into models/TRELLIS.2-4B first."
+        )
+
+    trellis2_pipeline = Trellis2ImageTo3DPipeline.from_pretrained(model_path)
+    trellis2_pipeline.cuda()
+    return trellis2_pipeline
 
 
 def trellis_2(cfg, flag, img):
@@ -50,8 +57,9 @@ def trellis_2(cfg, flag, img):
         img = Image.open(img)
     
     print(f"正在运行 TRELLIS.2 管道...")
+    pipeline = load_trellis2_pipeline(getattr(cfg, "trellis2_model_path", None))
     # 运行管道
-    mesh = trellis2_pipeline.run(img)[0]
+    mesh = pipeline.run(img)[0]
     mesh.simplify(16777216)  # nvdiffrast limit
     
     # 创建输出目录

@@ -26,6 +26,9 @@ class ScaleAdapter():
         if self.cfg.generative_model == "instantmesh":
             from tools.instantmesh import instantmesh
             self.generative = instantmesh
+        elif self.cfg.generative_model == "hunyuan2.0":
+            from tools.hunyuan3d_2 import hunyuan3d_2
+            self.generative = hunyuan3d_2
         elif self.cfg.generative_model == 'trellis':
             from trellis import trellis
             self.generative = trellis
@@ -52,12 +55,18 @@ class ScaleAdapter():
         if isinstance(point_uv, np.ndarray):
             point_uv = torch.tensor(point_uv).to(self.device)
         img = img.transpose(Image.FLIP_TOP_BOTTOM)
+        img_width, img_height = img.size
         img = transforms.ToTensor()(img).to(self.device)
         img_np = img.detach().cpu().numpy()
-        point_pixel = point_uv * 1024  # [piont_num,2]
-        point_pixel = point_pixel.long()
-        point_pixel = torch.cat((point_pixel[:, 1].unsqueeze(-1), point_pixel[:, 0].unsqueeze(-1)), dim=-1)
-        point_pixel = point_pixel.clip(0, 1024 - 1)
+        point_pixel = torch.stack(
+            (
+                point_uv[:, 1] * (img_height - 1),
+                point_uv[:, 0] * (img_width - 1),
+            ),
+            dim=-1,
+        ).long()
+        point_pixel[:, 0] = point_pixel[:, 0].clip(0, img_height - 1)
+        point_pixel[:, 1] = point_pixel[:, 1].clip(0, img_width - 1)
         colors = np.zeros_like(xyz.detach().cpu().numpy())
         for i, (x, y) in enumerate(point_pixel.detach().cpu().numpy()):
             colors[i] = img_np[:, x, y]

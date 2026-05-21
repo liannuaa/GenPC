@@ -88,10 +88,14 @@ def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, in
                     # print(f"scale:{scales},cd:{cd}")
                     # o3d.visualization.draw_geometries([source_copy.transform(icp_result.transformation), target_copy])
     # print(f"  best_scales:{best_scales},best_loss:{best_loss}")
-    best_scales_transformation = np.eye(4)
-    best_scales_transformation[0, 0] = best_scales[0]
-    best_scales_transformation[1, 1] = best_scales[1]
-    best_scales_transformation[2, 2] = best_scales[2]
+    if best_scales is None:
+        best_scales_transformation = np.eye(4)
+        best_transformation = np.eye(4)
+    else:
+        best_scales_transformation = np.eye(4)
+        best_scales_transformation[0, 0] = best_scales[0]
+        best_scales_transformation[1, 1] = best_scales[1]
+        best_scales_transformation[2, 2] = best_scales[2]
     # best_scales_transformation[2, 2] = 1.5
     return best_scales_transformation, best_loss, best_transformation
 
@@ -174,7 +178,9 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
         # 如果要对xyz三个轴上进行缩放配准，要对齐到complete的标准坐标系下，在这个坐标系下物体的朝向与轴正交
         source_pcd.transform(coarse_transformation)
         # o3d.visualization.draw_geometries([source_pcd, target_pcd], window_name="ICP with Scaling Result")
-        if cfg.dataset in ["pcn","kitti"]:
+        best_scales_transformation = np.eye(4)
+        best_transformation_xyz = np.eye(4)
+        if cfg.dataset in ["pcn", "kitti", "waymo"]:
             best_scales_transformation, best_loss_xyz, best_transformation_xyz = iterative_scale_search(
                 source_pcd,
                 target_pcd.voxel_down_sample(voxel_size=0.04),
@@ -215,6 +221,25 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     fused_pcd = numpy2o3d(fused_pcd_xyz,fused_pcd_color)
     fused_pcd = remove_noise_from_point_cloud(fused_pcd, std_ratio=2.5)
     o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_fused.ply",fused_pcd)
+
+    # Export an additional fused point cloud where the original partial points are highlighted in red.
+    source_xyz = np.asarray(source_pcd.points)
+    source_red = np.tile(np.array([[1.0, 0.0, 0.0]], dtype=np.float64), (len(source_xyz), 1))
+    target_xyz = np.asarray(filtered_target_pcd.points)
+    target_color = np.asarray(filtered_target_pcd.colors)
+    target_keep = max(0, 20000 - len(source_xyz))
+    if len(target_xyz) > target_keep > 0:
+        target_indices = fps_sampling(target_xyz, target_keep)
+        target_xyz = target_xyz[target_indices]
+        target_color = target_color[target_indices]
+    elif target_keep == 0:
+        target_xyz = np.empty((0, 3), dtype=np.float64)
+        target_color = np.empty((0, 3), dtype=np.float64)
+
+    fused_color_xyz = np.concatenate([source_xyz, target_xyz], axis=0)
+    fused_color_rgb = np.concatenate([source_red, target_color], axis=0)
+    fused_color_pcd = numpy2o3d(fused_color_xyz, fused_color_rgb)
+    o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_fused_color.ply", fused_color_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_gen3D.ply", target_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_miss.ply",filtered_target_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_partial.ply",source_pcd)

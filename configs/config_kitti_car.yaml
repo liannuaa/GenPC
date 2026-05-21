@@ -1,0 +1,66 @@
+# Single external KITTI partial point cloud demo
+output_path: 'workspace'
+save: True
+dataset: "kitti"
+device: "cuda"
+
+# Run this one sample only
+sample_ids: ["frame_0_car_0"]
+input_paths:
+  frame_0_car_0: "/root/autodl-tmp/frame_0_car_0.pcd"
+prompt_overrides:
+  frame_0_car_0: "car"
+
+# This external crop is not centered like the built-in redwood samples.
+# Normalize it before Stage 1 so the camera/viewpoint search still sees the object.
+normalize_input: true
+input_normalize_range: 0.5
+
+# This sample has no paired complete GT in the repo, so skip metrics by default.
+max_samples: null
+run_stage1: true
+run_stage2: true
+run_metric: false
+
+# Depth Prompting
+coords_scale: 0.5
+distance: 1.6
+fovy: 49.1
+point_size: 1
+mask_pixel_rate: 3
+downsample_num: 10000
+removal_radius: 10000
+camera_distribution: fibonacci_sphere
+cam_res: 256
+view_num: 256
+camera_base: 'kaolin'
+
+# inpaint
+res: 256
+edge_point_size: 2
+generate_res: 512
+
+# crop and rescale
+rescale: True
+padding: 0.15
+mask_ratio_thresh: 0.82
+
+inpainter: 'cv2'
+rembg_model: 'RMBG'
+control_model: "qwen"
+generative_model: "hunyuan2.0"
+
+# Hunyuan3D-2.0
+hunyuan_model_path: "models/Hunyuan3D-2-ms"
+hunyuan_shape_subfolder: "hunyuan3d-dit-v2-0"
+hunyuan_paint_subfolder: "hunyuan3d-paint-v2-0"
+hunyuan_enable_flashvdm: true
+hunyuan_shape_steps: 50
+hunyuan_octree_resolution: 380
+hunyuan_num_chunks: 20000
+hunyuan_point_sample_num: 100000
+hunyuan_seed: 12345
+hunyuan_paint: false
+
+# TRELLIS.2
+trellis2_model_path: "models/TRELLIS.2-4B"

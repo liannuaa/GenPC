@@ -1,5 +1,8 @@
 import yaml
 import torch
+import gc
+import argparse
+from pathlib import Path
 from munch import Munch
 from utils.dataUtils import *
 from DepthPrompting import DepthPrompting
@@ -9,6 +12,78 @@ from fpsample import fps_sampling
 
 import warnings
 warnings.filterwarnings("ignore")
+
+
+def free_memory():
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+
+
+def resolve_flags(cfg):
+    sample_ids = list(getattr(cfg, "sample_ids", []) or [])
+    if sample_ids:
+        return sample_ids
+
+    data_dir = Path("data")
+    flags = sorted(path.stem for path in data_dir.glob("*.ply"))
+    max_samples = getattr(cfg, "max_samples", None)
+    if max_samples:
+        flags = flags[: int(max_samples)]
+    return flags
+
+
+def resolve_input_path(cfg, flag):
+    input_paths = getattr(cfg, "input_paths", {}) or {}
+    if flag in input_paths:
+        return input_paths[flag]
+
+    direct_path = Path(flag)
+    if direct_path.exists():
+        return str(direct_path)
+
+    for suffix in (".ply", ".pcd"):
+        candidate = Path("data") / f"{flag}{suffix}"
+        if candidate.exists():
+            return str(candidate)
+
+    raise FileNotFoundError(
+        f"Input point cloud for '{flag}' not found. "
+        "Add it under data/ or set cfg.input_paths."
+    )
+
+
+def resolve_box_path(cfg, flag):
+    input_boxes = getattr(cfg, "input_boxes", {}) or {}
+    return input_boxes.get(flag)
+
+
+def normalize_with_box(xyz_np, box_path, normalize_range):
+    box_xyz = np.loadtxt(box_path, dtype=np.float32)
+    if box_xyz.ndim != 2 or box_xyz.shape[1] != 3:
+        raise ValueError(f"Invalid box file format: {box_path}")
+
+    box_min = box_xyz.min(axis=0)
+    box_max = box_xyz.max(axis=0)
+    center = (box_min + box_max) / 2.0
+    scale_factor = float((box_max - box_min).max())
+    scale = float(normalize_range) / 0.5
+    normalized = (xyz_np - center) / scale_factor
+    normalized *= scale
+    return normalized
+
+
+def load_sample(cfg, flag):
+    xyz_np, rgb_np = load_xyz(resolve_input_path(cfg, flag))
+    if getattr(cfg, "normalize_input", False):
+        normalize_range = float(getattr(cfg, "input_normalize_range", 0.5))
+        box_path = resolve_box_path(cfg, flag)
+        if box_path:
+            xyz_np = normalize_with_box(xyz_np, box_path, normalize_range)
+        else:
+            xyz_np, _, _ = normalize_numpy(xyz_np, range=normalize_range)
+    return xyz_np, rgb_np
 
 def metric(flag):
     """计算CD和EMD指标"""
@@ -34,52 +109,82 @@ def metric(flag):
     cd = completion_cd.get_loss(gen=pred_tensor, gt=gt_tensor)
     emd = completion_emd.get_loss(gen=pred_tensor, gt=gt_tensor)
     
-    print(f"Flag: {getCategory(flag)}, CD: {cd.item() * 100:.3f}, EMD: {emd.item() * 100:.3f}")
+    try:
+        label = getCategory(flag)
+    except KeyError:
+        label = flag
+    print(f"Flag: {label}, CD: {cd.item() * 100:.3f}, EMD: {emd.item() * 100:.3f}")
     return cd.item(), emd.item()
 
 def main(cfg):
-    """主函数：处理多个样本"""
-    flags = ['01184', '05117', '05452', '06127', '06145', '06188', '06830', '07136', '07306', '09639']
-    flags = ['07136']
+    """主函数：按配置执行 Stage 1 / Stage 2 / metric。"""
+    flags = resolve_flags(cfg)
+    if not flags:
+        raise FileNotFoundError(
+            "No input samples found. Add .ply files under data/ or set cfg.sample_ids."
+        )
+
+    run_stage1 = getattr(cfg, "run_stage1", True)
+    run_stage2 = getattr(cfg, "run_stage2", True)
+    run_metric = getattr(cfg, "run_metric", True)
     results = []
 
-    dp = DepthPrompting(cfg)
-    for flag in flags:
-        print(f'Processing {flag}...')
+    print(f"Running flags: {flags}")
 
-        # 加载点云数据 - 修复：正确解包返回值
-        xyz_np, rgb_np = load_xyz(f'./data/{flag}.ply')
-        xyz = torch.tensor(xyz_np).to(cfg.device)
-        rgb = torch.tensor(rgb_np).to(cfg.device)
-        dp.getImage(xyz=xyz, flag=flag, rgb=rgb, depth_gen=True, img_gen=False) 
+    if run_stage1:
+        print("\n=== Stage 1: Depth Prompting ===")
+        dp = DepthPrompting(cfg)
+        for flag in flags:
+            print(f'Processing {flag}...')
+            xyz_np, rgb_np = load_sample(cfg, flag)
+            xyz = torch.tensor(xyz_np).to(cfg.device)
+            rgb = torch.tensor(rgb_np).to(cfg.device)
+            dp.getImage(xyz=xyz, flag=flag, rgb=rgb, depth_gen=True, img_gen=True)
+            del xyz, rgb, xyz_np, rgb_np
+            free_memory()
+        del dp
+        free_memory()
 
-    sa = ScaleAdapter(cfg)
-    for flag in flags:
-        xyz, rgb = torch.tensor(load_xyz(f'./data/{flag}.ply')).to(cfg.device)
-        sa.scaleAdapter(xyz, flag)
-        sa.scaleReg(flag)
-        
-        # 计算指标
-        cd, emd = metric(flag)
-        results.append({
-            'flag': getCategory(flag),  # 修复：不使用集合括号
-            'cd': cd, 
-            'emd': emd
-        })
-    
-    # 打印总结
-    print("\n=== 结果总结 ===")
-    for result in results:
-        print(f"Category: {result['flag']}, CD: {result['cd'] * 100:.6f}, EMD: {result['emd'] * 100:.6f}")
-    
-    avg_cd = sum(r['cd'] for r in results) / len(results)
-    avg_emd = sum(r['emd'] for r in results) / len(results)
-    print(f"平均 CD: {avg_cd * 100:.6f}")
-    print(f"平均 EMD: {avg_emd * 100:.6f}")
-    
+    if run_stage2:
+        print("\n=== Stage 2: Scale Adapter ===")
+        sa = ScaleAdapter(cfg)
+        for flag in flags:
+            xyz_np, _ = load_sample(cfg, flag)
+            xyz = torch.tensor(xyz_np).to(cfg.device)
+            sa.scaleAdapter(xyz, flag)
+            sa.scaleReg(flag)
+            if run_metric:
+                cd, emd = metric(flag)
+                results.append({
+                    'flag': resolve_prompt_label(flag, cfg),
+                    'cd': cd,
+                    'emd': emd
+                })
+            del xyz, xyz_np
+            free_memory()
+        del sa
+        free_memory()
+
+    if results:
+        print("\n=== 结果总结 ===")
+        for result in results:
+            print(f"Category: {result['flag']}, CD: {result['cd'] * 100:.6f}, EMD: {result['emd'] * 100:.6f}")
+
+        avg_cd = sum(r['cd'] for r in results) / len(results)
+        avg_emd = sum(r['emd'] for r in results) / len(results)
+        print(f"平均 CD: {avg_cd * 100:.6f}")
+        print(f"平均 EMD: {avg_emd * 100:.6f}")
     return results
 
 if __name__ == '__main__':
-    cfg_txt = open('./configs/config.yaml', "r").read()
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config",
+        default="./configs/config.yaml",
+        help="Path to the YAML config file.",
+    )
+    args = parser.parse_args()
+
+    cfg_txt = open(args.config, "r").read()
     cfg = Munch.fromDict(yaml.safe_load(cfg_txt))
     main(cfg)

@@ -15,55 +15,197 @@ GenPC completes real-world partial scans without task-specific training by lever
 - Python 3.10
 - PyTorch >= 2
 
+> Note
+> The current default pipeline uses `qwen-image-edit` for image generation and `Hunyuan3D-2.0` for image-to-3D generation. The environment below focuses on that default path and does not try to keep every optional backend in the repo fully provisioned at the same time.
+
 ### Environment setup
 ```bash
 conda create -n genpc python=3.10 -y
 conda activate genpc
 
+# IMPORTANT:
+# On this machine, `conda activate genpc` may still leave `python` / `pip`
+# pointing at the base environment. Use the explicit env paths below for all
+# installs and runtime commands.
+export GENPC_PYTHON=/root/autodl-tmp/conda-envs/genpc/bin/python
+export GENPC_PIP=/root/autodl-tmp/conda-envs/genpc/bin/pip
+
+# Optional: move cache / temp files to a larger disk
+export XDG_CACHE_HOME=/root/autodl-tmp/.cache
+export PIP_CACHE_DIR=/root/autodl-tmp/.cache/pip
+export HF_HOME=/root/autodl-tmp/huggingface
+export TMPDIR=/root/autodl-tmp/tmp
+
 # Core torch stack (CUDA 12.6 build)
-pip install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
+$GENPC_PIP install torch==2.6.0 torchvision==0.21.0 torchaudio==2.6.0 \
   --index-url https://download.pytorch.org/whl/cu126
 
+# Core GenPC deps
+$GENPC_PIP install fpsample trimesh open3d opencv-python Pillow scipy matplotlib imageio pytz \
+  iopath munch pyyaml diffusers bitsandbytes accelerate transformers==4.57.6
+
+# Shared 3D / model deps
+$GENPC_PIP install pybind11 omegaconf pygltflib xatlas pymeshlab rembg onnxruntime
+$GENPC_PIP install imageio-ffmpeg easydict tensorboard lpips zstandard
+$GENPC_PIP install git+https://github.com/EasternJournalist/utils3d.git@9a4eb15e4021b67b12c460c7057d642626897ec8
+
+# Rendering / geometry deps used by GenPC
+$GENPC_PIP install kaolin==0.18.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.6.0_cu126.html
+$GENPC_PIP install warp-lang ipyevents ipycanvas "jupyter_client<8" tornado usd-core
+$GENPC_PIP install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast.git
+$GENPC_PIP install --no-build-isolation git+https://github.com/facebookresearch/pytorch3d.git
+
+# Nunchaku for Qwen-Image-Edit
+# Use the source build directly. On this machine, the official torch2.6 / cp310
+# wheel installs but fails at import time with an ABI error such as:
+#   undefined symbol: c10::detail::torchInternalAssertFail
+$GENPC_PIP install --no-build-isolation git+https://github.com/Nunchaku-AI/Nunchaku
+
+# Optional import check:
+$GENPC_PYTHON -c "import nunchaku; from nunchaku import NunchakuQwenImageTransformer2DModel; print('nunchaku ok')"
+
 # Build CUDA ops for Chamfer/EMD
-pip install ninja
-cd loss_functions/Chamfer3D/ && python setup.py install && cd ../emd && python setup.py install && cd ../..
+$GENPC_PIP install ninja
+cd loss_functions/Chamfer3D/ && $GENPC_PYTHON setup.py install && cd ../emd && $GENPC_PYTHON setup.py install && cd ../..
 
-# Common deps
-pip install "rembg[cli]" fpsample trimesh open3d opencv-python Pillow iopath \
-  munch diffusers bitsandbytes onnxruntime transformers==4.57.6
+# Hunyuan3D-2.0 code path (current default 3D backend)
+git clone --depth 1 https://github.com/Tencent-Hunyuan/Hunyuan3D-2 models/Hunyuan3D-2
+$GENPC_PIP install -e models/Hunyuan3D-2
 
-# Kaolin (match torch/cu version)
-pip install kaolin==0.18.0 -f https://nvidia-kaolin.s3.us-east-2.amazonaws.com/torch-2.6.0_cu126.html
-
-# Extra geometry / 3D toolkits
-pip install --no-build-isolation git+https://github.com/EasternJournalist/utils3d.git@c5daf6f6c244d251f252102d09e9b7bcef791a38
-pip install --no-build-isolation git+https://github.com/facebookresearch/pytorch3d.git
-pip install --no-build-isolation git+https://github.com/Nunchaku-AI/Nunchaku
-pip install --no-build-isolation "git+https://github.com/erikwijmans/Pointnet2_PyTorch.git#egg=pointnet2_ops&subdirectory=pointnet2_ops_lib"
+# Optional: TRELLIS.2 code and CUDA extensions
+# git clone -b main https://github.com/microsoft/TRELLIS.2.git --recursive models/TRELLIS.2
+# export CUDA_HOME=/usr/local/cuda
+# $GENPC_PYTHON -m pip install flash-attn==2.7.3 --no-build-isolation
+# $GENPC_PYTHON -m pip install git+https://github.com/JeffreyXiang/nvdiffrec.git@renderutils --no-build-isolation
+# $GENPC_PYTHON -m pip install git+https://github.com/JeffreyXiang/CuMesh.git --no-build-isolation
+# $GENPC_PYTHON -m pip install git+https://github.com/JeffreyXiang/FlexGEMM.git --no-build-isolation
+# $GENPC_PYTHON -m pip install models/TRELLIS.2/o-voxel --no-build-isolation
 ```
 
 ### Model downloads
 ```bash
-# 3D generator (recommended: TRELLIS.2; alternative: InstantMesh)
-mkdir -p models && cd models
-git clone -b main https://github.com/microsoft/TRELLIS.2.git --recursive
-
-# Image generator (recommended: Qwen-Image-Edit; alternatives: T2I-Adapter / ControlNet)
-mkdir -p nunchaku-qwen-image-edit-2509 && cd nunchaku-qwen-image-edit-2509
+# Image generator: Qwen-Image-Edit
+mkdir -p models/nunchaku-qwen-image-edit-2509 && cd models/nunchaku-qwen-image-edit-2509
 wget https://huggingface.co/nunchaku-ai/nunchaku-qwen-image-edit-2509/resolve/main/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
 cd ../..
-# (Paths for these weights can be customized in code.)
+
+# Qwen pipeline weights (ModelScope)
+MODELSCOPE_CACHE=/root/autodl-tmp/modelscope-cache $GENPC_PYTHON - <<'PY'
+from modelscope.hub.snapshot_download import snapshot_download
+snapshot_download('Qwen/Qwen-Image-Edit-2509', local_dir='models/Qwen-Image-Edit-2509', max_workers=4)
+PY
+
+# Local RMBG-2.0 for background removal
+MODELSCOPE_CACHE=/root/autodl-tmp/modelscope-cache $GENPC_PYTHON - <<'PY'
+from modelscope.hub.snapshot_download import snapshot_download
+snapshot_download(
+    'AI-ModelScope/RMBG-2.0',
+    local_dir='models/RMBG-2.0-ms-local',
+    allow_patterns=[
+        'config.json',
+        'configuration.json',
+        'preprocessor_config.json',
+        'birefnet.py',
+        'BiRefNet_config.py',
+        'model.safetensors',
+    ],
+    max_workers=4,
+)
+PY
+
+# Hunyuan3D-2.0 weights (current default 3D backend)
+MODELSCOPE_CACHE=/root/autodl-tmp/modelscope-cache $GENPC_PYTHON - <<'PY'
+from modelscope.hub.snapshot_download import snapshot_download
+snapshot_download('AI-ModelScope/Hunyuan3D-2', local_dir='models/Hunyuan3D-2-ms', max_workers=4)
+PY
+
+# Optional: TRELLIS.2 main weights
+# MODELSCOPE_CACHE=/root/autodl-tmp/modelscope-cache $GENPC_PYTHON - <<'PY'
+# from modelscope.hub.snapshot_download import snapshot_download
+# snapshot_download('microsoft/TRELLIS.2-4B', local_dir='models/TRELLIS.2-4B', max_workers=4)
+# PY
+
+# Optional: TRELLIS.2 image encoder dependency
+# MODELSCOPE_CACHE=/root/autodl-tmp/modelscope-cache $GENPC_PYTHON - <<'PY'
+# from modelscope.hub.snapshot_download import snapshot_download
+# snapshot_download(
+#     'facebook/dinov3-vitl16-pretrain-lvd1689m',
+#     local_dir='models/dinov3-vitl16-pretrain-lvd1689m',
+#     max_workers=4,
+# )
+# PY
+
+# Current default local paths:
+# - Qwen transformer: models/nunchaku-qwen-image-edit-2509/...
+# - Qwen pipeline: models/Qwen-Image-Edit-2509
+# - Hunyuan3D-2.0: models/Hunyuan3D-2-ms
+# - RMBG-2.0: models/RMBG-2.0-ms-local
 ```
 
 ## Usage
 ```bash
 # 1) Adjust configs/config.yaml as needed
 # 2) Run pipeline (inference + evaluation)
-python main.py
+/root/autodl-tmp/conda-envs/genpc/bin/python main.py
 
-# Note: There may be a memory leak between Step 1 and Step 2; if you hit OOM,
-# run those steps separately by commenting out the other stage.
+# Checked-in default path:
+# Stage 1 uses Qwen-Image-Edit, then Stage 2 uses Hunyuan3D-2.0.
 ```
+
+Useful runtime config knobs in `configs/config.yaml`:
+
+- `sample_ids: []`
+  - empty means run every `.ply` directly under `data/`
+  - set `["07136"]` to run a single sample
+- `max_samples: null`
+  - set an integer to truncate the auto-discovered list
+- `run_stage1: true`
+- `run_stage2: true`
+- `run_metric: true`
+
+External sample example:
+
+```bash
+/root/autodl-tmp/conda-envs/genpc/bin/python main.py --config configs/config_kitti_car.yaml
+```
+
+`configs/config_kitti_car.yaml` is a ready-to-run example for:
+
+- input point cloud: `/root/autodl-tmp/frame_0_car_0.pcd`
+- explicit prompt override: `car`
+- dataset mode: `kitti`
+- metric disabled because there is no paired GT in this repo
+
+### Current default config
+The checked-in default config is:
+
+- `control_model: "qwen"`
+- `generative_model: "hunyuan2.0"`
+- `rembg_model: "RMBG"`
+- `hunyuan_model_path: "models/Hunyuan3D-2-ms"`
+- `hunyuan_paint: false`
+- `sample_ids: []` (auto-run all `data/*.ply`)
+- `run_stage1: true`
+- `run_stage2: true`
+- `run_metric: true`
+
+This means the default pipeline is:
+
+1. `DepthPrompting` renders depth / mask guidance from the partial point cloud.
+2. `Qwen-Image-Edit` generates the completed reference image.
+3. `Hunyuan3D-2.0` generates the 3D asset.
+4. `ScaleAdapter` aligns and fuses the generated result back to the input scan.
+
+### Verified smoke test
+The current checked-in smoke test is sample `07136` with Stage 1 + Stage 2 run
+end-to-end using `sample_ids: ["07136"]`.
+
+Previously verified on this machine:
+
+- Stage 1: `Qwen-Image-Edit`
+- Stage 2: `Hunyuan3D-2.0` and `TRELLIS.2` were both brought up successfully during integration
+
+The checked-in default has now been switched back to `Hunyuan3D-2.0`.
 
 ## Citation
 ```bibtex

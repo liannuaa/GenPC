@@ -3,6 +3,11 @@ output_path: 'workspace' # output dir
 save: True # Saving intermediate files
 dataset: "redwood" # redwood, pcn, scannet
 device: "cuda"
+sample_ids: [] # empty => run all .ply files under data/
+max_samples: null # set an integer to truncate auto-discovered samples
+run_stage1: true
+run_stage2: true
+run_metric: true
 
 # Depth Prompting
 coords_scale: 0.5
@@ -29,5 +34,20 @@ mask_ratio_thresh: 0.82 # 0.82 for everything else, 0.5 for diffPIR
 
 inpainter: 'cv2' # [‘flux’, 'DDNM'，cv2]
 rembg_model: 'RMBG' # ['rembg', 'RMBG']
-control_model: "qwen" # ['controlnet', 'adapter', flux, qwen]
-generative_model: "trellis_2" # ['instantmesh', 'hunyuan2.0', sf3d, trellis, trellis_2]
+control_model: "qwen" # default image generator; ['controlnet', 'adapter', flux, qwen]
+generative_model: "hunyuan2.0" # default 3D generator; ['instantmesh', 'hunyuan2.0', sf3d, trellis, trellis_2]
+
+# Hunyuan3D-2.0
+hunyuan_model_path: "models/Hunyuan3D-2-ms"
+hunyuan_shape_subfolder: "hunyuan3d-dit-v2-0"
+hunyuan_paint_subfolder: "hunyuan3d-paint-v2-0"
+hunyuan_enable_flashvdm: true
+hunyuan_shape_steps: 50
+hunyuan_octree_resolution: 380
+hunyuan_num_chunks: 20000
+hunyuan_point_sample_num: 100000
+hunyuan_seed: 12345
+hunyuan_paint: false
+
+# TRELLIS.2
+trellis2_model_path: "models/TRELLIS.2-4B" # default TRELLIS.2 checkpoint

@@ -1,18 +1,30 @@
+import os
+from pathlib import Path
+
 # 使用 RMBG-2.0 模型移除背景
 from transformers import AutoModelForImageSegmentation
 from PIL import Image
 import torch
-import torch.nn.functional as F
 from torchvision.transforms.functional import normalize
 import numpy as np
 
+
+MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "RMBG-2.0-ms-local"
+
+if not MODEL_PATH.exists():
+    raise FileNotFoundError(
+        f"Local RMBG-2.0 model not found at {MODEL_PATH}. "
+        "Download AI-ModelScope/RMBG-2.0 into models/RMBG-2.0-ms-local first."
+    )
+
 # 加载模型
 model = AutoModelForImageSegmentation.from_pretrained(
-    "briaai/RMBG-2.0", 
+    str(MODEL_PATH),
     trust_remote_code=True,
     torch_dtype=None,
-    low_cpu_mem_usage=False,  
-    device_map=None          
+    low_cpu_mem_usage=False,
+    device_map=None,
+    local_files_only=True,
 )
 
 
@@ -72,4 +84,7 @@ def RMBG_pred(input_path, output_path=None):
     return output_path
 
 if __name__ == "__main__":
-    result_path = RMBG_pred("/home/engineai/code/genpc_open/workspace/01184/img.png")
+    sample = os.environ.get("RMBG_SAMPLE_IMAGE")
+    if sample:
+        result_path = RMBG_pred(sample)
+        print(result_path)

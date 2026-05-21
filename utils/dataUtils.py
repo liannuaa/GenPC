@@ -612,6 +612,16 @@ def getCategory(flag:str):
     }
     return kv[flag]
 
+
+def resolve_prompt_label(flag: str, cfg=None):
+    prompt_overrides = getattr(cfg, "prompt_overrides", None) if cfg is not None else None
+    if prompt_overrides and flag in prompt_overrides:
+        return prompt_overrides[flag]
+    try:
+        return getCategory(flag)
+    except KeyError:
+        return flag
+
 def getPrompt(flag:str):
     kv={
         "car":"car",

@@ -68,12 +68,14 @@ class DepthPrompting:
             rgb = torch.tensor(getRandomColor(xyz.shape[0])).float().to(self.device)
         if depth_gen:
             self.getDepth(xyz, flag, rgb)
-        self.depth = load_image(f"{self.cfg.output_path}/{flag}/depth.png")
-        self.depth.resize((self.cfg.generate_res, self.cfg.generate_res))
+        self.depth = load_image(f"{self.cfg.output_path}/{flag}/depth.png").resize(
+            (self.cfg.generate_res, self.cfg.generate_res)
+        )
         if img_gen:
             print(" Image Generation.....")
+            prompt_label = resolve_prompt_label(flag, self.cfg)
             self.image = self.depth2Image.generate(
-                self.depth, getCategory(flag), size=self.cfg.generate_res
+                self.depth, prompt_label, size=self.cfg.generate_res
             )
             self.image.save(f"{self.cfg.output_path}/{flag}/img.png")
         end = time.time()
@@ -85,8 +87,9 @@ class DepthPrompting:
         if self.cfg.view_num == 6:
             best_view_idx = 1
         else:
+            sample_num = min(int(self.cfg.downsample_num), int(xyz.shape[0]))
             xyz_fps_idx = fpsample.fps_sampling(
-                xyz.cpu().numpy(), self.cfg.downsample_num
+                xyz.cpu().numpy(), sample_num
             ).astype(np.int64)
             xyz_fps_idx = torch.from_numpy(xyz_fps_idx).long().to(xyz.device)
             xyz_fps = xyz[xyz_fps_idx]

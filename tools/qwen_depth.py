@@ -1,4 +1,5 @@
 import torch
+import types
 from diffusers import QwenImageEditPlusPipeline
 from PIL import Image
 from nunchaku import NunchakuQwenImageTransformer2DModel
@@ -6,6 +7,32 @@ from nunchaku.utils import get_precision
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _patch_nunchaku_qwen_forward(transformer):
+    """Bridge the current diffusers pipeline call shape to nunchaku's older txt_seq_lens API."""
+    original_forward = transformer.forward
+
+    def patched_forward(self, *args, **kwargs):
+        if kwargs.get("txt_seq_lens") is None:
+            encoder_hidden_states_mask = kwargs.get("encoder_hidden_states_mask")
+            encoder_hidden_states = kwargs.get("encoder_hidden_states")
+
+            if encoder_hidden_states_mask is not None:
+                txt_seq_lens = (
+                    encoder_hidden_states_mask.to(torch.int64).sum(dim=1).detach().cpu().tolist()
+                )
+            elif encoder_hidden_states is not None:
+                txt_seq_lens = [int(encoder_hidden_states.shape[1])] * int(encoder_hidden_states.shape[0])
+            else:
+                txt_seq_lens = None
+
+            kwargs["txt_seq_lens"] = txt_seq_lens
+
+        return original_forward(*args, **kwargs)
+
+    transformer.forward = types.MethodType(patched_forward, transformer)
+    return transformer
 
 
 class Qwen_depth:
@@ -20,7 +47,7 @@ class Qwen_depth:
         rank=128,
         step=8,
         transformer_path="models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-        pipeline_path="Qwen/Qwen-Image-Edit-2509",
+        pipeline_path="models/Qwen-Image-Edit-2509",
     ):
         """
         初始化 Qwen Image Edit 模型
@@ -30,7 +57,7 @@ class Qwen_depth:
             rank: 量化等级 (默认128，可选64/128)
             step: 推理步数 (默认8，可选4/8/16)
             transformer_path: transformer 模型路径 (默认根据 rank 和 step 自动生成)
-            pipeline_path: Qwen Image Edit pipeline 模型路径 (默认 "Qwen/Qwen-Image-Edit-2509")
+            pipeline_path: Qwen Image Edit pipeline 模型路径 (默认 "models/Qwen-Image-Edit-2509")
         """
         self.device = device
         self.rank = rank
@@ -50,6 +77,7 @@ class Qwen_depth:
         self.transformer = NunchakuQwenImageTransformer2DModel.from_pretrained(
             transformer_path
         )
+        _patch_nunchaku_qwen_forward(self.transformer)
 
         # 加载 pipeline
         self.pipeline = QwenImageEditPlusPipeline.from_pretrained(
@@ -125,7 +153,7 @@ class Qwen_depth:
             f"soft and evenly distributed illumination. "
             f"Realistic materials and natural textures, without exaggerated shapes or conceptual designs. "
             f"Accurate proportions, reasonable structure, and clearly visible details, "
-            f"shown from a 3/4 perspective view to present the overall form. "
+            f"shown from a top-down bird's-eye view to clearly present the overall form from above. "
             f"A clean white neutral background with sharp focus. "
             f"The overall style is realistic, simple, and practical, "
             f"making the object look like a real, commonly available item in everyday use."
