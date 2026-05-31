@@ -3,6 +3,8 @@ build/
 
 **/__pycache__/
 models/
+models
+logs/
 loss_functions/**/dist/
 loss_functions/**/*dist*/
 loss_functions/**/*egg-info*/
@@ -28,3 +30,4 @@ workspace/**/*.png
 workspace/**/*.pth
 *.npy
 *.png
+*.pt

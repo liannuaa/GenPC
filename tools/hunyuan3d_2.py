@@ -51,7 +51,7 @@ def _load_shape_pipeline(cfg):
     pipeline = Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
         str(model_root),
         subfolder=subfolder,
-        variant=None,
+        variant=getattr(cfg, "hunyuan_variant", "fp16"),
         device=cfg.device,
         dtype=torch.float16,
     )

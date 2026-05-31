@@ -1,38 +1,11 @@
 import torch
-import types
-from diffusers import QwenImageEditPlusPipeline
+from diffusers import QwenImageEditPipeline
 from PIL import Image
 from nunchaku import NunchakuQwenImageTransformer2DModel
 from nunchaku.utils import get_precision
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-def _patch_nunchaku_qwen_forward(transformer):
-    """Bridge the current diffusers pipeline call shape to nunchaku's older txt_seq_lens API."""
-    original_forward = transformer.forward
-
-    def patched_forward(self, *args, **kwargs):
-        if kwargs.get("txt_seq_lens") is None:
-            encoder_hidden_states_mask = kwargs.get("encoder_hidden_states_mask")
-            encoder_hidden_states = kwargs.get("encoder_hidden_states")
-
-            if encoder_hidden_states_mask is not None:
-                txt_seq_lens = (
-                    encoder_hidden_states_mask.to(torch.int64).sum(dim=1).detach().cpu().tolist()
-                )
-            elif encoder_hidden_states is not None:
-                txt_seq_lens = [int(encoder_hidden_states.shape[1])] * int(encoder_hidden_states.shape[0])
-            else:
-                txt_seq_lens = None
-
-            kwargs["txt_seq_lens"] = txt_seq_lens
-
-        return original_forward(*args, **kwargs)
-
-    transformer.forward = types.MethodType(patched_forward, transformer)
-    return transformer
 
 
 class Qwen_depth:
@@ -46,8 +19,8 @@ class Qwen_depth:
         device,
         rank=128,
         step=8,
-        transformer_path="models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-        pipeline_path="models/Qwen-Image-Edit-2509",
+        transformer_path="models/nunchaku-qwen-image-edit/svdq-int4_r128-qwen-image-edit-lightningv1.0-8steps.safetensors",
+        pipeline_path="models/Qwen-Image-Edit",
     ):
         """
         初始化 Qwen Image Edit 模型
@@ -57,7 +30,7 @@ class Qwen_depth:
             rank: 量化等级 (默认128，可选64/128)
             step: 推理步数 (默认8，可选4/8/16)
             transformer_path: transformer 模型路径 (默认根据 rank 和 step 自动生成)
-            pipeline_path: Qwen Image Edit pipeline 模型路径 (默认 "models/Qwen-Image-Edit-2509")
+            pipeline_path: Qwen Image Edit pipeline 模型路径 (默认 "models/Qwen-Image-Edit")
         """
         self.device = device
         self.rank = rank
@@ -66,7 +39,7 @@ class Qwen_depth:
         # 如果未指定 transformer 路径，则根据 rank 和 step 自动生成
         if transformer_path is None:
             transformer_path = NunchakuQwenImageTransformer2DModel.from_pretrained(
-                f"nunchaku-tech/nunchaku-qwen-image-edit-2509/svdq-{get_precision()}_r{rank}-qwen-image-edit-2509.safetensors"
+                f"nunchaku-tech/nunchaku-qwen-image-edit/svdq-{get_precision()}_r{rank}-qwen-image-edit.safetensors"
             )
 
         logger.info(f"Loading Qwen Image Edit (rank={rank}, step={step})...")
@@ -77,10 +50,9 @@ class Qwen_depth:
         self.transformer = NunchakuQwenImageTransformer2DModel.from_pretrained(
             transformer_path
         )
-        _patch_nunchaku_qwen_forward(self.transformer)
 
         # 加载 pipeline
-        self.pipeline = QwenImageEditPlusPipeline.from_pretrained(
+        self.pipeline = QwenImageEditPipeline.from_pretrained(
             pipeline_path, transformer=self.transformer, torch_dtype=torch.bfloat16
         )
 
@@ -114,7 +86,12 @@ class Qwen_depth:
 
         # 构建专业级 prompt
         prompt = self._build_prompt(flag)
-        negative_prompt = ""
+        negative_prompt = (
+            "dirty, stains, rust, broken, damaged, torn, crumpled, wrinkled, melted, deformed, "
+            "jagged edges, fragmented outline, paper, cardboard, clay, sculpture, toy-like, "
+            "extra parts, missing parts, multiple objects, text, logo, watermark, unrealistic texture, "
+            "overexposed, washed out, low contrast, transparent, ghostly, pure white object"
+        )
 
         logger.info(f"Generating image from depth map (flag={flag})...")
         # print(f"  Prompt: {prompt}")
@@ -147,16 +124,15 @@ class Qwen_depth:
         """
 
         return (
-            f"A highly realistic {flag} with a common, ordinary appearance, "
-            f"matching typical designs found in everyday life. "
-            f"Rendered in a professional product photography style with studio-grade natural lighting, "
-            f"soft and evenly distributed illumination. "
-            f"Realistic materials and natural textures, without exaggerated shapes or conceptual designs. "
-            f"Accurate proportions, reasonable structure, and clearly visible details, "
-            f"shown from a top-down bird's-eye view to clearly present the overall form from above. "
-            f"A clean white neutral background with sharp focus. "
-            f"The overall style is realistic, simple, and practical, "
-            f"making the object look like a real, commonly available item in everyday use."
+            f"A realistic everyday {flag}, matching the object category and overall shape indicated by the input depth map. "
+            f"Preserve the same silhouette, proportions, and main structural parts from the depth image, "
+            f"but present the object in a straight-on front view at eye level, with minimal top-down perspective. "
+            f"Render it as a clean, ordinary real-world object with plausible materials, natural colors, and simple practical design. "
+            f"Use smooth, coherent surfaces with clear edges and stable geometry, avoiding melted, crumpled, torn, or broken shapes. "
+            f"Use natural object colors, visible material texture, and moderate contrast; "
+            f"avoid a washed-out or pure white object unless the category is normally white. "
+            f"Professional product photography on a clean white background, soft natural studio lighting, sharp focus, "
+            f"realistic scale and physically plausible details."
         )
 
 
@@ -168,12 +144,13 @@ if __name__ == "__main__":
     # 初始化模型
     qwen_depth = Qwen_depth(
         device,
-        transformer_path="/root/shared-nvme/genpc_open/models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-        pipeline_path="/root/shared-nvme/genpc_open/models/qwen-image-edit-2509",
+        step=8,
+        transformer_path="models/nunchaku-qwen-image-edit/svdq-int4_r128-qwen-image-edit-lightningv1.0-8steps.safetensors",
+        pipeline_path="models/Qwen-Image-Edit",
     )
 
     # 生成图像
-    depth_path = "/root/shared-nvme/genpc_open/workspace/01184/depth.png"
+    depth_path = "workspace/01184/depth.png"
     output_image = qwen_depth.generate(depth_path, flag="rubbish bin", size=1024)
 
     # 保存结果
