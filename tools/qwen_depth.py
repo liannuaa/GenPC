@@ -1,9 +1,10 @@
 import torch
-from diffusers import QwenImageEditPipeline
+from diffusers import FlowMatchEulerDiscreteScheduler, QwenImageEditPlusPipeline
 from PIL import Image
 from nunchaku import NunchakuQwenImageTransformer2DModel
 from nunchaku.utils import get_precision
 import logging
+import math
 
 logger = logging.getLogger(__name__)
 
@@ -19,8 +20,8 @@ class Qwen_depth:
         device,
         rank=128,
         step=8,
-        transformer_path="models/nunchaku-qwen-image-edit/svdq-int4_r128-qwen-image-edit-lightningv1.0-8steps.safetensors",
-        pipeline_path="models/Qwen-Image-Edit",
+        transformer_path="models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
+        pipeline_path="models/Qwen-Image-Edit-2509",
     ):
         """
         初始化 Qwen Image Edit 模型
@@ -46,24 +47,42 @@ class Qwen_depth:
         logger.info(f"  Transformer: {transformer_path}")
         logger.info(f"  Pipeline: {pipeline_path}")
 
+        scheduler_config = {
+            "base_image_seq_len": 256,
+            "base_shift": math.log(3),  # We use shift=3 in distillation
+            "invert_sigmas": False,
+            "max_image_seq_len": 8192,
+            "max_shift": math.log(3),  # We use shift=3 in distillation
+            "num_train_timesteps": 1000,
+            "shift": 1.0,
+            "shift_terminal": None,  # set shift_terminal to None
+            "stochastic_sampling": False,
+            "time_shift_type": "exponential",
+            "use_beta_sigmas": False,
+            "use_dynamic_shifting": True,
+            "use_exponential_sigmas": False,
+            "use_karras_sigmas": False,
+        }
+        scheduler = FlowMatchEulerDiscreteScheduler.from_config(scheduler_config)
+
         # 加载 transformer 模型
         self.transformer = NunchakuQwenImageTransformer2DModel.from_pretrained(
             transformer_path
         )
 
         # 加载 pipeline
-        self.pipeline = QwenImageEditPipeline.from_pretrained(
-            pipeline_path, transformer=self.transformer, torch_dtype=torch.bfloat16
+        self.pipeline = QwenImageEditPlusPipeline.from_pretrained(
+            pipeline_path, transformer=self.transformer, scheduler=scheduler, torch_dtype=torch.bfloat16
         )
 
         # 启用 CPU offload 以节省显存
-        self.transformer.set_offload(True, use_pin_memory=False, num_blocks_on_gpu=50)
+        self.transformer.set_offload(True, use_pin_memory=False, num_blocks_on_gpu=1)
         self.pipeline._exclude_from_cpu_offload.append("transformer")
         self.pipeline.enable_sequential_cpu_offload()
 
         logger.info("✓ Qwen Image Edit 模型加载完成")
 
-    def generate(self, depth_image, flag, size=1024, cfg_scale=4.0):
+    def generate(self, depth_image, flag, size=1024):
         """
         从深度图生成真实感图像
 
@@ -71,7 +90,6 @@ class Qwen_depth:
             depth_image: PIL Image 或图像路径
             flag: 物体标签/描述 (例如 'rubbish bin')
             size: 生成图像尺寸 (默认1024)
-            cfg_scale: 引导尺度 (默认4.0，范围1-10)
 
         Returns:
             PIL Image: 生成的图像
@@ -81,7 +99,7 @@ class Qwen_depth:
             depth_image = Image.open(depth_image)
 
         # 调整尺寸
-        if depth_image.size[0] != size:
+        if depth_image.size != (size, size):
             depth_image = depth_image.resize((size, size), Image.LANCZOS)
 
         # 构建专业级 prompt
@@ -94,14 +112,15 @@ class Qwen_depth:
         )
 
         logger.info(f"Generating image from depth map (flag={flag})...")
-        # print(f"  Prompt: {prompt}")
 
         # 推理
         with torch.no_grad():
             inputs = {
                 "image": depth_image,
                 "prompt": prompt,
-                "true_cfg_scale": cfg_scale,
+                "height": size,
+                "width": size,
+                "true_cfg_scale": 1.0,
                 "negative_prompt": negative_prompt,
                 "num_inference_steps": self.step
             }
@@ -123,17 +142,7 @@ class Qwen_depth:
             str: 完整的 prompt
         """
 
-        return (
-            f"A realistic everyday {flag}, matching the object category and overall shape indicated by the input depth map. "
-            f"Preserve the same silhouette, proportions, and main structural parts from the depth image, "
-            f"but present the object in a straight-on front view at eye level, with minimal top-down perspective. "
-            f"Render it as a clean, ordinary real-world object with plausible materials, natural colors, and simple practical design. "
-            f"Use smooth, coherent surfaces with clear edges and stable geometry, avoiding melted, crumpled, torn, or broken shapes. "
-            f"Use natural object colors, visible material texture, and moderate contrast; "
-            f"avoid a washed-out or pure white object unless the category is normally white. "
-            f"Professional product photography on a clean white background, soft natural studio lighting, sharp focus, "
-            f"realistic scale and physically plausible details."
-        )
+        return  f"Generate an image that conforms to the depth map outlined in Figure 1 and follows the description below: a real-world physical {flag}, The entire object should be fully visible in the image, including all major parts from top to bottom, with no cropping, no missing sections, and no close-up view. Photographed in a studio, with sharp details, clear edges, coherent surfaces, realistic material appearance, and a clean white background."
 
 
 if __name__ == "__main__":
@@ -145,13 +154,13 @@ if __name__ == "__main__":
     qwen_depth = Qwen_depth(
         device,
         step=8,
-        transformer_path="models/nunchaku-qwen-image-edit/svdq-int4_r128-qwen-image-edit-lightningv1.0-8steps.safetensors",
-        pipeline_path="models/Qwen-Image-Edit",
+        transformer_path="models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
+        pipeline_path="models/Qwen-Image-Edit-2509",
     )
 
     # 生成图像
     depth_path = "workspace/01184/depth.png"
-    output_image = qwen_depth.generate(depth_path, flag="rubbish bin", size=1024)
+    output_image = qwen_depth.generate(depth_path, flag="rubbish bin", size=768)
 
     # 保存结果
     output_image.save("qwen_output.png")

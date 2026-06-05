@@ -20,13 +20,13 @@ GenPC completes real-world partial scans without task-specific training by lever
 
 ### Environment setup
 ```bash
-# Recreate the checked environment exactly enough for this project.
-conda env create -f environment.yml
-conda activate genpc
-
-# Or install manually:
+# Create a fresh Python 3.10 environment and install the exported packages
+# from the current working genpc environment.
 conda create -n genpc python=3.10 -y
 conda activate genpc
+python -m pip install -r requirements.txt
+
+# Manual install reference:
 
 # IMPORTANT:
 # Optional: move cache / temp files to a larger disk
