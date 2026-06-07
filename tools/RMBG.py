@@ -9,12 +9,12 @@ from torchvision.transforms.functional import normalize
 import numpy as np
 
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "RMBG-2.0-ms-local"
+MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "RMBG-2.0"
 
 if not MODEL_PATH.exists():
     raise FileNotFoundError(
         f"Local RMBG-2.0 model not found at {MODEL_PATH}. "
-        "Download AI-ModelScope/RMBG-2.0 into models/RMBG-2.0-ms-local first."
+        "Download AI-ModelScope/RMBG-2.0 into models/RMBG-2.0 first."
     )
 
 # 加载模型

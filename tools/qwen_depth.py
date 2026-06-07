@@ -1,6 +1,6 @@
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler, QwenImageEditPlusPipeline
-from PIL import Image
+from diffusers import FlowMatchEulerDiscreteScheduler, QwenImageEditPipeline
+from PIL import Image, ImageFilter, ImageOps
 from nunchaku import NunchakuQwenImageTransformer2DModel
 from nunchaku.utils import get_precision
 import logging
@@ -37,12 +37,6 @@ class Qwen_depth:
         self.rank = rank
         self.step = step
 
-        # 如果未指定 transformer 路径，则根据 rank 和 step 自动生成
-        if transformer_path is None:
-            transformer_path = NunchakuQwenImageTransformer2DModel.from_pretrained(
-                f"nunchaku-tech/nunchaku-qwen-image-edit/svdq-{get_precision()}_r{rank}-qwen-image-edit.safetensors"
-            )
-
         logger.info(f"Loading Qwen Image Edit (rank={rank}, step={step})...")
         logger.info(f"  Transformer: {transformer_path}")
         logger.info(f"  Pipeline: {pipeline_path}")
@@ -71,18 +65,16 @@ class Qwen_depth:
         )
 
         # 加载 pipeline
-        self.pipeline = QwenImageEditPlusPipeline.from_pretrained(
+        self.pipeline = QwenImageEditPipeline.from_pretrained(
             pipeline_path, transformer=self.transformer, scheduler=scheduler, torch_dtype=torch.bfloat16
         )
 
         # 启用 CPU offload 以节省显存
-        self.transformer.set_offload(True, use_pin_memory=False, num_blocks_on_gpu=1)
-        self.pipeline._exclude_from_cpu_offload.append("transformer")
-        self.pipeline.enable_sequential_cpu_offload()
+        self.pipeline.enable_model_cpu_offload()
 
         logger.info("✓ Qwen Image Edit 模型加载完成")
 
-    def generate(self, depth_image, flag, size=1024):
+    def generate(self, depth_image, flag, size=1280):
         """
         从深度图生成真实感图像
 
@@ -104,29 +96,24 @@ class Qwen_depth:
 
         # 构建专业级 prompt
         prompt = self._build_prompt(flag)
-        negative_prompt = (
-            "dirty, stains, rust, broken, damaged, torn, crumpled, wrinkled, melted, deformed, "
-            "jagged edges, fragmented outline, paper, cardboard, clay, sculpture, toy-like, "
-            "extra parts, missing parts, multiple objects, text, logo, watermark, unrealistic texture, "
-            "overexposed, washed out, low contrast, transparent, ghostly, pure white object"
-        )
+        negative_prompt = "blurry, low resolution, out of focus, soft details, fuzzy edges, noisy, distorted, hazy, unclear, cropped, partial object, incomplete object, crop, occlusion"
+
 
         logger.info(f"Generating image from depth map (flag={flag})...")
 
         # 推理
-        with torch.no_grad():
-            inputs = {
-                "image": depth_image,
-                "prompt": prompt,
-                "height": size,
-                "width": size,
-                "true_cfg_scale": 1.0,
-                "negative_prompt": negative_prompt,
-                "num_inference_steps": self.step
-            }
+        inputs = {
+            "image": depth_image,
+            "prompt": prompt,
+            "true_cfg_scale": 4.0,
+            "height": size,
+            "width": size,
+            "negative_prompt":  negative_prompt,
+            "num_inference_steps": self.step
+        }
 
-            output = self.pipeline(**inputs)
-            output_image = output.images[0]
+        output = self.pipeline(**inputs)
+        output_image = output.images[0]
 
         logger.info("✓ 图像生成完成")
         return output_image
@@ -142,7 +129,7 @@ class Qwen_depth:
             str: 完整的 prompt
         """
 
-        return  f"Generate an image that conforms to the depth map outlined in Figure 1 and follows the description below: a real-world physical {flag}, The entire object should be fully visible in the image, including all major parts from top to bottom, with no cropping, no missing sections, and no close-up view. Photographed in a studio, with sharp details, clear edges, coherent surfaces, realistic material appearance, and a clean white background."
+        return  f"Generate a clear, high-quality side-view image of a  {flag} on a clean white background. Use the provided depth map only as a loose layout and pose reference, not an exact shape or silhouette constraint. Complete any missing parts naturally. The {flag} should be fully visible, centered in the image, with realistic geometry, consistent material, and accurate surface details, realistic style."
 
 
 if __name__ == "__main__":
@@ -152,15 +139,12 @@ if __name__ == "__main__":
 
     # 初始化模型
     qwen_depth = Qwen_depth(
-        device,
-        step=8,
-        transformer_path="models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-        pipeline_path="models/Qwen-Image-Edit-2509",
+        device=device
     )
 
     # 生成图像
-    depth_path = "workspace/01184/depth.png"
-    output_image = qwen_depth.generate(depth_path, flag="rubbish bin", size=768)
+    depth_path = "workspace/06127/depth.png"
+    output_image = qwen_depth.generate(depth_path, flag="a vase with green leaves", size=1280)
 
     # 保存结果
     output_image.save("qwen_output.png")

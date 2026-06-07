@@ -55,7 +55,7 @@ class DepthPrompting:
             self.depth2Image = Flux_depth(self.device)
         elif self.cfg.control_model == "qwen":
             from tools.qwen_depth import Qwen_depth
-            self.depth2Image = Qwen_depth(self.device)
+            self.depth2Image = Qwen_depth(device=self.device)
         else:
             raise NotImplementedError(
                 f"Control model {self.cfg.control_model} not implemented."
@@ -102,7 +102,7 @@ class DepthPrompting:
         # 2. 启发式防止视角翻转 (Heuristic to prevent viewpoint flip)
         original_viewpoint = self.viewpoints[best_view_idx]
         opposite_viewpoint = -original_viewpoint  # 以(0,0,0)为中心反转
-        
+
         # 计算原视角和相反视角的深度和可见性
         up_vector = calculate_up_vector(opposite_viewpoint, np.array([0.0, 0.0, 0.0]))
         opposite_camera = kal.render.camera.Camera.from_args(
@@ -119,12 +119,12 @@ class DepthPrompting:
         # 注意：这里只选取对比所需的两个相机
         test_cams = [self.cameras[best_view_idx], opposite_camera]
         _, test_depths, _ = self.getUvs(test_cams, xyz, rescale=self.cfg.rescale, padding=self.cfg.padding)
-        
+
         # 获取可见点索引进行求和
         vis_mask = self.getVisiblePoints(xyz, [original_viewpoint, opposite_viewpoint], radius=1)
         depth_sum_1 = test_depths[0][vis_mask[0]].sum().item()
         depth_sum_2 = test_depths[1][vis_mask[1]].sum().item()
-        
+
         # print(f' Original view depth sum: {depth_sum_1:.4f}')
         # print(f' Opposite view depth sum: {depth_sum_2:.4f}')
 
@@ -143,7 +143,7 @@ class DepthPrompting:
     def getDepth(self, xyz, flag, rgb):
         with torch.no_grad():
             best_view_idx = self.viewpoint_select(xyz)
-            
+
             self.view = self.viewpoints[best_view_idx]
             self.cam = self.cameras[best_view_idx]
 
@@ -151,7 +151,7 @@ class DepthPrompting:
             point_uvs, point_depths, _ = self.getUvs([self.cam], xyz, rescale=self.cfg.rescale, padding=self.cfg.padding)
             selected_point_uvs = point_uvs[0]
             selected_point_depths = point_depths[0]
-            
+
             visible_point_idx = self.getVisiblePoints(xyz, [self.view], self.cfg.removal_radius)[0]
 
             # 渲染选中的视角

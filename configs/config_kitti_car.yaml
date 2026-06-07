@@ -50,17 +50,15 @@ rembg_model: 'RMBG'
 control_model: "qwen"
 generative_model: "hunyuan2.0"
 
-# Hunyuan3D-2.0
-hunyuan_model_path: "models/Hunyuan3D-2-ms"
-hunyuan_shape_subfolder: "hunyuan3d-dit-v2-0"
-hunyuan_paint_subfolder: "hunyuan3d-paint-v2-0"
+# Hunyuan3D-2.1 shape-only
+hunyuan_model_path: "models/Hunyuan3D-2.1"
+hunyuan_shape_subfolder: "hunyuan3d-dit-v2-1"
 hunyuan_enable_flashvdm: true
 hunyuan_shape_steps: 50
-hunyuan_octree_resolution: 380
-hunyuan_num_chunks: 20000
+hunyuan_octree_resolution: 384
+hunyuan_num_chunks: 8000
 hunyuan_point_sample_num: 100000
 hunyuan_seed: 12345
-hunyuan_paint: false
 
 # TRELLIS.2
 trellis2_model_path: "models/TRELLIS.2-4B"

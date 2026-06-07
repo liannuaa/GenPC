@@ -86,7 +86,7 @@ def group_image6(photos, ids, save_flag="group_depth"):
     """
     fig, axes = plt.subplots(2, 3, figsize=(12, 8))  # 创建2行3列的子图
     fig.suptitle("Grouped Images", fontsize=16)
-    
+
     for i, ax in enumerate(axes.flat):
         image = photos[i].transpose(1, 2, 0)  # 转置到[256, 256, 3]以便显示
         ax.imshow(image)
@@ -190,7 +190,7 @@ def load_xyz(path, down_sample=None):
 
 def glb2obj(glb_path, obj_path=None):
     import trimesh
-    
+
 
 def glb2ply(glb_path, ply_path=None):
     import trimesh
@@ -230,13 +230,13 @@ def glb2point(glb_path, down_sample=None, num_points=16384):
     else:
         # 如果没有颜色信息，使用默认颜色
         vertex_colors = np.ones((len(mesh.vertices), 3)) * 0.5
-    
+
     # 通过面索引获取每个采样点对应的三角形的顶点颜色
     face_colors = vertex_colors[mesh.faces[face_idx]]  # (n_pts, 3, 3)
-    
+
     # 计算重心坐标
     bary = trimesh.triangles.points_to_barycentric(mesh.triangles[face_idx], pts)
-    
+
     # 使用重心坐标插值颜色
     color = np.sum(face_colors * bary[:, :, np.newaxis], axis=1)  # (n_pts, 3)
     color = np.clip(color, 0, 1)  # 确保颜色值在有效范围内
@@ -579,38 +579,30 @@ def normalize_numpy(xyz, range=1.0):
     xyz_normalized *= scale
     return xyz_normalized, center, scale_factor
 
-def getID(flag:str):
-    kv={
-        "car":"car",
-        "Wheelie Bin":"01184",
-        "chair":"05117",
-        "armchair":"05452",
-        "Plant vases":"06127",
-        "table_base":"06145",
-        "vespa":"06188",
-        "Kid tricycle":"06830",
-        "sofa":"07136",
-        "trash can":"07306",
-        "swivel chair": "09639",
-        "airplane":"airplane",
-        "Square table_base":"Square table_base",
-    }
-    return kv[flag]
+CATEGORY_BY_ID = {
+    "01184": "rubbish bin",
+    "01373": "table",
+    "05117": "chair",
+    "05452": "armchair",
+    "06127": "plant vase",
+    "06145": "table",
+    "06188": "motorcyle",
+    "06830": "kid bicycle",
+    "07136": "sofa",
+    "07089": "motorcycle",
+    "07306": "trash container",
+    "09639": "swivel chair",
+    "09868": "bicyle",
+}
+
 
 def getCategory(flag:str):
-    kv = {
-        "01184": "Wheelie Bin",
-        "05117": "chair",
-        "05452": "armchair",
-        "06127": "Plant vases",
-        "06145": "table",
-        "06188": "vespa",
-        "06830": "Kid tricycle",
-        "07136": "sofa",
-        "07306": "trash can",
-        "09639": "swivel chair",
-    }
-    return kv[flag]
+    return CATEGORY_BY_ID[flag]
+
+
+def getID(flag:str):
+    flag = {"table_base": "table", "vespa": "vespa motorcyle"}.get(flag, flag)
+    return {category: id for id, category in CATEGORY_BY_ID.items()}[flag]
 
 
 def resolve_prompt_label(flag: str, cfg=None):
@@ -621,40 +613,6 @@ def resolve_prompt_label(flag: str, cfg=None):
         return getCategory(flag)
     except KeyError:
         return flag
-
-def getPrompt(flag:str):
-    kv={
-        "car":"car",
-        "Wheelie Bin":"a green Wheelie Bin",
-        "chair":"chair",
-        "armchair":"armchair",
-        "Plant vases":"plant in a large vase",
-        "table_base":"one leg square table_base",
-        "vespa":"vespa",
-        "Kid tricycle":"Children's tricycle with handle",
-        "sofa":"sofa",
-        "trash can":"a office trash can ",
-        "swivel chair": "swivel chair with brown legs",
-        "airplane":"airplane",
-        "Square table_base":"Square table_base",
-        "02691156":"airplane",
-        "02933112":"cabinet",
-        "02958343":"car",
-        "03001627":"chair",
-        "03636649":"lamp",
-        "04256520":"sofa",
-        "04379243":"table_base",
-        "04530566":"vessel",
-        "0kitti":"car",
-        'scanchair':"chair",
-        "scantable":"table_base",
-        "scansofa":"sofa",
-        "scancar":"car",
-        "scanlamp":"lamp",
-
-    }
-    return kv[flag]
-
 
 
 
