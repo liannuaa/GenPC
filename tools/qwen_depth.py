@@ -129,7 +129,7 @@ class Qwen_depth:
             str: 完整的 prompt
         """
 
-        return  f"Generate a clear, high-quality side-view image of a  {flag} on a clean white background. Use the provided depth map only as a loose layout and pose reference, not an exact shape or silhouette constraint. Complete any missing parts naturally. The {flag} should be fully visible, centered in the image, with realistic geometry, consistent material, and accurate surface details, realistic style."
+        return  f"Generate a clear, high-quality side-view image of a {flag} on a pure white background. Use the provided depth map only as a loose layout and pose reference, not an exact shape or silhouette constraint. Complete any missing parts naturally. The {flag} should be fully visible, centered in the image, with realistic geometry, consistent material, accurate surface details, and a realistic style."
 
 
 if __name__ == "__main__":

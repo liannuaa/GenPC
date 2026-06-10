@@ -512,7 +512,7 @@ def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters
     # print("图像统计信息:")
     # print(f"Partial图像 - 均值: {torch.mean(ref_img, dim=(0,1))}, 标准差: {torch.std(ref_img, dim=(0,1))}")
     if save_path is not None:
-        writer = imageio.get_writer("pose.gif", mode='I', duration=0.3, loop=0)
+        writer = imageio.get_writer(save_path, mode='I', duration=0.3, loop=0)
     best_loss = float('inf')
     best_state = None
     for start in range(cam_bias_num):

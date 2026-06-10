@@ -83,10 +83,10 @@ pip install -e models/Hunyuan3D-2
 python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
-    'nunchaku-tech/nunchaku-qwen-image-edit',
-    local_dir='models/nunchaku-qwen-image-edit',
+    'nunchaku-tech/nunchaku-qwen-image-edit-2509',
+    local_dir='models/nunchaku-qwen-image-edit-2509',
     allow_patterns=[
-        'svdq-int4_r128-qwen-image-edit-lightningv1.0-8steps.safetensors',
+        'svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors',
     ],
     max_workers=4,
 )
@@ -99,8 +99,8 @@ PY
 python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
-    'Qwen/Qwen-Image-Edit',
-    local_dir='models/Qwen-Image-Edit',
+    'Qwen/Qwen-Image-Edit-2509',
+    local_dir='models/Qwen-Image-Edit-2509',
     ignore_patterns=[
         'transformer/*.safetensors',
         'transformer/*.bin',
@@ -161,8 +161,8 @@ PY
 # PY
 
 # Current default local paths:
-# - Qwen transformer: models/nunchaku-qwen-image-edit/svdq-int4_r128-qwen-image-edit-lightningv1.0-8steps.safetensors
-# - Qwen pipeline: models/Qwen-Image-Edit
+# - Qwen transformer: models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
+# - Qwen pipeline: models/Qwen-Image-Edit-2509
 # - Hunyuan3D-2.0: models/Hunyuan3D-2-ms
 # - RMBG-2.0: models/RMBG-2.0-ms-local
 ```

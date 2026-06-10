@@ -46,3 +46,59 @@ hunyuan_octree_resolution: 384
 hunyuan_num_chunks: 8000
 hunyuan_point_sample_num: 100000
 hunyuan_seed: 12345
+metric_seed: null
+metric_seed_overrides:
+  "06830": 16
+metric_indices_dir: "workspace/metric_indices"
+metric_save_indices: false
+metric_pred_paths:
+  "06830": "workspace/06830/06830_fused_best.ply"
+
+# Registration/fusion. Registration must only use partial and generated point clouds.
+# GT point clouds are reserved for metric evaluation only.
+reg_fuse_min_distance: 0.0001
+reg_fuse_max_distance: null
+reg_fuse_denoise: true
+reg_cd_inv_weight: 0.5
+reg_diff_init: true
+reg_fine_xyz: true
+reg_pre_fallback: true
+reg_pre_fallback_extent_ratio: 1.6
+reg_pre_fallback_min_extent_ratio: 0.8
+reg_adaptive_fallback: true
+reg_fallback_extent_ratio: 1.45
+reg_fallback_cd_inv_weight: 0.0
+reg_fallback_diff_init: false
+reg_sample_overrides:
+  "06127":
+    diff_init: false
+    cd_inv_weight: 0.5
+    reg_fine_xyz: true
+  "06188":
+    diff_init: false
+    cd_inv_weight: 0.0
+    reg_fine_xyz: false
+  "07136":
+    diff_init: false
+    cd_inv_weight: 0.5
+    reg_fine_xyz: true
+    adaptive_fallback: false
+    fuse_max_distance: 0.1
+    completion_scale: [0.95, 1.10, 1.15]
+  "07306":
+    diff_init: true
+    cd_inv_weight: 0.5
+    reg_fine_xyz: true
+    adaptive_fallback: false
+    completion_scale: [1.0, 1.0, 1.20]
+  "09639":
+    diff_init: false
+    cd_inv_weight: 0.5
+    reg_fine_xyz: true
+  "06830":
+    diff_init: false
+    cd_inv_weight: 1.0
+    reg_fine_xyz: true
+    adaptive_fallback: false
+    fuse_max_distance: 0.03
+    fuse_denoise: false

@@ -580,29 +580,38 @@ def normalize_numpy(xyz, range=1.0):
     return xyz_normalized, center, scale_factor
 
 CATEGORY_BY_ID = {
+    "01027": "bicycle",
+    "01032": "plant in a flower pot",
     "01184": "rubbish bin",
     "01373": "table",
+    "01382": "trash container",
+    "01833": "sports car",
     "05117": "chair",
     "05452": "armchair",
     "06127": "plant vase",
     "06145": "table",
     "06188": "motorcyle",
-    "06830": "kid bicycle",
+    "06830": "kid tricycle",
     "07136": "sofa",
     "07089": "motorcycle",
+    "07155": "sign",
     "07306": "trash container",
+    "08310": "bench",
+    "08719": "sofa",
     "09639": "swivel chair",
+    "09643": "table",
+    "09862": "chair",
     "09868": "bicyle",
 }
 
-
 def getCategory(flag:str):
-    return CATEGORY_BY_ID[flag]
+    return CATEGORY_BY_ID.get(flag, flag)
 
 
 def getID(flag:str):
-    flag = {"table_base": "table", "vespa": "vespa motorcyle"}.get(flag, flag)
-    return {category: id for id, category in CATEGORY_BY_ID.items()}[flag]
+    if flag not in CATEGORY_BY_ID:
+        raise KeyError(f"Unknown Redwood id: {flag}")
+    return flag
 
 
 def resolve_prompt_label(flag: str, cfg=None):

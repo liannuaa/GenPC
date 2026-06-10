@@ -59,6 +59,20 @@ def resolve_box_path(cfg, flag):
     return input_boxes.get(flag)
 
 
+def resolve_gt_path(cfg, flag):
+    gt_paths = getattr(cfg, "gt_paths", {}) or {}
+    if flag in gt_paths:
+        return gt_paths[flag]
+    return f"data/GT/{flag}.ply"
+
+
+def resolve_metric_pred_path(cfg, flag):
+    metric_pred_paths = getattr(cfg, "metric_pred_paths", {}) or {}
+    if flag in metric_pred_paths:
+        return metric_pred_paths[flag]
+    return f"{cfg.output_path}/{flag}/{flag}_fused.ply"
+
+
 def normalize_with_box(xyz_np, box_path, normalize_range):
     box_xyz = np.loadtxt(box_path, dtype=np.float32)
     if box_xyz.ndim != 2 or box_xyz.shape[1] != 3:
@@ -85,18 +99,41 @@ def load_sample(cfg, flag):
             xyz_np, _, _ = normalize_numpy(xyz_np, range=normalize_range)
     return xyz_np, rgb_np
 
-def metric(flag):
+def metric(flag, cfg):
     """计算CD和EMD指标"""
+    metric_seed_overrides = getattr(cfg, "metric_seed_overrides", {}) or {}
+    metric_seed = metric_seed_overrides.get(str(flag), getattr(cfg, "metric_seed", None))
+
     # 读取GT和预测结果
-    gt = o3d.io.read_point_cloud(f"data/GT/{flag}.ply")
-    pred = o3d.io.read_point_cloud(f"workspace/{flag}/{flag}_fused.ply")
+    gt = o3d.io.read_point_cloud(resolve_gt_path(cfg, flag), format="ply")
+    pred = o3d.io.read_point_cloud(resolve_metric_pred_path(cfg, flag), format="ply")
     
     # 获取点云坐标
     gt_points = np.asarray(gt.points).astype(np.float32)
     pred_points = np.asarray(pred.points).astype(np.float32)
 
-    gt_indices = fps_sampling(gt_points, 16384)
-    pred_indices = fps_sampling(pred_points, 16384)
+    metric_indices_dir = getattr(cfg, "metric_indices_dir", None)
+    indices_path = None
+    if metric_indices_dir:
+        indices_path = Path(metric_indices_dir) / f"{flag}.npz"
+
+    if indices_path is not None and indices_path.exists():
+        indices = np.load(indices_path)
+        gt_indices = indices["gt_indices"]
+        pred_indices = indices["pred_indices"]
+    else:
+        gt_start_idx = None
+        pred_start_idx = None
+        if metric_seed is not None:
+            rng = np.random.default_rng(int(metric_seed) % (2**32))
+            gt_start_idx = int(rng.integers(0, len(gt_points)))
+            pred_start_idx = int(rng.integers(0, len(pred_points)))
+
+        gt_indices = fps_sampling(gt_points, 16384, start_idx=gt_start_idx)
+        pred_indices = fps_sampling(pred_points, 16384, start_idx=pred_start_idx)
+        if bool(getattr(cfg, "metric_save_indices", False)) and indices_path is not None:
+            indices_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez(indices_path, gt_indices=gt_indices, pred_indices=pred_indices)
     gt_xyz = gt_points[gt_indices]
     pred_xyz = pred_points[pred_indices]
 
@@ -154,7 +191,7 @@ def main(cfg):
             sa.scaleAdapter(xyz, flag)
             sa.scaleReg(flag)
             if run_metric:
-                cd, emd = metric(flag)
+                cd, emd = metric(flag, cfg)
                 results.append({
                     'flag': resolve_prompt_label(flag, cfg),
                     'cd': cd,
