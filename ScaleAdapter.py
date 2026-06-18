@@ -2,12 +2,10 @@ import torch
 from PIL import Image
 from torchvision import transforms
 import numpy as np
-import yaml
-from munch import Munch
 import open3d as o3d
-from utils.dataUtils import *
+from utils.dataUtils import normalize_numpy, save_ply_xyzrgb
+from utils.runtime import model_path, sample_file
 import warnings
-import io
 from reg_xyz import reg, load_generated_point_cloud
 
 warnings.filterwarnings("ignore")
@@ -22,11 +20,17 @@ class ScaleAdapter():
             self.rembg = remove
         elif self.cfg.rembg_model == 'RMBG':
             from tools.RMBG import RMBG_pred
-            self.rembg = RMBG_pred
+            rmbg_model_path = model_path(self.cfg, "rmbg_model_path", "RMBG-2.0")
+            self.rembg = lambda input_path, output_path: RMBG_pred(
+                input_path, output_path, model_path=rmbg_model_path
+            )
+        else:
+            raise NotImplementedError(f"Background model {self.cfg.rembg_model} not implemented.")
+
         if self.cfg.generative_model == "instantmesh":
             from tools.instantmesh import instantmesh
             self.generative = instantmesh
-        elif self.cfg.generative_model == "hunyuan2.0":
+        elif self.cfg.generative_model in ("hunyuan2.0", "hunyuan2.1"):
             from tools.hunyuan3d_2 import hunyuan3d_2
             self.generative = hunyuan3d_2
         elif self.cfg.generative_model == 'trellis':
@@ -35,22 +39,27 @@ class ScaleAdapter():
         elif self.cfg.generative_model == 'trellis_2':
             from tools.trells_2 import trellis_2
             self.generative = trellis_2
+        else:
+            raise NotImplementedError(f"Generative model {self.cfg.generative_model} not implemented.")
 
     def remove_bg(self, flag, img_resource):
-        if img_resource == 'obj':
-            img = Image.open(f'{self.cfg.output_path}/{flag}/image.png')
-        elif img_resource == 'depth':
-            img = Image.open(f'{self.cfg.output_path}/{flag}/img.png')
-        output_path = self.rembg(f'{self.cfg.output_path}/{flag}/img.png', f'{self.cfg.output_path}/{flag}/img_sam.png')
+        input_path = sample_file(self.cfg, flag, "image.png" if img_resource == "obj" else "img.png")
+        output_path = sample_file(self.cfg, flag, "img_sam.png")
+        self.rembg(str(input_path), str(output_path))
 
-    def colorPoint(self, flag, xyz, gt, rgb, img_resource):
-        cam = torch.load(f'{self.cfg.output_path}/{flag}/camera.pth', weights_only=False)
-        point_uv = np.load(f'{self.cfg.output_path}/{flag}/point_uv.npy')
+    def colorPoint(self, flag, xyz, rgb, img_resource):
+        point_uv = np.load(sample_file(self.cfg, flag, "point_uv.npy"))
         if img_resource == 'obj':
-            save_ply_xyzrgb(xyz.detach().cpu().numpy(), rgb.detach().cpu().numpy(), f'{self.cfg.output_path}/{flag}/color_point.ply')
+            save_ply_xyzrgb(
+                xyz.detach().cpu().numpy(),
+                rgb.detach().cpu().numpy(),
+                str(sample_file(self.cfg, flag, "color_point.ply")),
+            )
             return
         elif img_resource == 'depth':
-            img = Image.open(f'{self.cfg.output_path}/{flag}/img.png')
+            img = Image.open(sample_file(self.cfg, flag, "img.png"))
+        else:
+            raise ValueError(f"Unknown image resource: {img_resource}")
         # 如果point_uv是numpy则转换为torch
         if isinstance(point_uv, np.ndarray):
             point_uv = torch.tensor(point_uv).to(self.device)
@@ -70,11 +79,14 @@ class ScaleAdapter():
         colors = np.zeros_like(xyz.detach().cpu().numpy())
         for i, (x, y) in enumerate(point_pixel.detach().cpu().numpy()):
             colors[i] = img_np[:, x, y]
-        # o3d.io.write_point_cloud(f"workspace/{flag}/GT.ply", numpy2o3d(gt))
-        save_ply_xyzrgb(xyz.detach().cpu().numpy(), colors, f'{self.cfg.output_path}/{flag}/color_point.ply')
+        save_ply_xyzrgb(
+            xyz.detach().cpu().numpy(),
+            colors,
+            str(sample_file(self.cfg, flag, "color_point.ply")),
+        )
 
     def img2shape(self, flag):
-        img = Image.open(f'{self.cfg.output_path}/{flag}/img_sam.png')
+        img = Image.open(sample_file(self.cfg, flag, "img_sam.png"))
         self.generative(self.cfg, flag, img)
 
     def scaleReg(self, flag):
@@ -87,7 +99,7 @@ class ScaleAdapter():
             cd_inv_weight = float(override.get("cd_inv_weight", cd_inv_weight))
             diff_init = bool(override.get("diff_init", diff_init))
             reg_fine_xyz = bool(override.get("reg_fine_xyz", reg_fine_xyz))
-        source_pcd = o3d.io.read_point_cloud(f"{self.cfg.output_path}/{flag}/color_point.ply")
+        source_pcd = o3d.io.read_point_cloud(str(sample_file(self.cfg, flag, "color_point.ply")))
         source_xyz = np.asarray(source_pcd.points)
         source_extent = source_xyz.max(axis=0) - source_xyz.min(axis=0)
         direct_fallback = False
@@ -135,7 +147,7 @@ class ScaleAdapter():
         )
         adaptive_fallback = bool(override.get("adaptive_fallback", getattr(self.cfg, "reg_adaptive_fallback", True)))
         if adaptive_fallback:
-            target_pcd = o3d.io.read_point_cloud(f"{self.cfg.output_path}/{flag}/{flag}_registered_gen.ply")
+            target_pcd = o3d.io.read_point_cloud(str(sample_file(self.cfg, flag, f"{flag}_registered_gen.ply")))
             target_xyz = np.asarray(target_pcd.points)
             target_extent = target_xyz.max(axis=0) - target_xyz.min(axis=0)
             extent_ratio = np.divide(
@@ -166,16 +178,5 @@ class ScaleAdapter():
         else:
             img_resource = 'depth' # 使用controlnet输出的rgb图片
         self.remove_bg(flag, img_resource=img_resource)
-        self.colorPoint(flag, xyz, xyz, rgb, img_resource=img_resource)
+        self.colorPoint(flag, xyz, rgb, img_resource=img_resource)
         self.img2shape(flag)
-
-if __name__ == "__main__":
-    cfg_txt = open('./configs/config.yaml', "r").read()
-    cfg = Munch.fromDict(yaml.safe_load(cfg_txt))
-    sa = ScaleAdapter(cfg)
-    flag = '09639'
-    xyz = torch.tensor(load_xyz(f'./data/{flag}.ply')).to(cfg.device)
-    gt = torch.tensor(load_xyz(f'./data/GT/{flag}.ply')).to(cfg.device)
-    sa.colorPoint(flag, xyz, gt)
-    sa.img2shape(flag)
-    sa.scaleAdapter(xyz, flag)

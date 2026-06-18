@@ -5,6 +5,7 @@ from nunchaku import NunchakuQwenImageTransformer2DModel
 from nunchaku.utils import get_precision
 import logging
 import math
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class Qwen_depth:
             rank: 量化等级 (默认128，可选64/128)
             step: 推理步数 (默认8，可选4/8/16)
             transformer_path: transformer 模型路径 (默认根据 rank 和 step 自动生成)
-            pipeline_path: Qwen Image Edit pipeline 模型路径 (默认 "models/Qwen-Image-Edit")
+            pipeline_path: Qwen Image Edit pipeline 模型路径 (默认 "models/Qwen-Image-Edit-2509")
         """
         self.device = device
         self.rank = rank
@@ -40,6 +41,12 @@ class Qwen_depth:
         logger.info(f"Loading Qwen Image Edit (rank={rank}, step={step})...")
         logger.info(f"  Transformer: {transformer_path}")
         logger.info(f"  Pipeline: {pipeline_path}")
+        transformer_path = Path(transformer_path).expanduser().resolve()
+        pipeline_path = Path(pipeline_path).expanduser().resolve()
+        if not transformer_path.exists():
+            raise FileNotFoundError(f"Qwen transformer not found at {transformer_path}")
+        if not pipeline_path.exists():
+            raise FileNotFoundError(f"Qwen pipeline not found at {pipeline_path}")
 
         scheduler_config = {
             "base_image_seq_len": 256,
@@ -61,12 +68,12 @@ class Qwen_depth:
 
         # 加载 transformer 模型
         self.transformer = NunchakuQwenImageTransformer2DModel.from_pretrained(
-            transformer_path
+            str(transformer_path)
         )
 
         # 加载 pipeline
         self.pipeline = QwenImageEditPipeline.from_pretrained(
-            pipeline_path, transformer=self.transformer, scheduler=scheduler, torch_dtype=torch.bfloat16
+            str(pipeline_path), transformer=self.transformer, scheduler=scheduler, torch_dtype=torch.bfloat16
         )
 
         # 启用 CPU offload 以节省显存
@@ -130,22 +137,3 @@ class Qwen_depth:
         """
 
         return  f"Generate a clear, high-quality side-view image of a {flag} on a pure white background. Use the provided depth map only as a loose layout and pose reference, not an exact shape or silhouette constraint. Complete any missing parts naturally. The {flag} should be fully visible, centered in the image, with realistic geometry, consistent material, accurate surface details, and a realistic style."
-
-
-if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO)
-    # 示例使用
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-    # 初始化模型
-    qwen_depth = Qwen_depth(
-        device=device
-    )
-
-    # 生成图像
-    depth_path = "workspace/06127/depth.png"
-    output_image = qwen_depth.generate(depth_path, flag="a vase with green leaves", size=1280)
-
-    # 保存结果
-    output_image.save("qwen_output.png")
-    logger.info("✓ 结果已保存到 qwen_output.png")

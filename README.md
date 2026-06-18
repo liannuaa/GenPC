@@ -16,7 +16,7 @@ GenPC completes real-world partial scans without task-specific training by lever
 - PyTorch >= 2
 
 > Note
-> The current default pipeline uses `qwen-image-edit` for image generation and `Hunyuan3D-2.0` for image-to-3D generation. The environment below focuses on that default path and does not try to keep every optional backend in the repo fully provisioned at the same time.
+> The current default pipeline uses `Qwen-Image-Edit-2509` for image generation and `Hunyuan3D-2.1` for image-to-3D generation. The environment below focuses on that default path and does not try to keep every optional backend in the repo fully provisioned at the same time.
 
 ### Environment setup
 ```bash
@@ -50,7 +50,7 @@ pip install warp-lang ipyevents ipycanvas "jupyter_client<8" tornado usd-core
 pip install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast.git
 pip install --no-build-isolation git+https://github.com/facebookresearch/pytorch3d.git
 
-# Nunchaku for Qwen-Image-Edit
+# Nunchaku for Qwen-Image-Edit-2509
 # Use the source build directly. On this machine, the official torch2.6 / cp310
 # wheel installs but fails at import time with an ABI error such as:
 #   undefined symbol: c10::detail::torchInternalAssertFail
@@ -63,9 +63,8 @@ python -c "import nunchaku; from nunchaku import NunchakuQwenImageTransformer2DM
 pip install ninja
 cd loss_functions/Chamfer3D/ && python setup.py install && cd ../emd && python setup.py install && cd ../..
 
-# Hunyuan3D-2.0 code path (current default 3D backend)
-git clone --depth 1 https://github.com/Tencent-Hunyuan/Hunyuan3D-2 models/Hunyuan3D-2
-pip install -e models/Hunyuan3D-2
+# Hunyuan3D-2.1 code path (current default 3D backend)
+git clone --depth 1 https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1 ../Hunyuan3D-2.1
 
 # Optional: TRELLIS.2 code and CUDA extensions
 # git clone -b main https://github.com/microsoft/TRELLIS.2.git --recursive models/TRELLIS.2
@@ -79,7 +78,7 @@ pip install -e models/Hunyuan3D-2
 
 ### Model downloads
 ```bash
-# Image generator: Qwen-Image-Edit
+# Image generator: Qwen-Image-Edit-2509
 python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
@@ -114,7 +113,7 @@ python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
     'AI-ModelScope/RMBG-2.0',
-    local_dir='models/RMBG-2.0-ms-local',
+    local_dir='models/RMBG-2.0',
     allow_patterns=[
         'config.json',
         'configuration.json',
@@ -127,18 +126,14 @@ snapshot_download(
 )
 PY
 
-# Hunyuan3D-2.0 weights (current default shape-only 3D backend)
-# The default config has hunyuan_paint: false, so only the shape subfolder is
-# required for Stage 2. The loader uses the fp16 variant below. Download
-# paint/delight subfolders only if enabling paint.
+# Hunyuan3D-2.1 weights (current default shape-only 3D backend)
 python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
-    'AI-ModelScope/Hunyuan3D-2',
-    local_dir='models/Hunyuan3D-2-ms',
+    'AI-ModelScope/Hunyuan3D-2.1',
+    local_dir='models/Hunyuan3D-2.1',
     allow_patterns=[
-        'hunyuan3d-dit-v2-0/config.yaml',
-        'hunyuan3d-dit-v2-0/model.fp16.safetensors',
+        'hunyuan3d-dit-v2-1/**',
     ],
     max_workers=4,
 )
@@ -163,36 +158,74 @@ PY
 # Current default local paths:
 # - Qwen transformer: models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
 # - Qwen pipeline: models/Qwen-Image-Edit-2509
-# - Hunyuan3D-2.0: models/Hunyuan3D-2-ms
-# - RMBG-2.0: models/RMBG-2.0-ms-local
+# - Hunyuan3D-2.1: models/Hunyuan3D-2.1
+# - RMBG-2.0: models/RMBG-2.0
 ```
 
 ## Usage
 ```bash
 # 1) Adjust configs/config.yaml as needed
-# 2) Run the full pipeline on GPU 6 (Stage 1 + Stage 2 + metric)
-CUDA_VISIBLE_DEVICES=6 python main.py
+# 2) Run the full pipeline on the visible GPU (Stage 1 + Stage 2 + metric)
+CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py
 
 # Checked-in default path:
-# Stage 1 uses Qwen-Image-Edit, then Stage 2 uses Hunyuan3D-2.0.
+# Stage 1 uses Qwen-Image-Edit-2509, then Stage 2 uses Hunyuan3D-2.1.
 # The default config has run_stage1/run_stage2/run_metric all set to true.
 ```
 
-Useful runtime config knobs in `configs/config.yaml`:
+The main runtime input is a YAML config file:
 
-- `sample_ids: []`
-  - empty means run every `.ply` directly under `data/`
-  - set `["07136"]` to run a single sample
-- `max_samples: null`
-  - set an integer to truncate the auto-discovered list
-- `run_stage1: true`
-- `run_stage2: true`
-- `run_metric: true`
+```bash
+CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py \
+  --config configs/config.yaml
+```
+
+Useful CLI overrides:
+
+```bash
+# Run selected samples without editing YAML
+CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py \
+  --sample_ids 06127 07136 07306
+
+# Override output or model root directories
+CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py \
+  --workspace /tmp/genpc_workspace \
+  --models_dir /opt/models/genpc
+```
+
+Key config fields in `configs/config.yaml`:
+
+- `paths.data_dir`: directory for input `.ply` / `.pcd` samples.
+- `paths.gt_dir`: directory for GT `.ply` files used by metric.
+- `paths.output_dir`: workspace directory for generated outputs.
+- `paths.models_dir`: root directory for local model weights.
+- `paths.hunyuan_repo_root`: local clone of `Tencent-Hunyuan/Hunyuan3D-2.1`.
+- `models.qwen_transformer_path`: Qwen/Nunchaku transformer path, relative to `paths.models_dir` unless absolute.
+- `models.qwen_pipeline_path`: Qwen pipeline directory, relative to `paths.models_dir` unless absolute.
+- `models.rmbg_model_path`: RMBG-2.0 directory, relative to `paths.models_dir` unless absolute.
+- `models.hunyuan_model_path`: Hunyuan3D-2.1 weights directory, relative to `paths.models_dir` unless absolute.
+- `sample_ids`: empty means run every `.ply` directly under `paths.data_dir`; set `["07136"]` for a single sample.
+- `input_paths`: optional per-sample explicit input paths for external files.
+- `gt_paths`: optional per-sample explicit GT paths for metric.
+- `outputs.save_intermediates`: default `false`; set `true` to keep debug and intermediate files.
+- `run_stage1`, `run_stage2`, `run_metric`: enable or skip each pipeline stage.
+
+By default, a completed sample directory keeps only:
+
+```text
+workspace/<sample_id>/<sample_id>_fused.ply
+```
+
+When `outputs.save_intermediates: true`, the pipeline also keeps depth images,
+masks, generated RGB images, background-removed images, colorized partial
+clouds, generated GLB/PLY files, registered generated point clouds, and
+`*_fused_color.ply`.
 
 External sample example:
 
 ```bash
-python main.py --config configs/config_kitti_car.yaml
+CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py \
+  --config configs/config_kitti_car.yaml
 ```
 
 `configs/config_kitti_car.yaml` is a ready-to-run example for:
@@ -206,11 +239,13 @@ python main.py --config configs/config_kitti_car.yaml
 The checked-in default config is:
 
 - `control_model: "qwen"`
-- `generative_model: "hunyuan2.0"`
+- `generative_model: "hunyuan2.1"`
 - `rembg_model: "RMBG"`
-- `hunyuan_model_path: "models/Hunyuan3D-2-ms"`
-- `hunyuan_paint: false`
+- `paths.models_dir: "models"`
+- `models.hunyuan_model_path: "Hunyuan3D-2.1"`
+- `hunyuan_shape_subfolder: "hunyuan3d-dit-v2-1"`
 - `sample_ids: []` (auto-run all `data/*.ply`)
+- `outputs.save_intermediates: false`
 - `run_stage1: true`
 - `run_stage2: true`
 - `run_metric: true`
@@ -218,20 +253,22 @@ The checked-in default config is:
 This means the default pipeline is:
 
 1. `DepthPrompting` renders depth / mask guidance from the partial point cloud.
-2. `Qwen-Image-Edit` generates the completed reference image.
-3. `Hunyuan3D-2.0` generates the 3D asset.
+2. `Qwen-Image-Edit-2509` generates the completed reference image.
+3. `Hunyuan3D-2.1` generates the 3D asset.
 4. `ScaleAdapter` aligns and fuses the generated result back to the input scan.
 
 ### Verified smoke test
-The current checked-in smoke test is sample `07136` with Stage 1 + Stage 2 run
-end-to-end using `sample_ids: ["07136"]`.
+The current checked-in regression smoke test is three Redwood samples with
+Stage 1 + Stage 2 + metric:
 
-Previously verified on this machine:
+```bash
+CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py \
+  --sample_ids 06127 07136 07306
+```
 
-- Stage 1: `Qwen-Image-Edit`
-- Stage 2: `Hunyuan3D-2.0` and `TRELLIS.2` were both brought up successfully during integration
+For quick single-sample validation, use `--sample_ids 07136`.
 
-The checked-in default has now been switched back to `Hunyuan3D-2.0`.
+The checked-in default is `Qwen-Image-Edit-2509` plus `Hunyuan3D-2.1`.
 
 ## Citation
 ```bibtex

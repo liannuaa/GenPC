@@ -1,17 +1,28 @@
+from pathlib import Path
+
 import open3d as o3d
 import numpy as np
-from utils.dataUtils import *
+import torch
+from utils.dataUtils import (
+    get_rotate_matrix,
+    glb2point,
+    normalize_numpy,
+    numpy2o3d,
+    remove_noise_from_point_cloud,
+)
 from copy import deepcopy
-from utils.loss_util import *
+from utils.loss_util import Completionloss
 from optim_registration.diff_obj_pose import object_pose_optimization
 from fpsample import fps_sampling
+from utils.runtime import sample_file, save_intermediates
 
 
 def load_generated_point_cloud(path, flag, model_name, fallback_points=163840):
-    ply_path = f"{path}/{flag}/{flag}_{model_name}.ply"
-    if os.path.exists(ply_path):
-        return o3d.io.read_point_cloud(ply_path)
-    return glb2point(f"{path}/{flag}/{flag}_{model_name}.glb", num_points=fallback_points)
+    sample_path = Path(path) / str(flag)
+    ply_path = sample_path / f"{flag}_{model_name}.ply"
+    if ply_path.exists():
+        return o3d.io.read_point_cloud(str(ply_path))
+    return glb2point(str(sample_path / f"{flag}_{model_name}.glb"), num_points=fallback_points)
 
 
 def icp_with_scaling_xyz(source, target, scales, max_correspondence_distance=0.05, init_transform=np.eye(4)):
@@ -174,35 +185,37 @@ def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, in
 
 
 def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
-    path = cfg.output_path
+    path = Path(cfg.output_path)
     sample_overrides = getattr(cfg, "reg_sample_overrides", {}) or {}
     sample_override = sample_overrides.get(str(flag), {})
     # Registration uses only the observed partial point cloud and the generated completion.
     # Full GT point clouds must stay metric-only.
     # transforms_target2source # 目标点云变换到源点云的坐标系下
     # 判断路径是否存在
-    if not os.path.exists(f"{path}/{flag}/color_point.ply"):
+    color_point_path = sample_file(cfg, flag, "color_point.ply")
+    glb_path = sample_file(cfg, flag, f"{flag}_{cfg.generative_model}.glb")
+    if not color_point_path.exists():
         # print(f"Path {path}/{flag}/color_point.ply does not exist.")
-        raise FileNotFoundError(f"Path {path}/{flag}/color_point.ply does not exist.")
-    if not os.path.exists(f"{path}/{flag}/{flag}_{cfg.generative_model}.glb"):
+        raise FileNotFoundError(f"Path {color_point_path} does not exist.")
+    if not glb_path.exists():
         # print(f"Path {path}/{flag}/{flag}_{cfg.generative_model}.glb does not exist.")
-        raise FileNotFoundError(f"Path {path}/{flag}/{flag}_{cfg.generative_model}.glb does not exist.")
+        raise FileNotFoundError(f"Path {glb_path} does not exist.")
     diff_transform = np.eye(4)
     if diff_init:
         diff_transform = object_pose_optimization(
-            glb_path=f"{path}/{flag}/{flag}_{cfg.generative_model}.glb",
-            point_path=f"{path}/{flag}/color_point.ply",
+            glb_path=str(glb_path),
+            point_path=str(color_point_path),
             radius=0.02,
             lr=0.01,
             iters=200,
             render_size=224,
             vis=bool(getattr(cfg, "reg_pose_vis", False)),
-            save_path=f"{path}/{flag}/pose.gif",
+            save_path=str(sample_file(cfg, flag, "pose.gif")),
             device=cfg.device
         )
         diff_transform = np.linalg.inv(diff_transform)
-    source_pcd = o3d.io.read_point_cloud(f"{path}/{flag}/color_point.ply")
-    target_pcd = load_generated_point_cloud(path, flag, cfg.generative_model)
+    source_pcd = o3d.io.read_point_cloud(str(color_point_path))
+    target_pcd = load_generated_point_cloud(str(path), flag, cfg.generative_model)
     # 初步对齐到complete的标准坐标系下
     source_pcd.transform(diff_transform)
     # o3d.visualization.draw_geometries([source_pcd, target_pcd], window_name="ICP with Scaling Input")
@@ -297,7 +310,7 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     # Visualize the result
     # o3d.visualization.draw_geometries([source_pcd, target_pcd], window_name="ICP with Scaling Result")
 
-    o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_registered_gen.ply", target_pcd)
+    o3d.io.write_point_cloud(str(sample_file(cfg, flag, f"{flag}_registered_gen.ply")), target_pcd)
     if bool(getattr(cfg, "reg_skip_fuse_after_registered", False)):
         return
 
@@ -312,7 +325,6 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
         max_distance=fuse_max_distance,
     )
     fused_pcd = source_pcd + filtered_target_pcd
-    all_fused_pcd = source_pcd + target_pcd
     fused_pcd_xyz = np.asarray(fused_pcd.points)
     fused_pcd_color = np.asarray(fused_pcd.colors)
     fused_indices = fps_sampling(fused_pcd_xyz, 20000)
@@ -322,9 +334,12 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     fuse_denoise = bool(sample_override.get("fuse_denoise", getattr(cfg, "reg_fuse_denoise", True)))
     if fuse_denoise:
         fused_pcd = remove_noise_from_point_cloud(fused_pcd, std_ratio=2.5)
-    o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_fused.ply",fused_pcd)
+    o3d.io.write_point_cloud(str(sample_file(cfg, flag, f"{flag}_fused.ply")), fused_pcd)
 
     # Export an additional fused point cloud where the original partial points are highlighted in red.
+    if not save_intermediates(cfg):
+        return
+
     source_xyz = np.asarray(source_pcd.points)
     source_red = np.tile(np.array([[1.0, 0.0, 0.0]], dtype=np.float64), (len(source_xyz), 1))
     target_xyz = np.asarray(filtered_target_pcd.points)
@@ -341,7 +356,7 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     fused_color_xyz = np.concatenate([source_xyz, target_xyz], axis=0)
     fused_color_rgb = np.concatenate([source_red, target_color], axis=0)
     fused_color_pcd = numpy2o3d(fused_color_xyz, fused_color_rgb)
-    o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_fused_color.ply", fused_color_pcd)
+    o3d.io.write_point_cloud(str(sample_file(cfg, flag, f"{flag}_fused_color.ply")), fused_color_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_gen3D.ply", target_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_miss.ply",filtered_target_pcd)
     # o3d.io.write_point_cloud(f"{path}/{flag}/{flag}_partial.ply",source_pcd)

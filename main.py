@@ -4,10 +4,25 @@ import gc
 import argparse
 from pathlib import Path
 from munch import Munch
-from utils.dataUtils import *
+import numpy as np
+import open3d as o3d
+from utils.dataUtils import (
+    getCategory,
+    load_xyz,
+    normalize_numpy,
+    resolve_prompt_label,
+)
 from DepthPrompting import DepthPrompting
-from ScaleAdapter import *
+from ScaleAdapter import ScaleAdapter
 from utils.loss_util import Completionloss
+from utils.runtime import (
+    cleanup_intermediates,
+    data_dir,
+    gt_dir,
+    normalize_runtime_config,
+    output_dir,
+    resolve_path,
+)
 from fpsample import fps_sampling
 
 import warnings
@@ -26,8 +41,7 @@ def resolve_flags(cfg):
     if sample_ids:
         return sample_ids
 
-    data_dir = Path("data")
-    flags = sorted(path.stem for path in data_dir.glob("*.ply"))
+    flags = sorted(path.stem for path in data_dir(cfg).glob("*.ply"))
     max_samples = getattr(cfg, "max_samples", None)
     if max_samples:
         flags = flags[: int(max_samples)]
@@ -37,40 +51,41 @@ def resolve_flags(cfg):
 def resolve_input_path(cfg, flag):
     input_paths = getattr(cfg, "input_paths", {}) or {}
     if flag in input_paths:
-        return input_paths[flag]
+        return str(resolve_path(input_paths[flag]))
 
     direct_path = Path(flag)
     if direct_path.exists():
-        return str(direct_path)
+        return str(direct_path.resolve())
 
     for suffix in (".ply", ".pcd"):
-        candidate = Path("data") / f"{flag}{suffix}"
+        candidate = data_dir(cfg) / f"{flag}{suffix}"
         if candidate.exists():
             return str(candidate)
 
     raise FileNotFoundError(
         f"Input point cloud for '{flag}' not found. "
-        "Add it under data/ or set cfg.input_paths."
+        f"Add it under {data_dir(cfg)} or set cfg.input_paths."
     )
 
 
 def resolve_box_path(cfg, flag):
     input_boxes = getattr(cfg, "input_boxes", {}) or {}
-    return input_boxes.get(flag)
+    box_path = input_boxes.get(flag)
+    return str(resolve_path(box_path)) if box_path else None
 
 
 def resolve_gt_path(cfg, flag):
     gt_paths = getattr(cfg, "gt_paths", {}) or {}
     if flag in gt_paths:
-        return gt_paths[flag]
-    return f"data/GT/{flag}.ply"
+        return str(resolve_path(gt_paths[flag]))
+    return str(gt_dir(cfg) / f"{flag}.ply")
 
 
 def resolve_metric_pred_path(cfg, flag):
     metric_pred_paths = getattr(cfg, "metric_pred_paths", {}) or {}
     if flag in metric_pred_paths:
-        return metric_pred_paths[flag]
-    return f"{cfg.output_path}/{flag}/{flag}_fused.ply"
+        return str(resolve_path(metric_pred_paths[flag]))
+    return str(output_dir(cfg) / flag / f"{flag}_fused.ply")
 
 
 def normalize_with_box(xyz_np, box_path, normalize_range):
@@ -115,7 +130,7 @@ def metric(flag, cfg):
     metric_indices_dir = getattr(cfg, "metric_indices_dir", None)
     indices_path = None
     if metric_indices_dir:
-        indices_path = Path(metric_indices_dir) / f"{flag}.npz"
+        indices_path = resolve_path(metric_indices_dir) / f"{flag}.npz"
 
     if indices_path is not None and indices_path.exists():
         indices = np.load(indices_path)
@@ -158,7 +173,7 @@ def main(cfg):
     flags = resolve_flags(cfg)
     if not flags:
         raise FileNotFoundError(
-            "No input samples found. Add .ply files under data/ or set cfg.sample_ids."
+            f"No input samples found. Add .ply files under {data_dir(cfg)} or set cfg.sample_ids."
         )
 
     run_stage1 = getattr(cfg, "run_stage1", True)
@@ -197,6 +212,7 @@ def main(cfg):
                     'cd': cd,
                     'emd': emd
                 })
+            cleanup_intermediates(cfg, flag)
             del xyz, xyz_np
             free_memory()
         del sa
@@ -220,8 +236,29 @@ if __name__ == '__main__':
         default="./configs/config.yaml",
         help="Path to the YAML config file.",
     )
+    parser.add_argument(
+        "--sample_ids",
+        nargs="*",
+        help="Optional sample ids that override config sample_ids.",
+    )
+    parser.add_argument(
+        "--workspace",
+        help="Optional output workspace directory that overrides paths.output_dir.",
+    )
+    parser.add_argument(
+        "--models_dir",
+        help="Optional models directory that overrides paths.models_dir.",
+    )
     args = parser.parse_args()
 
     cfg_txt = open(args.config, "r").read()
     cfg = Munch.fromDict(yaml.safe_load(cfg_txt))
+    cfg.paths = getattr(cfg, "paths", Munch())
+    if args.sample_ids is not None:
+        cfg.sample_ids = args.sample_ids
+    if args.workspace:
+        cfg.paths.output_dir = args.workspace
+    if args.models_dir:
+        cfg.paths.models_dir = args.models_dir
+    normalize_runtime_config(cfg)
     main(cfg)

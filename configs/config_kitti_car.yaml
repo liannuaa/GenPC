@@ -1,6 +1,20 @@
 # Single external KITTI partial point cloud demo
-output_path: 'workspace'
-save: True
+paths:
+  data_dir: "data"
+  gt_dir: "data/GT"
+  output_dir: "workspace"
+  models_dir: "models"
+  hunyuan_repo_root: "../Hunyuan3D-2.1"
+
+models:
+  qwen_transformer_path: "nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors"
+  qwen_pipeline_path: "Qwen-Image-Edit-2509"
+  rmbg_model_path: "RMBG-2.0"
+  hunyuan_model_path: "Hunyuan3D-2.1"
+
+outputs:
+  save_intermediates: false
+
 dataset: "kitti"
 device: "cuda"
 
@@ -48,10 +62,9 @@ mask_ratio_thresh: 0.82
 inpainter: 'cv2'
 rembg_model: 'RMBG'
 control_model: "qwen"
-generative_model: "hunyuan2.0"
+generative_model: "hunyuan2.1"
 
 # Hunyuan3D-2.1 shape-only
-hunyuan_model_path: "models/Hunyuan3D-2.1"
 hunyuan_shape_subfolder: "hunyuan3d-dit-v2-1"
 hunyuan_enable_flashvdm: true
 hunyuan_shape_steps: 50

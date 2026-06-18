@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 # 使用 RMBG-2.0 模型移除背景
@@ -9,31 +8,42 @@ from torchvision.transforms.functional import normalize
 import numpy as np
 
 
-MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "RMBG-2.0"
+DEFAULT_MODEL_PATH = Path(__file__).resolve().parent.parent / "models" / "RMBG-2.0"
+_model = None
+_model_path = None
+_device = None
 
-if not MODEL_PATH.exists():
-    raise FileNotFoundError(
-        f"Local RMBG-2.0 model not found at {MODEL_PATH}. "
-        "Download AI-ModelScope/RMBG-2.0 into models/RMBG-2.0 first."
+
+def _load_model(model_path=None):
+    global _model, _model_path, _device
+    resolved_path = Path(model_path or DEFAULT_MODEL_PATH).expanduser().resolve()
+    if _model is not None and _model_path == resolved_path:
+        return _model, _device
+
+    if not resolved_path.exists():
+        raise FileNotFoundError(
+            f"Local RMBG-2.0 model not found at {resolved_path}. "
+            "Set models.rmbg_model_path or download AI-ModelScope/RMBG-2.0 first."
+        )
+
+    model = AutoModelForImageSegmentation.from_pretrained(
+        str(resolved_path),
+        trust_remote_code=True,
+        torch_dtype=None,
+        low_cpu_mem_usage=False,
+        device_map=None,
+        local_files_only=True,
     )
-
-# 加载模型
-model = AutoModelForImageSegmentation.from_pretrained(
-    str(MODEL_PATH),
-    trust_remote_code=True,
-    torch_dtype=None,
-    low_cpu_mem_usage=False,
-    device_map=None,
-    local_files_only=True,
-)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model.to(device)
+    model.eval()
+    _model = model
+    _model_path = resolved_path
+    _device = device
+    return _model, _device
 
 
-# 如果有GPU，使用GPU
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model.to(device)
-model.eval()
-
-def RMBG_pred(input_path, output_path=None):
+def RMBG_pred(input_path, output_path=None, model_path=None):
     """
     使用 RMBG-2.0 模型移除图片背景
     
@@ -44,6 +54,8 @@ def RMBG_pred(input_path, output_path=None):
     Returns:
         output_path: 保存的输出文件路径
     """
+    model, device = _load_model(model_path)
+
     # 如果没有指定输出路径，自动生成
     if output_path is None:
         import os
@@ -84,6 +96,8 @@ def RMBG_pred(input_path, output_path=None):
     return output_path
 
 if __name__ == "__main__":
+    import os
+
     sample = os.environ.get("RMBG_SAMPLE_IMAGE")
     if sample:
         result_path = RMBG_pred(sample)

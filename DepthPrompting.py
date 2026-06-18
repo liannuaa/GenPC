@@ -1,14 +1,18 @@
+import os
 import time
+import math
+import cv2
+import numpy as np
+import torch
+import kaolin as kal
+import open3d as o3d
 from torchvision.utils import save_image
-from PIL import Image
 import warnings
-from munch import Munch
-import yaml
-from utils.dataUtils import *
-from utils.camera_utils import *
+from utils.dataUtils import getRandomColor, resolve_prompt_label
+from utils.camera_utils import calculate_up_vector, create_cameras
+from utils.runtime import model_path, sample_dir, sample_file
 import fpsample
 from diffusers.utils import load_image
-import math
 warnings.filterwarnings("ignore")
 
 
@@ -55,7 +59,23 @@ class DepthPrompting:
             self.depth2Image = Flux_depth(self.device)
         elif self.cfg.control_model == "qwen":
             from tools.qwen_depth import Qwen_depth
-            self.depth2Image = Qwen_depth(device=self.device)
+            self.depth2Image = Qwen_depth(
+                device=self.device,
+                transformer_path=str(
+                    model_path(
+                        self.cfg,
+                        "qwen_transformer_path",
+                        "nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
+                    )
+                ),
+                pipeline_path=str(
+                    model_path(
+                        self.cfg,
+                        "qwen_pipeline_path",
+                        "Qwen-Image-Edit-2509",
+                    )
+                ),
+            )
         else:
             raise NotImplementedError(
                 f"Control model {self.cfg.control_model} not implemented."
@@ -68,7 +88,7 @@ class DepthPrompting:
             rgb = torch.tensor(getRandomColor(xyz.shape[0])).float().to(self.device)
         if depth_gen:
             self.getDepth(xyz, flag, rgb)
-        self.depth = load_image(f"{self.cfg.output_path}/{flag}/depth.png").resize(
+        self.depth = load_image(str(sample_file(self.cfg, flag, "depth.png"))).resize(
             (self.cfg.generate_res, self.cfg.generate_res)
         )
         if img_gen:
@@ -77,7 +97,7 @@ class DepthPrompting:
             self.image = self.depth2Image.generate(
                 self.depth, prompt_label, size=self.cfg.generate_res
             )
-            self.image.save(f"{self.cfg.output_path}/{flag}/img.png")
+            self.image.save(sample_file(self.cfg, flag, "img.png"))
         end = time.time()
         print(f" Take {int(end-start)} seconds")
 
@@ -174,25 +194,28 @@ class DepthPrompting:
             )
 
             # inpainting [3,h,w]
-            os.makedirs(f"{self.cfg.output_path}/{flag}", exist_ok=True)
-            save_image(raw_depth, f"{self.cfg.output_path}/{flag}/raw_depth.png")
+            sample_dir(self.cfg, flag).mkdir(parents=True, exist_ok=True)
+            raw_depth_path = sample_file(self.cfg, flag, "raw_depth.png")
+            mask_path = sample_file(self.cfg, flag, "mask.png")
+            depth_path = sample_file(self.cfg, flag, "depth.png")
+            save_image(raw_depth, raw_depth_path)
             print(" Inpainting depth...")
             if self.cfg.inpainter == "flux":
-                save_image(hole_mask1, f"{self.cfg.output_path}/{flag}/mask.png")
+                save_image(hole_mask1, mask_path)
                 depth = self.inpainter.paint(
-                    load_image(f"{self.cfg.output_path}/{flag}/raw_depth.png"),
-                    load_image(f"{self.cfg.output_path}/{flag}/mask.png"),
+                    load_image(str(raw_depth_path)),
+                    load_image(str(mask_path)),
                     prompt="complete the depth map. ",
                     size=self.cfg.res,
                 )
-                depth.save(f"{self.cfg.output_path}/{flag}/depth.png")
+                depth.save(depth_path)
             elif self.cfg.inpainter == "DDNM":
-                save_image(hole_mask2, f"{self.cfg.output_path}/{flag}/mask.png")
+                save_image(hole_mask2, mask_path)
                 depth = self.inpainter.inpaint(
                     masked_imgs=raw_depth.permute(1, 2, 0).unsqueeze(0),
                     masks=hole_mask2.permute(1, 2, 0).unsqueeze(0),
                 )[0]
-                save_image(depth, f"{self.cfg.output_path}/{flag}/depth.png")
+                save_image(depth, depth_path)
             elif self.cfg.inpainter == "cv2":
                 depth_np = (raw_depth.permute(1, 2, 0).cpu().numpy() * 255).astype(
                     np.uint8
@@ -204,16 +227,16 @@ class DepthPrompting:
                 inpainted_depth = (
                     torch.from_numpy(inpainted_depth).permute(2, 0, 1).float() / 255.0
                 )
-                save_image(inpainted_depth, f"{self.cfg.output_path}/{flag}/depth.png")
-                save_image(hole_mask1, f"{self.cfg.output_path}/{flag}/mask.png")
+                save_image(inpainted_depth, depth_path)
+                save_image(hole_mask1, mask_path)
 
             self.point_uv = selected_point_uvs
             np.save(
-                f"{self.cfg.output_path}/{flag}/point_uv.npy",
+                sample_file(self.cfg, flag, "point_uv.npy"),
                 self.point_uv.detach().cpu().numpy(),
             )
-            np.save(f"{self.cfg.output_path}/{flag}/viewpoint.npy", self.view)
-            torch.save(self.cam, f"{self.cfg.output_path}/{flag}/camera.pth")
+            np.save(sample_file(self.cfg, flag, "viewpoint.npy"), self.view)
+            torch.save(self.cam, sample_file(self.cfg, flag, "camera.pth"))
 
 
     def getUvs(self, cams, points, rescale=True, padding=0.15):
@@ -369,17 +392,3 @@ class DepthPrompting:
             (all_front_mask * 255).int() ^ (back_mask * 255).int()
         ).float() / 255
         return sparse_img, sparse_depth, hole_mask1, hole_mask2
-
-
-if __name__ == "__main__":
-    cfg_txt = open("./configs/config.yaml", "r").read()
-    cfg = Munch.fromDict(yaml.safe_load(cfg_txt))
-    xyz = torch.tensor(load_xyz("./data/09639.ply")).to(cfg.device)
-
-    dp = DepthPrompting(cfg)
-    flag = "06188"
-    dp.getImage(
-        xyz,
-        flag,
-    )
-    # dp.getRawDepth(xyz, flag)
