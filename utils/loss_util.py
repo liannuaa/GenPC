@@ -17,6 +17,9 @@ class Completionloss:
         elif loss_func == 'cd_l2':
             self.metric = self.chamfer_l2
             self.partial_matching = self.chamfer_partial_l2
+        elif loss_func == 'infocd':
+            self.metric = self.info_cd
+            self.partial_matching = self.info_cd_partial
         elif loss_func == 'emd':
             self.metric = self.emd_loss
         else:
@@ -41,6 +44,25 @@ class Completionloss:
         d1, d2, _, _ = self.chamfer_dist(pcd1, pcd2)
         d1 = torch.mean(d1)
         return d1
+
+    def _info_distance(self, dist):
+        # Adapted from PGD InfoCD: https://github.com/git-guocc/PGD/blob/main/models/InfoCD.py
+        dist = torch.clamp(dist, min=1e-9)
+        d = torch.sqrt(dist)
+        exp_d = torch.exp(-0.5 * d)
+        normalizer = torch.sum(exp_d + 1e-7, dim=-1).unsqueeze(-1)
+        return -torch.log(exp_d / (normalizer ** 1e-7))
+
+    def info_cd(self, p1, p2):
+        d1, d2, _, _ = self.chamfer_dist(p1, p2)
+        distances1 = self._info_distance(d1)
+        distances2 = self._info_distance(d2)
+        return (torch.sum(distances1) + torch.sum(distances2)) / (2 * p1.shape[0])
+
+    def info_cd_partial(self, pcd1, pcd2):
+        d1, _, _, _ = self.chamfer_dist(pcd1, pcd2)
+        distances1 = self._info_distance(d1)
+        return torch.sum(distances1) / pcd1.shape[0]
 
     def emd_loss(self, p1, p2):
         d1, _ = self.EMD(p1, p2, eps=0.005, iters=50)

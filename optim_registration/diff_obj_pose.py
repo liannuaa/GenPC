@@ -323,8 +323,8 @@ def compute_loss_function(ref_img, result, ref_mask=None, ref_points=None, resul
     cd_loss_value = torch.tensor(0.0, device=result.device)
     if ref_points is not None and result_points is not None:
         # cd_loss_value = chamfer_distance_loss(ref_points, result_points)
-        cd_loss_value = + cdloss.chamfer_partial_l1(result_points.unsqueeze(0), ref_points.unsqueeze(0)) + \
-             0.5 * cdloss.chamfer_partial_l1(ref_points.unsqueeze(0), result_points.unsqueeze(0)) 
+        cd_loss_value = + cdloss.partial_matching(result_points.unsqueeze(0), ref_points.unsqueeze(0)) + \
+             0.5 * cdloss.partial_matching(ref_points.unsqueeze(0), result_points.unsqueeze(0)) 
 
     # 权重: 可根据需要调节
     total_loss = (mse_loss * 0 + 
@@ -493,10 +493,10 @@ def get_init_rot(axis, angle_deg, device):
     return rot6d
 
 
-def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters=300, render_size=224, vis=False, save_path=None, device=None, cam_bias_num=4):
+def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters=300, render_size=224, vis=False, save_path=None, device=None, cam_bias_num=4, cd_loss_func='cd_l1'):
     if device is None:
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
-    cdloss = Completionloss(loss_func='cd_l1')
+    cdloss = Completionloss(loss_func=cd_loss_func)
 
     # 加载 partial & complete
     partial_xyz, partial_col = load_point_cloud(point_path=point_path, device=device, radius=radius, num_points=8000)

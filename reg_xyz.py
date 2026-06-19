@@ -139,11 +139,11 @@ def scale_completion_from_partial_bbox(source_pcd, target_pcd, scales):
     return scaled
 
 
-def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, init_transform=np.eye(4), cd_inv_weight=0):
+def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, init_transform=np.eye(4), cd_inv_weight=0, loss_func='cd_l1'):
     best_loss = 999999
     best_scales = None
     best_transformation = None
-    completion_loss = Completionloss(loss_func='cd_l1')
+    completion_loss = Completionloss(loss_func=loss_func)
     x_scales = np.linspace(scale_ranges[0][0], scale_ranges[0][1], scale_steps)
     y_scales = np.linspace(scale_ranges[1][0], scale_ranges[1][1], scale_steps)
     z_scales = np.linspace(scale_ranges[2][0], scale_ranges[2][1], scale_steps)
@@ -162,8 +162,8 @@ def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, in
                 source_xyz = torch.tensor(np.asarray(source_aligned.points), dtype=torch.float32).unsqueeze(0).cuda()
                 target_xyz = torch.tensor(np.asarray(target_copy.points), dtype=torch.float32).unsqueeze(0).cuda()
 
-                cd = completion_loss.chamfer_partial_l1(source_xyz, target_xyz)
-                cd_inv = completion_loss.chamfer_partial_l1(target_xyz, source_xyz) * cd_inv_weight
+                cd = completion_loss.partial_matching(source_xyz, target_xyz)
+                cd_inv = completion_loss.partial_matching(target_xyz, source_xyz) * cd_inv_weight
                 cd = cd + cd_inv
                 if cd < best_loss:
                     best_loss = cd
@@ -188,6 +188,7 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     path = Path(cfg.output_path)
     sample_overrides = getattr(cfg, "reg_sample_overrides", {}) or {}
     sample_override = sample_overrides.get(str(flag), {})
+    reg_loss_func = sample_override.get("reg_cd_loss", getattr(cfg, "reg_cd_loss", "cd_l1"))
     # Registration uses only the observed partial point cloud and the generated completion.
     # Full GT point clouds must stay metric-only.
     # transforms_target2source # 目标点云变换到源点云的坐标系下
@@ -211,7 +212,8 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
             render_size=224,
             vis=bool(getattr(cfg, "reg_pose_vis", False)),
             save_path=str(sample_file(cfg, flag, "pose.gif")),
-            device=cfg.device
+            device=cfg.device,
+            cd_loss_func=reg_loss_func,
         )
         diff_transform = np.linalg.inv(diff_transform)
     source_pcd = o3d.io.read_point_cloud(str(color_point_path))
@@ -235,7 +237,7 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
 
     # o3d.visualization.draw_geometries([target_pcd, source_pcd])
 
-    completion_loss = Completionloss(loss_func='cd_l1')
+    completion_loss = Completionloss(loss_func=reg_loss_func)
     scales = np.linspace(1.5, 0.8 , 11)
     best_scale = 1.5
     best_loss = 999999
@@ -257,8 +259,8 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
         source_color = torch.tensor(np.asarray(source_down.colors),dtype=torch.float32).unsqueeze(0).cuda()
         target_xyz = torch.tensor(np.asarray(target_down.points),dtype=torch.float32).unsqueeze(0).cuda()
         target_color = torch.tensor(np.asarray(target_down.colors),dtype=torch.float32).unsqueeze(0).cuda()
-        cd = completion_loss.chamfer_partial_l1(source_xyz, target_xyz)
-        cd_inv = completion_loss.chamfer_partial_l1(target_xyz, source_xyz) * cd_inv_weight
+        cd = completion_loss.partial_matching(source_xyz, target_xyz)
+        cd_inv = completion_loss.partial_matching(target_xyz, source_xyz) * cd_inv_weight
         cd = cd + cd_inv
         if cd < best_loss:
             best_loss = cd
@@ -279,13 +281,13 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
                 source_pcd,
                 target_pcd.voxel_down_sample(voxel_size=0.04),
                 scale_ranges=[(0.8, 1.2), (0.8, 1.2), (0.8, 1.2)],
-                scale_steps=10, init_transform=np.eye(4), cd_inv_weight=cd_inv_weight)
+                scale_steps=10, init_transform=np.eye(4), cd_inv_weight=cd_inv_weight, loss_func=reg_loss_func)
         elif cfg.dataset in ["redwood"]:
             best_scales_transformation, best_loss_xyz, best_transformation_xyz = iterative_scale_search(
                 source_pcd.voxel_down_sample(voxel_size=fine_voxel),
                 target_pcd.voxel_down_sample(voxel_size=fine_voxel),
                 scale_ranges=[(0.8, 1.2), (0.8, 1.2), (0.8, 1.2)],
-                scale_steps=fine_scale_steps, init_transform=np.eye(4), cd_inv_weight=cd_inv_weight)
+                scale_steps=fine_scale_steps, init_transform=np.eye(4), cd_inv_weight=cd_inv_weight, loss_func=reg_loss_func)
         # o3d.visualization.draw_geometries([source_pcd, target_pcd], window_name="ICP with Scaling Result")
         # 让complete进行逆变换(带有xyz三个维度缩放)，对齐partial在标准坐标系下的位置
         inv = np.linalg.inv(best_scales_transformation)
