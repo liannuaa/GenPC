@@ -283,7 +283,18 @@ def edge_loss(ref_img, result):
     edge_loss_value = F.mse_loss(ref_edges_h, result_edges_h) + F.mse_loss(ref_edges_v, result_edges_v)
     return edge_loss_value
 
-def compute_loss_function(ref_img, result, ref_mask=None, ref_points=None, result_points=None, cdloss=None):
+def compute_loss_function(
+    ref_img,
+    result,
+    ref_mask=None,
+    ref_points=None,
+    result_points=None,
+    cdloss=None,
+    mask_weight=1.0,
+    cd_weight=3.0,
+    cd_inv_weight=0.5,
+    cd_direction="complete_to_partial",
+):
     """计算组合损失函数 (包含可微 soft IoU + Chamfer Distance)。"""
     # 图像标准化
     ref_img_norm, result_norm = normalize_images(ref_img, result)
@@ -322,16 +333,23 @@ def compute_loss_function(ref_img, result, ref_mask=None, ref_points=None, resul
     # Chamfer Distance损失 (3D点云)
     cd_loss_value = torch.tensor(0.0, device=result.device)
     if ref_points is not None and result_points is not None:
-        # cd_loss_value = chamfer_distance_loss(ref_points, result_points)
-        cd_loss_value = + cdloss.partial_matching(result_points.unsqueeze(0), ref_points.unsqueeze(0)) + \
-             0.5 * cdloss.partial_matching(ref_points.unsqueeze(0), result_points.unsqueeze(0)) 
+        partial_to_complete = cdloss.partial_matching(ref_points.unsqueeze(0), result_points.unsqueeze(0))
+        complete_to_partial = cdloss.partial_matching(result_points.unsqueeze(0), ref_points.unsqueeze(0))
+        if cd_direction == "partial_to_complete":
+            cd_loss_value = partial_to_complete + cd_inv_weight * complete_to_partial
+        elif cd_direction == "complete_to_partial":
+            cd_loss_value = complete_to_partial + cd_inv_weight * partial_to_complete
+        elif cd_direction == "symmetric":
+            cd_loss_value = partial_to_complete + complete_to_partial
+        else:
+            raise ValueError(f"Unsupported pose cd direction: {cd_direction}")
 
     # 权重: 可根据需要调节
     total_loss = (mse_loss * 0 + 
                   edge_loss_value * 0 + 
-                  mask_loss * 1 +
+                  mask_loss * mask_weight +
                   iou_loss_value * .0 + 
-                  cd_loss_value * 3.0)  # CD损失权重
+                  cd_loss_value * cd_weight)  # CD损失权重
     
     return total_loss, mse_loss, edge_loss_value, iou_loss_value, iou_value, cd_loss_value, mask_loss
 
@@ -346,8 +364,20 @@ class ObjectPoseOptim(nn.Module):
       4. 提供 get_transform / get_current_RT 便于外部访问当前变换。
       5. 可选择返回变换后的点 (return_pts)。
     """
-    def __init__(self, vert_pos, vert_col, radius, render_size, device, R_cam, T_cam, init_rot,
-                 focal=4.0, project_every=0):
+    def __init__(
+        self,
+        vert_pos,
+        vert_col,
+        radius,
+        render_size,
+        device,
+        R_cam,
+        T_cam,
+        init_rot,
+        focal=4.0,
+        project_every=0,
+        scale_init=0.75,
+    ):
         super().__init__()
         self.device = device
         self.render_size = render_size
@@ -364,7 +394,7 @@ class ObjectPoseOptim(nn.Module):
         # 姿态参数
         self.rot_6d = nn.Parameter(init_rot)
         self.trans = nn.Parameter(torch.zeros(3, dtype=torch.float32, device=device))
-        self.log_scale = nn.Parameter(torch.tensor([math.log(0.75)], dtype=torch.float32, device=device))  # scale = exp(log_scale) = 0.75
+        self.log_scale = nn.Parameter(torch.tensor([math.log(scale_init)], dtype=torch.float32, device=device))
 
         # 相机固定缓存
         self.register_buffer('R_cam', R_cam)
@@ -401,8 +431,9 @@ class ObjectPoseOptim(nn.Module):
     def get_transform(self):
         R, t, s = self.get_current_RT()
         T = torch.eye(4, device=R.device)
-        T[:3, :3] = R * s
-        T[:3, 3] = t
+        linear = R * s
+        T[:3, :3] = linear
+        T[:3, 3] = self.center + t - linear @ self.center
         return T
 
     def forward(self, return_pts=False, project_now=False):
@@ -461,10 +492,14 @@ def create_opencv_visualization_obj(ref_img, result, model, i, loss,  iou_value=
         return key == 27, final_img
     return None, final_img
 
-def build_transform(R_obj, t, scale):
+def build_transform(R_obj, t, scale, center=None):
     T = torch.eye(4, device=R_obj.device)
-    T[:3, :3] = R_obj * scale  # 将尺度吸收进旋转块 (各向同性)
-    T[:3, 3] = t
+    linear = R_obj * scale  # 将尺度吸收进旋转块 (各向同性)
+    T[:3, :3] = linear
+    if center is None:
+        T[:3, 3] = t
+    else:
+        T[:3, 3] = center + t - linear @ center
     return T
 
 def get_init_rot(axis, angle_deg, device):
@@ -493,7 +528,27 @@ def get_init_rot(axis, angle_deg, device):
     return rot6d
 
 
-def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters=300, render_size=224, vis=False, save_path=None, device=None, cam_bias_num=4, cd_loss_func='cd_l1'):
+def object_pose_optimization(
+    glb_path,
+    point_path,
+    radius=0.005,
+    lr=0.005,
+    iters=300,
+    render_size=224,
+    vis=False,
+    save_path=None,
+    device=None,
+    cam_bias_num=4,
+    cd_loss_func='cd_l1',
+    scale_init=0.75,
+    scale_min=0.55,
+    scale_max=0.9,
+    scale_reg_weight=0.1,
+    pose_mask_weight=1.0,
+    pose_cd_weight=3.0,
+    pose_cd_inv_weight=0.5,
+    pose_cd_direction="complete_to_partial",
+):
     if device is None:
         device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     cdloss = Completionloss(loss_func=cd_loss_func)
@@ -518,9 +573,19 @@ def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters
     for start in range(cam_bias_num):
         # print(f"\n=== Multi-start {start+1}/{cam_bias_num} ===")
         #把complete_xyz旋转90, 180, 270
-        rot_init = get_init_rot('y', start * 90, device)  # 可选 'x',90 | 'y',180 | 'z',270
+        rot_init = get_init_rot('y', start * 360.0 / cam_bias_num, device)  # evenly spaced yaw starts
         print(f"初始旋转 (6D): {rot_init.tolist()}")
-        model = ObjectPoseOptim(complete_xyz, complete_col, radius, render_size, device, R_cam, T_cam, rot_init).to(device)
+        model = ObjectPoseOptim(
+            complete_xyz,
+            complete_col,
+            radius,
+            render_size,
+            device,
+            R_cam,
+            T_cam,
+            rot_init,
+            scale_init=scale_init,
+        ).to(device)
         optimizer = optim.Adam([
             {"params": [model.rot_6d], "lr": lr},
             {"params": [model.trans], "lr": lr * 0.2},
@@ -536,15 +601,27 @@ def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters
             
             # 计算损失函数 (包含点云Chamfer Distance)
             total_loss, mse_loss, edge_loss, iou_loss_value, iou_value, cd_loss_value, mask_loss = compute_loss_function(
-                ref_img, result, ref_mask, partial_xyz, transformed_pts, cdloss
+                ref_img,
+                result,
+                ref_mask,
+                partial_xyz,
+                transformed_pts,
+                cdloss,
+                mask_weight=pose_mask_weight,
+                cd_weight=pose_cd_weight,
+                cd_inv_weight=pose_cd_inv_weight,
+                cd_direction=pose_cd_direction,
             )
             
             # 正交性正则 (R R^T ~= I)
             ortho_err = torch.norm(R_obj @ R_obj.T - torch.eye(3, device=device))
             rot_reg = 0.001 * ortho_err
-            loss = total_loss + rot_reg  # 仅使用旋转正则
+            scale_reg = scale_reg_weight * (model.log_scale - math.log(scale_init)).pow(2).sum()
+            loss = total_loss + rot_reg + scale_reg
             loss.backward()
             optimizer.step()
+            with torch.no_grad():
+                model.log_scale.clamp_(math.log(scale_min), math.log(scale_max))
             cur_loss = loss.item()
             if cur_loss < local_best:
                 local_best = cur_loss
@@ -586,7 +663,7 @@ def object_pose_optimization(glb_path, point_path, radius=0.005, lr=0.005, iters
     trans = best_state['trans']
     scale = torch.exp(best_state['log_scale'])[0]
     R_obj = rotation_6d_to_matrix(rot_6d[None])[0]
-    T_final = build_transform(R_obj, trans, scale)
+    T_final = build_transform(R_obj, trans, scale, complete_xyz.mean(0))
     final_transform = T_final.detach().cpu().numpy()
     np.save('final_transform.npy', final_transform)
     # print("最终 4x4 变换矩阵 (complete -> partial 相机坐标系):")

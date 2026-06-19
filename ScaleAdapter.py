@@ -3,10 +3,10 @@ from PIL import Image
 from torchvision import transforms
 import numpy as np
 import open3d as o3d
-from utils.dataUtils import normalize_numpy, save_ply_xyzrgb
+from utils.dataUtils import save_ply_xyzrgb
 from utils.runtime import model_path, sample_file
 import warnings
-from reg_xyz import reg, load_generated_point_cloud
+from reg_xyz import reg
 
 warnings.filterwarnings("ignore")
 
@@ -99,45 +99,6 @@ class ScaleAdapter():
             cd_inv_weight = float(override.get("cd_inv_weight", cd_inv_weight))
             diff_init = bool(override.get("diff_init", diff_init))
             reg_fine_xyz = bool(override.get("reg_fine_xyz", reg_fine_xyz))
-        source_pcd = o3d.io.read_point_cloud(str(sample_file(self.cfg, flag, "color_point.ply")))
-        source_xyz = np.asarray(source_pcd.points)
-        source_extent = source_xyz.max(axis=0) - source_xyz.min(axis=0)
-        direct_fallback = False
-        if bool(getattr(self.cfg, "reg_pre_fallback", True)):
-            raw_target_pcd = load_generated_point_cloud(
-                self.cfg.output_path,
-                flag,
-                self.cfg.generative_model,
-            )
-            raw_target_xyz = np.asarray(raw_target_pcd.points)
-            raw_target_xyz, _, _ = normalize_numpy(raw_target_xyz, range=0.5)
-            raw_target_extent = raw_target_xyz.max(axis=0) - raw_target_xyz.min(axis=0)
-            raw_extent_ratio = np.divide(
-                raw_target_extent,
-                source_extent,
-                out=np.zeros_like(raw_target_extent),
-                where=source_extent > 1e-9,
-            )
-            pre_fallback_ratio = float(getattr(self.cfg, "reg_pre_fallback_extent_ratio", 1.6))
-            pre_fallback_min_ratio = float(getattr(self.cfg, "reg_pre_fallback_min_extent_ratio", 0.8))
-            direct_fallback = (
-                float(raw_extent_ratio.max()) > pre_fallback_ratio
-                and float(raw_extent_ratio.min()) > pre_fallback_min_ratio
-            )
-            if direct_fallback:
-                print(
-                    f"Direct registration fallback for {flag}: "
-                    f"raw_extent_ratio={raw_extent_ratio.round(3).tolist()}"
-                )
-        if direct_fallback:
-            reg(
-                self.cfg,
-                flag,
-                cd_inv_weight=float(override.get("cd_inv_weight", getattr(self.cfg, "reg_fallback_cd_inv_weight", 0.0))),
-                diff_init=bool(override.get("diff_init", getattr(self.cfg, "reg_fallback_diff_init", False))),
-                reg_fine_xyz=reg_fine_xyz,
-            )
-            return
         reg(
             self.cfg,
             flag,
@@ -145,30 +106,6 @@ class ScaleAdapter():
             diff_init=diff_init,
             reg_fine_xyz=reg_fine_xyz,
         )
-        adaptive_fallback = bool(override.get("adaptive_fallback", getattr(self.cfg, "reg_adaptive_fallback", True)))
-        if adaptive_fallback:
-            target_pcd = o3d.io.read_point_cloud(str(sample_file(self.cfg, flag, f"{flag}_registered_gen.ply")))
-            target_xyz = np.asarray(target_pcd.points)
-            target_extent = target_xyz.max(axis=0) - target_xyz.min(axis=0)
-            extent_ratio = np.divide(
-                target_extent,
-                source_extent,
-                out=np.zeros_like(target_extent),
-                where=source_extent > 1e-9,
-            )
-            fallback_ratio = float(getattr(self.cfg, "reg_fallback_extent_ratio", 1.45))
-            if float(extent_ratio.max()) > fallback_ratio:
-                print(
-                    f"Adaptive registration fallback for {flag}: "
-                    f"extent_ratio={extent_ratio.round(3).tolist()}"
-                )
-                reg(
-                    self.cfg,
-                    flag,
-                    cd_inv_weight=float(getattr(self.cfg, "reg_fallback_cd_inv_weight", 0.0)),
-                    diff_init=bool(getattr(self.cfg, "reg_fallback_diff_init", False)),
-                    reg_fine_xyz=reg_fine_xyz,
-                )
         
 
     def scaleAdapter(self, xyz, flag, rgb=None):

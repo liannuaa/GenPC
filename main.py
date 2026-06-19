@@ -136,7 +136,16 @@ def metric(flag, cfg):
         indices = np.load(indices_path)
         gt_indices = indices["gt_indices"]
         pred_indices = indices["pred_indices"]
+        gt_max_index = int(gt_indices.max()) if len(gt_indices) else -1
+        pred_max_index = int(pred_indices.max()) if len(pred_indices) else -1
+        if gt_max_index >= len(gt_points) or pred_max_index >= len(pred_points):
+            gt_indices = None
+            pred_indices = None
     else:
+        gt_indices = None
+        pred_indices = None
+
+    if gt_indices is None or pred_indices is None:
         gt_start_idx = None
         pred_start_idx = None
         if metric_seed is not None:

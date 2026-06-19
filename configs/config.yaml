@@ -18,7 +18,17 @@ outputs:
 
 dataset: "redwood" # redwood, pcn, scannet
 device: "cuda"
-sample_ids: [] # empty => run all .ply files under data/
+sample_ids:
+  - "01184"
+  - "05117"
+  - "05452"
+  - "06127"
+  - "06145"
+  - "06188"
+  - "06830"
+  - "07136"
+  - "07306"
+  - "09639"
 max_samples: null # set an integer to truncate auto-discovered samples
 run_stage1: true
 run_stage2: true
@@ -68,50 +78,42 @@ metric_save_indices: false
 
 # Registration/fusion. Registration must only use partial and generated point clouds.
 # GT point clouds are reserved for metric evaluation only.
-reg_fuse_min_distance: 0.0001
+reg_fuse_min_distance: 0.0
 reg_fuse_max_distance: null
-reg_fuse_denoise: true
+reg_fuse_denoise: false
 reg_cd_inv_weight: 0.5
 reg_cd_loss: "infocd"
+reg_candidate_loss: "model"
 reg_diff_init: true
 reg_fine_xyz: true
-reg_pre_fallback: true
-reg_pre_fallback_extent_ratio: 1.6
-reg_pre_fallback_min_extent_ratio: 0.8
-reg_adaptive_fallback: true
-reg_fallback_extent_ratio: 1.45
-reg_fallback_cd_inv_weight: 0.0
-reg_fallback_diff_init: false
-reg_sample_overrides:
-  "06127":
-    diff_init: false
-    cd_inv_weight: 0.5
-    reg_fine_xyz: true
-  "06188":
-    diff_init: false
-    cd_inv_weight: 0.0
-    reg_fine_xyz: false
-  "07136":
-    diff_init: false
-    cd_inv_weight: 0.5
-    reg_fine_xyz: true
-    adaptive_fallback: false
-    fuse_max_distance: 0.1
-    completion_scale: [0.95, 1.10, 1.15]
-  "07306":
-    diff_init: true
-    cd_inv_weight: 0.5
-    reg_fine_xyz: true
-    adaptive_fallback: false
-    completion_scale: [1.0, 1.0, 1.20]
-  "09639":
-    diff_init: false
-    cd_inv_weight: 0.5
-    reg_fine_xyz: true
-  "06830":
-    diff_init: false
-    cd_inv_weight: 1.0
-    reg_fine_xyz: true
-    adaptive_fallback: false
-    fuse_max_distance: 0.03
-    fuse_denoise: false
+reg_coarse_scale_range: [1.5, 0.5]
+reg_coarse_scale_steps: 13
+reg_pose_scale_init: 0.75
+reg_pose_scale_min: 0.2
+reg_pose_scale_max: 0.9
+reg_pose_scale_reg_weight: 0.0
+reg_pose_iters: 400
+reg_pose_cam_bias_num: 8
+reg_pose_mask_weight: 0.3
+reg_pose_cd_weight: 8.0
+reg_pose_cd_inv_weight: 0.0
+reg_pose_cd_direction: "complete_to_partial"
+reg_fine_scale_ranges:
+  - [0.6, 1.4]
+  - [0.6, 1.4]
+  - [0.6, 1.4]
+reg_fine_scale_steps: 9
+reg_forward_trim_ratio: 1.0
+reg_inverse_trim_ratio: 0.25
+reg_torch_refine: false
+reg_torch_refine_iters: 120
+reg_torch_refine_lr: 0.01
+reg_torch_refine_source_points: 2048
+reg_torch_refine_target_points: 4096
+reg_torch_refine_inverse_weight: 0.15
+reg_torch_refine_inverse_trim_ratio: 0.25
+reg_torch_refine_scale_min: 0.75
+reg_torch_refine_scale_max: 1.25
+reg_torch_refine_scale_reg_weight: 0.02
+reg_torch_refine_trans_reg_weight: 0.001
+reg_torch_refine_rot_reg_weight: 0.001

@@ -17,6 +17,117 @@ from fpsample import fps_sampling
 from utils.runtime import sample_file, save_intermediates
 
 
+def rotation_matrix_from_axis_angle(axis_angle):
+    theta = torch.linalg.norm(axis_angle) + 1e-9
+    axis = axis_angle / theta
+    x, y, z = axis
+    zeros = torch.zeros((), dtype=axis_angle.dtype, device=axis_angle.device)
+    skew = torch.stack(
+        [
+            torch.stack([zeros, -z, y]),
+            torch.stack([z, zeros, -x]),
+            torch.stack([-y, x, zeros]),
+        ]
+    )
+    eye = torch.eye(3, dtype=axis_angle.dtype, device=axis_angle.device)
+    return eye + torch.sin(theta) * skew + (1.0 - torch.cos(theta)) * (skew @ skew)
+
+
+def cfg_scale_range(value, default):
+    if value is None:
+        return default
+    if len(value) != 2:
+        raise ValueError(f"Scale range must have 2 values, got {value}")
+    return (float(value[0]), float(value[1]))
+
+
+def cfg_xyz_scale_ranges(value, default):
+    if value is None:
+        return default
+    if len(value) != 3:
+        raise ValueError(f"XYZ scale ranges must have 3 ranges, got {value}")
+    return [cfg_scale_range(axis_range, default[i]) for i, axis_range in enumerate(value)]
+
+
+def points_to_tensor(pcd, max_points, device):
+    xyz = np.asarray(pcd.points).astype(np.float32)
+    if len(xyz) > max_points:
+        rng = np.random.default_rng()
+        xyz = xyz[rng.choice(len(xyz), size=max_points, replace=False)]
+    return torch.from_numpy(xyz).to(device)
+
+
+def refine_generated_to_partial(
+    source_pcd,
+    target_pcd,
+    device,
+    iters=120,
+    lr=0.01,
+    source_points=2048,
+    target_points=4096,
+    inverse_weight=0.15,
+    inverse_trim_ratio=0.25,
+    scale_min=0.75,
+    scale_max=1.25,
+    scale_reg_weight=0.02,
+    trans_reg_weight=0.001,
+    rot_reg_weight=0.001,
+):
+    source = points_to_tensor(source_pcd, source_points, device)
+    target = points_to_tensor(target_pcd, target_points, device)
+    if source.numel() == 0 or target.numel() == 0:
+        return np.eye(4)
+
+    rot = torch.zeros(3, dtype=torch.float32, device=device, requires_grad=True)
+    trans = torch.zeros(3, dtype=torch.float32, device=device, requires_grad=True)
+    log_scale = torch.zeros(3, dtype=torch.float32, device=device, requires_grad=True)
+    optimizer = torch.optim.Adam([rot, trans, log_scale], lr=lr)
+
+    best_loss = float("inf")
+    best_transform = np.eye(4)
+    trim_k = max(1, int(target.shape[0] * inverse_trim_ratio))
+
+    for _ in range(int(iters)):
+        optimizer.zero_grad()
+        scale = torch.exp(log_scale)
+        rot_m = rotation_matrix_from_axis_angle(rot)
+        target_tf = (target * scale) @ rot_m.T + trans
+
+        dist = torch.cdist(source.unsqueeze(0), target_tf.unsqueeze(0))[0]
+        src_to_tgt = dist.min(dim=1).values
+        tgt_to_src = dist.min(dim=0).values
+        tgt_trim = torch.topk(tgt_to_src, k=trim_k, largest=False).values
+
+        loss = src_to_tgt.mean()
+        loss = loss + inverse_weight * tgt_trim.mean()
+        loss = loss + scale_reg_weight * (log_scale ** 2).sum()
+        loss = loss + trans_reg_weight * (trans ** 2).sum()
+        loss = loss + rot_reg_weight * (rot ** 2).sum()
+        loss.backward()
+        optimizer.step()
+
+        with torch.no_grad():
+            log_scale.clamp_(np.log(scale_min), np.log(scale_max))
+            loss_value = float(loss.item())
+            if loss_value < best_loss:
+                best_loss = loss_value
+                scale_np = torch.exp(log_scale).detach().cpu().numpy()
+                rot_np = rotation_matrix_from_axis_angle(rot).detach().cpu().numpy()
+                trans_np = trans.detach().cpu().numpy()
+                transform = np.eye(4)
+                transform[:3, :3] = rot_np @ np.diag(scale_np)
+                transform[:3, 3] = trans_np
+                best_transform = transform
+
+    print(
+        "torch refine "
+        f"loss:{best_loss:.6f}, "
+        f"scale:{np.diag(best_transform[:3, :3]).tolist()}, "
+        f"trans:{best_transform[:3, 3].tolist()}"
+    )
+    return best_transform
+
+
 def load_generated_point_cloud(path, flag, model_name, fallback_points=163840):
     sample_path = Path(path) / str(flag)
     ply_path = sample_path / f"{flag}_{model_name}.ply"
@@ -139,7 +250,18 @@ def scale_completion_from_partial_bbox(source_pcd, target_pcd, scales):
     return scaled
 
 
-def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, init_transform=np.eye(4), cd_inv_weight=0, loss_func='cd_l1'):
+def iterative_scale_search(
+    source_pcd,
+    target_pcd,
+    scale_ranges,
+    scale_steps,
+    init_transform=np.eye(4),
+    cd_inv_weight=0,
+    loss_func='cd_l1',
+    candidate_loss="model",
+    forward_trim_ratio=1.0,
+    inverse_trim_ratio=0.25,
+):
     best_loss = 999999
     best_scales = None
     best_transformation = None
@@ -162,9 +284,15 @@ def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, in
                 source_xyz = torch.tensor(np.asarray(source_aligned.points), dtype=torch.float32).unsqueeze(0).cuda()
                 target_xyz = torch.tensor(np.asarray(target_copy.points), dtype=torch.float32).unsqueeze(0).cuda()
 
-                cd = completion_loss.partial_matching(source_xyz, target_xyz)
-                cd_inv = completion_loss.partial_matching(target_xyz, source_xyz) * cd_inv_weight
-                cd = cd + cd_inv
+                cd = registration_candidate_loss(
+                    completion_loss,
+                    source_xyz,
+                    target_xyz,
+                    mode=candidate_loss,
+                    cd_inv_weight=cd_inv_weight,
+                    forward_trim_ratio=forward_trim_ratio,
+                    inverse_trim_ratio=inverse_trim_ratio,
+                )
                 if cd < best_loss:
                     best_loss = cd
                     best_scales = scales
@@ -182,6 +310,37 @@ def iterative_scale_search(source_pcd, target_pcd, scale_ranges, scale_steps, in
         best_scales_transformation[2, 2] = best_scales[2]
     # best_scales_transformation[2, 2] = 1.5
     return best_scales_transformation, best_loss, best_transformation
+
+
+def trimmed_mean(distances, trim_ratio):
+    distances = torch.sqrt(torch.clamp(distances, min=1e-12)).reshape(-1)
+    if trim_ratio >= 1.0:
+        return distances.mean()
+    keep = max(1, int(distances.numel() * trim_ratio))
+    return torch.topk(distances, k=keep, largest=False).values.mean()
+
+
+def registration_candidate_loss(
+    completion_loss,
+    source_xyz,
+    target_xyz,
+    mode="model",
+    cd_inv_weight=0.0,
+    forward_trim_ratio=1.0,
+    inverse_trim_ratio=0.25,
+):
+    if mode == "model":
+        loss = completion_loss.partial_matching(source_xyz, target_xyz)
+        if cd_inv_weight > 0:
+            loss = loss + cd_inv_weight * completion_loss.partial_matching(target_xyz, source_xyz)
+        return loss
+    if mode != "trimmed_cd_l1":
+        raise ValueError(f"Unsupported registration candidate loss: {mode}")
+    d_source, d_target, _, _ = completion_loss.chamfer_dist(source_xyz, target_xyz)
+    loss = trimmed_mean(d_source, forward_trim_ratio)
+    if cd_inv_weight > 0:
+        loss = loss + cd_inv_weight * trimmed_mean(d_target, inverse_trim_ratio)
+    return loss
 
 
 def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
@@ -208,12 +367,21 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
             point_path=str(color_point_path),
             radius=0.02,
             lr=0.01,
-            iters=200,
+            iters=int(getattr(cfg, "reg_pose_iters", 200)),
             render_size=224,
             vis=bool(getattr(cfg, "reg_pose_vis", False)),
             save_path=str(sample_file(cfg, flag, "pose.gif")),
             device=cfg.device,
+            cam_bias_num=int(getattr(cfg, "reg_pose_cam_bias_num", 4)),
             cd_loss_func=reg_loss_func,
+            scale_init=float(getattr(cfg, "reg_pose_scale_init", 0.75)),
+            scale_min=float(getattr(cfg, "reg_pose_scale_min", 0.55)),
+            scale_max=float(getattr(cfg, "reg_pose_scale_max", 0.9)),
+            scale_reg_weight=float(getattr(cfg, "reg_pose_scale_reg_weight", 0.1)),
+            pose_mask_weight=float(getattr(cfg, "reg_pose_mask_weight", 1.0)),
+            pose_cd_weight=float(getattr(cfg, "reg_pose_cd_weight", 3.0)),
+            pose_cd_inv_weight=float(getattr(cfg, "reg_pose_cd_inv_weight", 0.5)),
+            pose_cd_direction=getattr(cfg, "reg_pose_cd_direction", "complete_to_partial"),
         )
         diff_transform = np.linalg.inv(diff_transform)
     source_pcd = o3d.io.read_point_cloud(str(color_point_path))
@@ -238,7 +406,24 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     # o3d.visualization.draw_geometries([target_pcd, source_pcd])
 
     completion_loss = Completionloss(loss_func=reg_loss_func)
-    scales = np.linspace(1.5, 0.8 , 11)
+    reg_candidate_loss = sample_override.get(
+        "candidate_loss",
+        getattr(cfg, "reg_candidate_loss", "model"),
+    )
+    reg_forward_trim_ratio = float(sample_override.get(
+        "forward_trim_ratio",
+        getattr(cfg, "reg_forward_trim_ratio", 1.0),
+    ))
+    reg_inverse_trim_ratio = float(sample_override.get(
+        "inverse_trim_ratio",
+        getattr(cfg, "reg_inverse_trim_ratio", 0.25),
+    ))
+    coarse_scale_range = cfg_scale_range(
+        sample_override.get("coarse_scale_range", getattr(cfg, "reg_coarse_scale_range", None)),
+        (1.5, 0.8),
+    )
+    coarse_scale_steps = int(sample_override.get("coarse_scale_steps", getattr(cfg, "reg_coarse_scale_steps", 11)))
+    scales = np.linspace(coarse_scale_range[0], coarse_scale_range[1], coarse_scale_steps)
     best_scale = 1.5
     best_loss = 999999
     coarse_transformation = None
@@ -259,18 +444,28 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
         source_color = torch.tensor(np.asarray(source_down.colors),dtype=torch.float32).unsqueeze(0).cuda()
         target_xyz = torch.tensor(np.asarray(target_down.points),dtype=torch.float32).unsqueeze(0).cuda()
         target_color = torch.tensor(np.asarray(target_down.colors),dtype=torch.float32).unsqueeze(0).cuda()
-        cd = completion_loss.partial_matching(source_xyz, target_xyz)
-        cd_inv = completion_loss.partial_matching(target_xyz, source_xyz) * cd_inv_weight
-        cd = cd + cd_inv
+        cd = registration_candidate_loss(
+            completion_loss,
+            source_xyz,
+            target_xyz,
+            mode=reg_candidate_loss,
+            cd_inv_weight=cd_inv_weight,
+            forward_trim_ratio=reg_forward_trim_ratio,
+            inverse_trim_ratio=reg_inverse_trim_ratio,
+        )
         if cd < best_loss:
             best_loss = cd
             best_scale = scale
             coarse_transformation = icp_result.transformation
 
-    # print(f"best_scale:{best_scale},best_loss:{best_loss}")
+    print(f"coarse best_scale:{best_scale}, best_loss:{float(best_loss):.6f}")
     if reg_fine_xyz:
         fine_voxel = float(getattr(cfg, "reg_fine_voxel_size", 0.03))
-        fine_scale_steps = int(getattr(cfg, "reg_fine_scale_steps", 10))
+        fine_scale_steps = int(sample_override.get("fine_scale_steps", getattr(cfg, "reg_fine_scale_steps", 10)))
+        fine_scale_ranges = cfg_xyz_scale_ranges(
+            sample_override.get("fine_scale_ranges", getattr(cfg, "reg_fine_scale_ranges", None)),
+            [(0.8, 1.2), (0.8, 1.2), (0.8, 1.2)],
+        )
         # 如果要对xyz三个轴上进行缩放配准，要对齐到complete的标准坐标系下，在这个坐标系下物体的朝向与轴正交
         source_pcd.transform(coarse_transformation)
         # o3d.visualization.draw_geometries([source_pcd, target_pcd], window_name="ICP with Scaling Result")
@@ -280,14 +475,22 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
             best_scales_transformation, best_loss_xyz, best_transformation_xyz = iterative_scale_search(
                 source_pcd,
                 target_pcd.voxel_down_sample(voxel_size=0.04),
-                scale_ranges=[(0.8, 1.2), (0.8, 1.2), (0.8, 1.2)],
-                scale_steps=10, init_transform=np.eye(4), cd_inv_weight=cd_inv_weight, loss_func=reg_loss_func)
+                scale_ranges=fine_scale_ranges,
+                scale_steps=10, init_transform=np.eye(4), cd_inv_weight=cd_inv_weight, loss_func=reg_loss_func,
+                candidate_loss=reg_candidate_loss,
+                forward_trim_ratio=reg_forward_trim_ratio, inverse_trim_ratio=reg_inverse_trim_ratio)
         elif cfg.dataset in ["redwood"]:
             best_scales_transformation, best_loss_xyz, best_transformation_xyz = iterative_scale_search(
                 source_pcd.voxel_down_sample(voxel_size=fine_voxel),
                 target_pcd.voxel_down_sample(voxel_size=fine_voxel),
-                scale_ranges=[(0.8, 1.2), (0.8, 1.2), (0.8, 1.2)],
-                scale_steps=fine_scale_steps, init_transform=np.eye(4), cd_inv_weight=cd_inv_weight, loss_func=reg_loss_func)
+                scale_ranges=fine_scale_ranges,
+                scale_steps=fine_scale_steps, init_transform=np.eye(4), cd_inv_weight=cd_inv_weight, loss_func=reg_loss_func,
+                candidate_loss=reg_candidate_loss,
+                forward_trim_ratio=reg_forward_trim_ratio, inverse_trim_ratio=reg_inverse_trim_ratio)
+        print(
+            "fine best_scales:"
+            f"{np.diag(best_scales_transformation)[:3].tolist()}, best_loss:{float(best_loss_xyz):.6f}"
+        )
         # o3d.visualization.draw_geometries([source_pcd, target_pcd], window_name="ICP with Scaling Result")
         # 让complete进行逆变换(带有xyz三个维度缩放)，对齐partial在标准坐标系下的位置
         inv = np.linalg.inv(best_scales_transformation)
@@ -300,6 +503,24 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     # complete变换到原始相机坐标系下
     inv = np.linalg.inv(coarse_transformation)
     target_pcd.transform(inv)
+    if bool(sample_override.get("torch_refine", getattr(cfg, "reg_torch_refine", True))):
+        refine_transform = refine_generated_to_partial(
+            source_pcd,
+            target_pcd,
+            device=cfg.device,
+            iters=int(sample_override.get("torch_refine_iters", getattr(cfg, "reg_torch_refine_iters", 120))),
+            lr=float(sample_override.get("torch_refine_lr", getattr(cfg, "reg_torch_refine_lr", 0.01))),
+            source_points=int(sample_override.get("torch_refine_source_points", getattr(cfg, "reg_torch_refine_source_points", 2048))),
+            target_points=int(sample_override.get("torch_refine_target_points", getattr(cfg, "reg_torch_refine_target_points", 4096))),
+            inverse_weight=float(sample_override.get("torch_refine_inverse_weight", getattr(cfg, "reg_torch_refine_inverse_weight", 0.15))),
+            inverse_trim_ratio=float(sample_override.get("torch_refine_inverse_trim_ratio", getattr(cfg, "reg_torch_refine_inverse_trim_ratio", 0.25))),
+            scale_min=float(sample_override.get("torch_refine_scale_min", getattr(cfg, "reg_torch_refine_scale_min", 0.75))),
+            scale_max=float(sample_override.get("torch_refine_scale_max", getattr(cfg, "reg_torch_refine_scale_max", 1.25))),
+            scale_reg_weight=float(sample_override.get("torch_refine_scale_reg_weight", getattr(cfg, "reg_torch_refine_scale_reg_weight", 0.02))),
+            trans_reg_weight=float(sample_override.get("torch_refine_trans_reg_weight", getattr(cfg, "reg_torch_refine_trans_reg_weight", 0.001))),
+            rot_reg_weight=float(sample_override.get("torch_refine_rot_reg_weight", getattr(cfg, "reg_torch_refine_rot_reg_weight", 0.001))),
+        )
+        target_pcd.transform(refine_transform)
     inv = np.linalg.inv(diff_transform)
     target_pcd.transform(inv)
     source_pcd.transform(inv)
