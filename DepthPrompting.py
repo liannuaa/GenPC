@@ -65,14 +65,21 @@ class DepthPrompting:
                     model_path(
                         self.cfg,
                         "qwen_transformer_path",
-                        "nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
+                        "nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors",
                     )
                 ),
                 pipeline_path=str(
                     model_path(
                         self.cfg,
                         "qwen_pipeline_path",
-                        "Qwen-Image-Edit-2509",
+                        "Qwen-Image",
+                    )
+                ),
+                controlnet_path=str(
+                    model_path(
+                        self.cfg,
+                        "qwen_controlnet_path",
+                        "Qwen-Image-ControlNet-Union",
                     )
                 ),
             )
@@ -88,14 +95,19 @@ class DepthPrompting:
             rgb = torch.tensor(getRandomColor(xyz.shape[0])).float().to(self.device)
         if depth_gen:
             self.getDepth(xyz, flag, rgb)
+        depth_input_res = int(getattr(self.cfg, "qwen_depth_input_res", 512))
         self.depth = load_image(str(sample_file(self.cfg, flag, "depth.png"))).resize(
-            (self.cfg.generate_res, self.cfg.generate_res)
+            (depth_input_res, depth_input_res)
         )
         if img_gen:
             print(" Image Generation.....")
             prompt_label = resolve_prompt_label(flag, self.cfg)
             self.image = self.depth2Image.generate(
-                self.depth, prompt_label, size=self.cfg.generate_res
+                self.depth,
+                prompt_label,
+                size=self.cfg.generate_res,
+                input_size=depth_input_res,
+                mode="depth",
             )
             self.image.save(sample_file(self.cfg, flag, "img.png"))
         end = time.time()

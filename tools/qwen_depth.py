@@ -1,8 +1,13 @@
 import torch
-from diffusers import FlowMatchEulerDiscreteScheduler, QwenImageEditPipeline
-from PIL import Image, ImageFilter, ImageOps
-from nunchaku import NunchakuQwenImageTransformer2DModel
-from nunchaku.utils import get_precision
+from diffusers import (
+    FlowMatchEulerDiscreteScheduler,
+    QwenImageControlNetModel,
+    QwenImageControlNetPipeline,
+)
+from PIL import Image
+from nunchaku.models.transformers.transformer_qwenimage import (
+    NunchakuQwenImageTransformer2DModel,
+)
 import logging
 import math
 from pathlib import Path
@@ -12,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 class Qwen_depth:
     """
-    Qwen Image Edit 深度图生成类
+    Qwen Image ControlNet 深度图生成类
     用于将深度图转换为真实感图像
     """
 
@@ -20,33 +25,39 @@ class Qwen_depth:
         self,
         device,
         rank=128,
-        step=8,
-        transformer_path="models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors",
-        pipeline_path="models/Qwen-Image-Edit-2509",
+        step=4,
+        transformer_path="models/nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors",
+        pipeline_path="models/Qwen-Image",
+        controlnet_path="models/Qwen-Image-ControlNet-Union",
     ):
         """
-        初始化 Qwen Image Edit 模型
+        初始化 Qwen Image ControlNet 模型
 
         Args:
             device: 计算设备 (cuda 或 cpu)
             rank: 量化等级 (默认128，可选64/128)
-            step: 推理步数 (默认8，可选4/8/16)
-            transformer_path: transformer 模型路径 (默认根据 rank 和 step 自动生成)
-            pipeline_path: Qwen Image Edit pipeline 模型路径 (默认 "models/Qwen-Image-Edit-2509")
+            step: 推理步数 (默认4)
+            transformer_path: Nunchaku transformer 模型路径
+            pipeline_path: Qwen Image pipeline 模型路径
+            controlnet_path: Qwen Image ControlNet Union 模型路径
         """
         self.device = device
         self.rank = rank
         self.step = step
 
-        logger.info(f"Loading Qwen Image Edit (rank={rank}, step={step})...")
+        logger.info(f"Loading Qwen Image ControlNet (rank={rank}, step={step})...")
         logger.info(f"  Transformer: {transformer_path}")
         logger.info(f"  Pipeline: {pipeline_path}")
+        logger.info(f"  ControlNet: {controlnet_path}")
         transformer_path = Path(transformer_path).expanduser().resolve()
         pipeline_path = Path(pipeline_path).expanduser().resolve()
+        controlnet_path = Path(controlnet_path).expanduser().resolve()
         if not transformer_path.exists():
             raise FileNotFoundError(f"Qwen transformer not found at {transformer_path}")
         if not pipeline_path.exists():
             raise FileNotFoundError(f"Qwen pipeline not found at {pipeline_path}")
+        if not controlnet_path.exists():
+            raise FileNotFoundError(f"Qwen ControlNet not found at {controlnet_path}")
 
         scheduler_config = {
             "base_image_seq_len": 256,
@@ -70,18 +81,35 @@ class Qwen_depth:
         self.transformer = NunchakuQwenImageTransformer2DModel.from_pretrained(
             str(transformer_path)
         )
+        self.controlnet = QwenImageControlNetModel.from_pretrained(
+            str(controlnet_path), torch_dtype=torch.bfloat16
+        )
 
         # 加载 pipeline
-        self.pipeline = QwenImageEditPipeline.from_pretrained(
-            str(pipeline_path), transformer=self.transformer, scheduler=scheduler, torch_dtype=torch.bfloat16
+        self.pipeline = QwenImageControlNetPipeline.from_pretrained(
+            str(pipeline_path),
+            controlnet=self.controlnet,
+            transformer=self.transformer,
+            scheduler=scheduler,
+            torch_dtype=torch.bfloat16,
         )
 
         # 启用 CPU offload 以节省显存
         self.pipeline.enable_model_cpu_offload()
 
-        logger.info("✓ Qwen Image Edit 模型加载完成")
+        logger.info("✓ Qwen Image ControlNet 模型加载完成")
 
-    def generate(self, depth_image, flag, size=1280):
+    def generate(
+        self,
+        depth_image,
+        flag,
+        size=1280,
+        input_size=None,
+        mode="depth",
+        true_cfg_scale=None,
+        controlnet_conditioning_scale=0.9,
+        seed=None,
+    ):
         """
         从深度图生成真实感图像
 
@@ -89,6 +117,7 @@ class Qwen_depth:
             depth_image: PIL Image 或图像路径
             flag: 物体标签/描述 (例如 'rubbish bin')
             size: 生成图像尺寸 (默认1024)
+            input_size: 输入条件图尺寸；None 表示使用生成图像尺寸
 
         Returns:
             PIL Image: 生成的图像
@@ -98,26 +127,32 @@ class Qwen_depth:
             depth_image = Image.open(depth_image)
 
         # 调整尺寸
-        if depth_image.size != (size, size):
-            depth_image = depth_image.resize((size, size), Image.LANCZOS)
+        condition_size = size if input_size is None else input_size
+        if depth_image.size != (condition_size, condition_size):
+            depth_image = depth_image.resize(
+                (condition_size, condition_size), Image.LANCZOS
+            )
 
         # 构建专业级 prompt
-        prompt = self._build_prompt(flag)
-        negative_prompt = "blurry, low resolution, out of focus, soft details, fuzzy edges, noisy, distorted, hazy, unclear, cropped, partial object, incomplete object, crop, occlusion"
+        prompt = self._build_prompt(flag, mode=mode)
+        negative_prompt = " "
 
 
-        logger.info(f"Generating image from depth map (flag={flag})...")
+        logger.info(f"Generating image with Qwen (flag={flag}, mode={mode})...")
 
         # 推理
         inputs = {
-            "image": depth_image,
             "prompt": prompt,
-            "true_cfg_scale": 4.0,
+            "negative_prompt": negative_prompt,
+            "control_image": depth_image,
+            "controlnet_conditioning_scale": controlnet_conditioning_scale,
             "height": size,
             "width": size,
-            "negative_prompt":  negative_prompt,
-            "num_inference_steps": self.step
+            "num_inference_steps": self.step,
+            "true_cfg_scale": 1.0 if true_cfg_scale is None else true_cfg_scale,
         }
+        if seed is not None and str(self.device).startswith("cuda"):
+            inputs["generator"] = torch.Generator(device="cuda").manual_seed(seed)
 
         output = self.pipeline(**inputs)
         output_image = output.images[0]
@@ -125,7 +160,7 @@ class Qwen_depth:
         logger.info("✓ 图像生成完成")
         return output_image
 
-    def _build_prompt(self, flag):
+    def _build_prompt(self, flag, mode="depth"):
         """
         构建专业级 prompt
 
@@ -136,4 +171,4 @@ class Qwen_depth:
             str: 完整的 prompt
         """
 
-        return  f"Generate a clear, high-quality side-view image of a {flag} on a pure white background. Use the provided depth map only as a loose layout and pose reference, not an exact shape or silhouette constraint. Complete any missing parts naturally. The {flag} should be fully visible, centered in the image, with realistic geometry, consistent material, accurate surface details, and a realistic style."
+        return f"a {flag} on a pure white background"

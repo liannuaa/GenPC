@@ -86,9 +86,6 @@ def _load_shape_pipeline(cfg):
         device=cfg.device,
         dtype=torch.float16,
     )
-    if getattr(cfg, "hunyuan_enable_flashvdm", True):
-        pipeline.enable_flashvdm(mc_algo="mc")
-
     _shape_pipeline = pipeline
     _shape_pipeline_key = key
     return _shape_pipeline
@@ -125,23 +122,25 @@ def hunyuan3d_2(cfg, flag, img):
     model_name = getattr(cfg, "generative_model", "hunyuan2.1")
     image = _prepare_input_image(cfg, img)
 
-    shape_steps = getattr(cfg, "hunyuan_shape_steps", 50)
+    shape_steps = int(getattr(cfg, "hunyuan_shape_steps", 50))
     octree_resolution = getattr(cfg, "hunyuan_octree_resolution", 384)
     num_chunks = getattr(cfg, "hunyuan_num_chunks", 8000)
     point_sample_num = getattr(cfg, "hunyuan_point_sample_num", 100000)
-    seed = getattr(cfg, "hunyuan_seed", 12345)
+    seed = getattr(cfg, "hunyuan_seed", None)
 
-    print("Running Hunyuan3D-2.1 shape generation...")
+    print(f"Running Hunyuan3D-2.1 shape generation ({shape_steps} steps)...")
     start_time = time.time()
     shape_pipeline = _load_shape_pipeline(cfg)
-    mesh = shape_pipeline(
-        image=image,
-        num_inference_steps=shape_steps,
-        octree_resolution=octree_resolution,
-        num_chunks=num_chunks,
-        generator=torch.manual_seed(seed),
-        output_type="trimesh",
-    )[0]
+    shape_kwargs = {
+        "image": image,
+        "num_inference_steps": shape_steps,
+        "octree_resolution": octree_resolution,
+        "num_chunks": num_chunks,
+        "output_type": "trimesh",
+    }
+    if seed is not None:
+        shape_kwargs["generator"] = torch.manual_seed(int(seed))
+    mesh = shape_pipeline(**shape_kwargs)[0]
     shape_elapsed = time.time() - start_time
 
     shape_glb_path = sample_file(cfg, flag, f"{flag}_{model_name}_shape.glb")

@@ -18,22 +18,29 @@
 - Default output cleanup keeps only `workspace/<sample_id>/<sample_id>_fused.ply`.
   Set `outputs.save_intermediates: true` to keep depth images, masks, generated
   images, GLB/PLY intermediates, registered point clouds, and debug outputs.
-- Current Qwen/Nunchaku test pins are `diffusers==0.36.0` and
+- Current Qwen ControlNet/Nunchaku test pins are `diffusers==0.36.0` and
   `transformers==4.57.6`.
 
 ## Model Download Notes
 - Nunchaku Qwen transformer weights should come from ModelScope repo
-  `nunchaku-tech/nunchaku-qwen-image-edit-2509`, not Hugging Face.
+  `nunchaku-tech/nunchaku-qwen-image`, not Hugging Face.
 - The current default transformer weight is
-  `models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors`.
-- Qwen pipeline files must exist at `models/Qwen-Image-Edit-2509`; otherwise
-  diffusers will try to resolve `models/Qwen-Image-Edit-2509` through Hugging Face
+  `models/nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors`.
+- Qwen pipeline files must exist at `models/Qwen-Image`; otherwise
+  diffusers will try to resolve `models/Qwen-Image` through Hugging Face
   and fail.
 - Because Nunchaku provides the transformer, skip Qwen pipeline full transformer
-  shards (`transformer/*.safetensors`) when downloading `Qwen/Qwen-Image-Edit-2509`.
+  shards (`transformer/*.safetensors`) when downloading `Qwen/Qwen-Image`.
+- Qwen ControlNet Union files must exist at `models/Qwen-Image-ControlNet-Union`.
+- Stage 1 uses a random seed by default. The prompt format is
+  `a {flag} on a pure white background`, with ControlNet conditioning scale
+  currently set in `tools/qwen_depth.py`.
 - The default Hunyuan3D path is shape-only and uses `Hunyuan3D-2.1`.
   Download `AI-ModelScope/Hunyuan3D-2.1` into `models/Hunyuan3D-2.1`,
   including the `hunyuan3d-dit-v2-1` subfolder. The loader uses the `fp16`
   variant for this checkpoint.
+- Hunyuan3D uses the regular 50-step path by default, with FlashVDM disabled.
+  `hunyuan_seed: null` means the shape generator uses a random seed; set an
+  integer only when reproducibility is needed.
 - RMBG-2.0 should be downloaded from ModelScope repo `AI-ModelScope/RMBG-2.0`
   into `models/RMBG-2.0`.

@@ -16,7 +16,7 @@ GenPC completes real-world partial scans without task-specific training by lever
 - PyTorch >= 2
 
 > Note
-> The current default pipeline uses `Qwen-Image-Edit-2509` for image generation and `Hunyuan3D-2.1` for image-to-3D generation. The environment below focuses on that default path and does not try to keep every optional backend in the repo fully provisioned at the same time.
+> The current default pipeline uses `Qwen-Image` with `Qwen-Image-ControlNet-Union` and a Nunchaku 4-step transformer for image generation, then `Hunyuan3D-2.1` for image-to-3D generation. The environment below focuses on that default path and does not try to keep every optional backend in the repo fully provisioned at the same time.
 
 ### Environment setup
 ```bash
@@ -50,14 +50,14 @@ pip install warp-lang ipyevents ipycanvas "jupyter_client<8" tornado usd-core
 pip install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast.git
 pip install --no-build-isolation git+https://github.com/facebookresearch/pytorch3d.git
 
-# Nunchaku for Qwen-Image-Edit-2509
+# Nunchaku for Qwen-Image ControlNet
 # Use the source build directly. On this machine, the official torch2.6 / cp310
 # wheel installs but fails at import time with an ABI error such as:
 #   undefined symbol: c10::detail::torchInternalAssertFail
 pip install --no-build-isolation git+https://github.com/Nunchaku-AI/Nunchaku
 
 # Optional import check:
-python -c "import nunchaku; from nunchaku import NunchakuQwenImageTransformer2DModel; print('nunchaku ok')"
+python -c "import nunchaku; from nunchaku.models.transformers.transformer_qwenimage import NunchakuQwenImageTransformer2DModel; print('nunchaku ok')"
 
 # Build CUDA ops for Chamfer/EMD
 pip install ninja
@@ -78,14 +78,14 @@ git clone --depth 1 https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1 ../Hunyuan3
 
 ### Model downloads
 ```bash
-# Image generator: Qwen-Image-Edit-2509
+# Image generator transformer: Nunchaku Qwen-Image 4-step
 python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
-    'nunchaku-tech/nunchaku-qwen-image-edit-2509',
-    local_dir='models/nunchaku-qwen-image-edit-2509',
+    'nunchaku-tech/nunchaku-qwen-image',
+    local_dir='models/nunchaku-qwen-image',
     allow_patterns=[
-        'svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors',
+        'svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors',
     ],
     max_workers=4,
 )
@@ -98,12 +98,22 @@ PY
 python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
-    'Qwen/Qwen-Image-Edit-2509',
-    local_dir='models/Qwen-Image-Edit-2509',
+    'Qwen/Qwen-Image',
+    local_dir='models/Qwen-Image',
     ignore_patterns=[
         'transformer/*.safetensors',
         'transformer/*.bin',
     ],
+    max_workers=4,
+)
+PY
+
+# Qwen Image ControlNet Union
+python - <<'PY'
+from modelscope.hub.snapshot_download import snapshot_download
+snapshot_download(
+    'Qwen/Qwen-Image-ControlNet-Union',
+    local_dir='models/Qwen-Image-ControlNet-Union',
     max_workers=4,
 )
 PY
@@ -156,8 +166,9 @@ PY
 # PY
 
 # Current default local paths:
-# - Qwen transformer: models/nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors
-# - Qwen pipeline: models/Qwen-Image-Edit-2509
+# - Qwen transformer: models/nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors
+# - Qwen pipeline: models/Qwen-Image
+# - Qwen ControlNet: models/Qwen-Image-ControlNet-Union
 # - Hunyuan3D-2.1: models/Hunyuan3D-2.1
 # - RMBG-2.0: models/RMBG-2.0
 ```
@@ -169,7 +180,7 @@ PY
 CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py
 
 # Checked-in default path:
-# Stage 1 uses Qwen-Image-Edit-2509, then Stage 2 uses Hunyuan3D-2.1.
+# Stage 1 uses Qwen-Image ControlNet, then Stage 2 uses Hunyuan3D-2.1.
 # The default config has run_stage1/run_stage2/run_metric all set to true.
 ```
 
@@ -202,6 +213,7 @@ Key config fields in `configs/config.yaml`:
 - `paths.hunyuan_repo_root`: local clone of `Tencent-Hunyuan/Hunyuan3D-2.1`.
 - `models.qwen_transformer_path`: Qwen/Nunchaku transformer path, relative to `paths.models_dir` unless absolute.
 - `models.qwen_pipeline_path`: Qwen pipeline directory, relative to `paths.models_dir` unless absolute.
+- `models.qwen_controlnet_path`: Qwen Image ControlNet Union directory, relative to `paths.models_dir` unless absolute.
 - `models.rmbg_model_path`: RMBG-2.0 directory, relative to `paths.models_dir` unless absolute.
 - `models.hunyuan_model_path`: Hunyuan3D-2.1 weights directory, relative to `paths.models_dir` unless absolute.
 - `sample_ids`: empty means run every `.ply` directly under `paths.data_dir`; set `["07136"]` for a single sample.
@@ -243,9 +255,14 @@ The checked-in default config is:
 - `rembg_model: "RMBG"`
 - `paths.models_dir: "models"`
 - `models.hunyuan_model_path: "Hunyuan3D-2.1"`
+- `models.qwen_transformer_path: "nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors"`
+- `models.qwen_pipeline_path: "Qwen-Image"`
+- `models.qwen_controlnet_path: "Qwen-Image-ControlNet-Union"`
 - `hunyuan_shape_subfolder: "hunyuan3d-dit-v2-1"`
+- `hunyuan_shape_steps: 50`
+- `hunyuan_seed: null` (random Hunyuan seed; set an integer for reproducibility)
 - `sample_ids: []` (auto-run all `data/*.ply`)
-- `outputs.save_intermediates: false`
+- `outputs.save_intermediates: true`
 - `run_stage1: true`
 - `run_stage2: true`
 - `run_metric: true`
@@ -253,8 +270,8 @@ The checked-in default config is:
 This means the default pipeline is:
 
 1. `DepthPrompting` renders depth / mask guidance from the partial point cloud.
-2. `Qwen-Image-Edit-2509` generates the completed reference image.
-3. `Hunyuan3D-2.1` generates the 3D asset.
+2. `Qwen-Image` + `Qwen-Image-ControlNet-Union` generates the completed reference image with prompt `a {flag} on a pure white background`.
+3. `Hunyuan3D-2.1` generates the 3D asset with the regular 50-step shape path; FlashVDM is disabled.
 4. `ScaleAdapter` aligns and fuses the generated result back to the input scan.
 
 ### Verified smoke test
@@ -268,7 +285,7 @@ CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python mai
 
 For quick single-sample validation, use `--sample_ids 07136`.
 
-The checked-in default is `Qwen-Image-Edit-2509` plus `Hunyuan3D-2.1`.
+The checked-in default is Qwen Image ControlNet plus `Hunyuan3D-2.1`.
 
 ## Citation
 ```bibtex

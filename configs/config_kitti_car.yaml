@@ -7,8 +7,9 @@ paths:
   hunyuan_repo_root: "../Hunyuan3D-2.1"
 
 models:
-  qwen_transformer_path: "nunchaku-qwen-image-edit-2509/svdq-int4_r128-qwen-image-edit-2509-lightningv2.0-8steps.safetensors"
-  qwen_pipeline_path: "Qwen-Image-Edit-2509"
+  qwen_transformer_path: "nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors"
+  qwen_pipeline_path: "Qwen-Image"
+  qwen_controlnet_path: "Qwen-Image-ControlNet-Union"
   rmbg_model_path: "RMBG-2.0"
   hunyuan_model_path: "Hunyuan3D-2.1"
 
@@ -52,7 +53,8 @@ camera_base: 'kaolin'
 # inpaint
 res: 256
 edge_point_size: 2
-generate_res: 512
+generate_res: 1024
+qwen_depth_input_res: 512
 
 # crop and rescale
 rescale: True
@@ -66,12 +68,11 @@ generative_model: "hunyuan2.1"
 
 # Hunyuan3D-2.1 shape-only
 hunyuan_shape_subfolder: "hunyuan3d-dit-v2-1"
-hunyuan_enable_flashvdm: true
 hunyuan_shape_steps: 50
 hunyuan_octree_resolution: 384
 hunyuan_num_chunks: 8000
 hunyuan_point_sample_num: 100000
-hunyuan_seed: 12345
+hunyuan_seed: null
 
 # TRELLIS.2
 trellis2_model_path: "models/TRELLIS.2-4B"
