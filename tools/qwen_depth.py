@@ -10,9 +10,17 @@ from nunchaku.models.transformers.transformer_qwenimage import (
 )
 import logging
 import math
+import resource
+import gc
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+def _format_limit(value):
+    if value == resource.RLIM_INFINITY:
+        return "unlimited"
+    return f"{value} bytes"
 
 
 class Qwen_depth:
@@ -29,6 +37,8 @@ class Qwen_depth:
         transformer_path="models/nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors",
         pipeline_path="models/Qwen-Image",
         controlnet_path="models/Qwen-Image-ControlNet-Union",
+        cpu_offload=True,
+        cpu_text_encoder=False,
     ):
         """
         初始化 Qwen Image ControlNet 模型
@@ -44,6 +54,30 @@ class Qwen_depth:
         self.device = device
         self.rank = rank
         self.step = step
+        self.cpu_offload = cpu_offload
+        self.cpu_text_encoder = cpu_text_encoder
+        if str(self.device).startswith("cuda"):
+            soft_limit, hard_limit = resource.getrlimit(resource.RLIMIT_MEMLOCK)
+            min_memlock = 256 * 1024 * 1024
+            if (
+                hard_limit != resource.RLIM_INFINITY
+                and hard_limit < min_memlock
+                and bool(getattr(self, "require_memlock", False))
+            ):
+                raise RuntimeError(
+                    "Qwen CUDA generation cannot run with the current locked-memory "
+                    f"limit ({_format_limit(hard_limit)} hard limit). The process "
+                    "hangs while CUDA page-locks model weights for CPU-to-GPU "
+                    "transfer. Start the container/session with a larger memlock "
+                    "limit, for example Docker '--ulimit memlock=-1:-1' or an "
+                    "equivalent CAP_IPC_LOCK/memlock setting, then rerun."
+                )
+            if hard_limit != resource.RLIM_INFINITY and hard_limit < min_memlock:
+                logger.warning(
+                    "Low locked-memory hard limit detected: %s. CUDA model transfer "
+                    "may hang on this host.",
+                    _format_limit(hard_limit),
+                )
 
         logger.info(f"Loading Qwen Image ControlNet (rank={rank}, step={step})...")
         logger.info(f"  Transformer: {transformer_path}")
@@ -94,10 +128,26 @@ class Qwen_depth:
             torch_dtype=torch.bfloat16,
         )
 
-        # 启用 CPU offload 以节省显存
-        self.pipeline.enable_model_cpu_offload()
+        if self.cpu_text_encoder:
+            self.pipeline.vae.to(self.device)
+            self.pipeline.transformer.to(self.device)
+            self.pipeline.controlnet.to(self.device)
+        elif self.cpu_offload:
+            # 启用 CPU offload 以节省显存
+            self.pipeline.enable_model_cpu_offload()
+        else:
+            self.pipeline.to(self.device)
 
         logger.info("✓ Qwen Image ControlNet 模型加载完成")
+
+    def close(self):
+        self.pipeline = None
+        self.controlnet = None
+        self.transformer = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
 
     def generate(
         self,
@@ -140,10 +190,7 @@ class Qwen_depth:
 
         logger.info(f"Generating image with Qwen (flag={flag}, mode={mode})...")
 
-        # 推理
         inputs = {
-            "prompt": prompt,
-            "negative_prompt": negative_prompt,
             "control_image": depth_image,
             "controlnet_conditioning_scale": controlnet_conditioning_scale,
             "height": size,
@@ -151,6 +198,36 @@ class Qwen_depth:
             "num_inference_steps": self.step,
             "true_cfg_scale": 1.0 if true_cfg_scale is None else true_cfg_scale,
         }
+        if self.cpu_text_encoder:
+            prompt_embeds, prompt_embeds_mask = self.pipeline.encode_prompt(
+                prompt=prompt,
+                device=torch.device("cpu"),
+                num_images_per_prompt=1,
+                max_sequence_length=512,
+            )
+            negative_prompt_embeds, negative_prompt_embeds_mask = self.pipeline.encode_prompt(
+                prompt=negative_prompt,
+                device=torch.device("cpu"),
+                num_images_per_prompt=1,
+                max_sequence_length=512,
+            )
+            inputs.update(
+                {
+                    "prompt": None,
+                    "negative_prompt": None,
+                    "prompt_embeds": prompt_embeds.to(self.device),
+                    "prompt_embeds_mask": prompt_embeds_mask.to(self.device),
+                    "negative_prompt_embeds": negative_prompt_embeds.to(self.device),
+                    "negative_prompt_embeds_mask": negative_prompt_embeds_mask.to(self.device),
+                }
+            )
+        else:
+            inputs.update(
+                {
+                    "prompt": prompt,
+                    "negative_prompt": negative_prompt,
+                }
+            )
         if seed is not None and str(self.device).startswith("cuda"):
             inputs["generator"] = torch.Generator(device="cuda").manual_seed(seed)
 

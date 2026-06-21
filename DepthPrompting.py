@@ -82,11 +82,18 @@ class DepthPrompting:
                         "Qwen-Image-ControlNet-Union",
                     )
                 ),
+                cpu_offload=bool(getattr(self.cfg, "qwen_cpu_offload", True)),
+                cpu_text_encoder=bool(getattr(self.cfg, "qwen_cpu_text_encoder", False)),
             )
         else:
             raise NotImplementedError(
                 f"Control model {self.cfg.control_model} not implemented."
             )
+
+    def close(self):
+        if hasattr(self, "depth2Image") and hasattr(self.depth2Image, "close"):
+            self.depth2Image.close()
+        self.depth2Image = None
 
     def getImage(self, xyz, flag, rgb=None, depth_gen=True, img_gen=True):
         print("Stage 1 : Depth Prompting.....")

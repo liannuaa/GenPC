@@ -103,7 +103,29 @@ def cleanup_intermediates(cfg, flag):
     if save_intermediates(cfg):
         return
 
-    keep = {f"{flag}_fused.ply"}
+    outputs = cfg_section(cfg, "outputs")
+    keep_files = _mapping_get(outputs, "keep_files")
+    if keep_files is None:
+        keep_files = getattr(cfg, "keep_files", None)
+    if keep_files is None:
+        keep_files = [f"{flag}_fused.ply"]
+    keep = {str(name).format(flag=flag) for name in keep_files}
+    directory = sample_dir(cfg, flag)
+    if not directory.exists():
+        return
+
+    for path in directory.iterdir():
+        if path.name in keep:
+            continue
+        if path.is_file():
+            path.unlink()
+
+
+def cleanup_stage1_intermediates(cfg, flag):
+    if save_intermediates(cfg):
+        return
+
+    keep = {"depth.png", "img.png", "point_uv.npy"}
     directory = sample_dir(cfg, flag)
     if not directory.exists():
         return

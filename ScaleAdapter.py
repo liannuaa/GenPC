@@ -86,6 +86,11 @@ class ScaleAdapter():
         )
 
     def img2shape(self, flag):
+        ply_path = sample_file(self.cfg, flag, f"{flag}_{self.cfg.generative_model}.ply")
+        glb_path = sample_file(self.cfg, flag, f"{flag}_{self.cfg.generative_model}.glb")
+        if bool(getattr(self.cfg, "skip_existing", False)) and ply_path.exists() and glb_path.exists():
+            print(f" Skip shape generation for {flag}: existing {ply_path.name} and {glb_path.name}.")
+            return
         img = Image.open(sample_file(self.cfg, flag, "img_sam.png"))
         self.generative(self.cfg, flag, img)
 

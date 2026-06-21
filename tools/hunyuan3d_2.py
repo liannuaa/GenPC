@@ -1,6 +1,7 @@
 import os
 import sys
 import time
+import gc
 from pathlib import Path
 
 import open3d as o3d
@@ -19,6 +20,20 @@ _shape_pipeline_key = None
 _background_remover = None
 _pipeline_cls = None
 _background_remover_cls = None
+
+
+def release_hunyuan3d_cache():
+    global _shape_pipeline
+    global _shape_pipeline_key
+    global _background_remover
+
+    _shape_pipeline = None
+    _shape_pipeline_key = None
+    _background_remover = None
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
 
 def _hunyuan_repo_root(cfg):

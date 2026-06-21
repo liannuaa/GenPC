@@ -471,7 +471,7 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
         # o3d.visualization.draw_geometries([source_pcd, target_pcd], window_name="ICP with Scaling Result")
         best_scales_transformation = np.eye(4)
         best_transformation_xyz = np.eye(4)
-        if cfg.dataset in ["pcn", "kitti", "waymo"]:
+        if cfg.dataset in ["pcn", "kitti", "waymo", "shapenet55"]:
             best_scales_transformation, best_loss_xyz, best_transformation_xyz = iterative_scale_search(
                 source_pcd,
                 target_pcd.voxel_down_sample(voxel_size=0.04),
