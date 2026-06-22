@@ -8,7 +8,7 @@ import kaolin as kal
 import open3d as o3d
 from torchvision.utils import save_image
 import warnings
-from utils.dataUtils import getRandomColor, resolve_prompt_label
+from utils.dataUtils import getRandomColor, resolve_prompt_label, save_ply_xyzrgb
 from utils.camera_utils import calculate_up_vector, create_cameras
 from utils.runtime import model_path, sample_dir, sample_file
 import fpsample
@@ -94,6 +94,37 @@ class DepthPrompting:
         if hasattr(self, "depth2Image") and hasattr(self.depth2Image, "close"):
             self.depth2Image.close()
         self.depth2Image = None
+
+    def save_depth_view_point_cloud(self, flag, xyz, rgb, viewpoint):
+        if not bool(getattr(self.cfg, "save_depth_view_point_cloud", True)):
+            return
+
+        view_np = np.asarray(viewpoint, dtype=np.float32)
+        z_axis = torch.from_numpy(view_np).to(device=xyz.device, dtype=xyz.dtype)
+        z_axis = z_axis / z_axis.norm().clamp_min(1e-8)
+
+        up_np = calculate_up_vector(view_np, np.array([0.0, 0.0, 0.0], dtype=np.float32))
+        y_axis = torch.from_numpy(up_np).to(device=xyz.device, dtype=xyz.dtype)
+        y_axis = y_axis / y_axis.norm().clamp_min(1e-8)
+
+        x_axis = torch.cross(y_axis, z_axis, dim=0)
+        x_axis = x_axis / x_axis.norm().clamp_min(1e-8)
+        y_axis = torch.cross(z_axis, x_axis, dim=0)
+        y_axis = y_axis / y_axis.norm().clamp_min(1e-8)
+
+        screen_points = torch.stack(
+            (
+                torch.matmul(xyz, x_axis),
+                torch.matmul(xyz, y_axis),
+                torch.matmul(xyz, z_axis),
+            ),
+            dim=-1,
+        )
+        save_ply_xyzrgb(
+            screen_points.detach().cpu().numpy(),
+            rgb.detach().cpu().numpy(),
+            str(sample_file(self.cfg, flag, "depth_view_point_cloud.ply")),
+        )
 
     def getImage(self, xyz, flag, rgb=None, depth_gen=True, img_gen=True):
         print("Stage 1 : Depth Prompting.....")
@@ -256,6 +287,7 @@ class DepthPrompting:
             )
             np.save(sample_file(self.cfg, flag, "viewpoint.npy"), self.view)
             torch.save(self.cam, sample_file(self.cfg, flag, "camera.pth"))
+            self.save_depth_view_point_cloud(flag, xyz, rgb, self.view)
 
 
     def getUvs(self, cams, points, rescale=True, padding=0.15):

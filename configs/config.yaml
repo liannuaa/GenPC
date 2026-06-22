@@ -46,6 +46,7 @@ camera_distribution: fibonacci_sphere
 cam_res: 256  # 256 rendering res
 view_num: 256 # if view_num=6, is orthogonal camera
 camera_base: 'kaolin'  # blender, kaolin
+save_depth_view_point_cloud: true
 
 # inpaint
 res: 256 # inpainting resolution
