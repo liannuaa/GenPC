@@ -1,12 +1,15 @@
 import os
 import time
 import math
+import json
 import cv2
 import numpy as np
 import torch
 import kaolin as kal
 import open3d as o3d
 from torchvision.utils import save_image
+from PIL import Image
+from PIL import ImageDraw
 import warnings
 from utils.dataUtils import getRandomColor, resolve_prompt_label, save_ply_xyzrgb
 from utils.camera_utils import calculate_up_vector, create_cameras
@@ -45,6 +48,14 @@ class DepthPrompting:
             res=self.cfg.cam_res,
             device=self.device,
         )
+        # Load image-generation models only after depth/view selection. Semantic
+        # view ranking can then temporarily use the GPU without co-residency.
+        self.depth2Image = None
+        self.semantic_selected_image = None
+
+    def _load_depth2image(self):
+        if self.depth2Image is not None or self.cfg.control_model == "depth_passthrough":
+            return
         if self.cfg.control_model == "controlnet":
             from tools.controlnet_depth import ControlNet_Depth
 
@@ -84,6 +95,26 @@ class DepthPrompting:
                 ),
                 cpu_offload=bool(getattr(self.cfg, "qwen_cpu_offload", True)),
                 cpu_text_encoder=bool(getattr(self.cfg, "qwen_cpu_text_encoder", False)),
+            )
+        elif self.cfg.control_model == "qwen_edit":
+            from tools.qwen_image_edit import QwenImageEdit
+
+            self.depth2Image = QwenImageEdit(
+                device=self.device,
+                transformer_path=str(
+                    model_path(
+                        self.cfg,
+                        "qwen_edit_transformer_path",
+                        "nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors",
+                    )
+                ),
+                pipeline_path=str(
+                    model_path(self.cfg, "qwen_edit_pipeline_path", "Qwen-Image-Edit-2511")
+                ),
+                step=int(getattr(self.cfg, "qwen_edit_steps", 40)),
+                true_cfg_scale=float(getattr(self.cfg, "qwen_edit_true_cfg_scale", 4.0)),
+                generation_size=int(getattr(self.cfg, "qwen_edit_generate_res", 1024)),
+                cpu_offload=bool(getattr(self.cfg, "qwen_cpu_offload", True)),
             )
         else:
             raise NotImplementedError(
@@ -129,7 +160,7 @@ class DepthPrompting:
     def getImage(self, xyz, flag, rgb=None, depth_gen=True, img_gen=True):
         print("Stage 1 : Depth Prompting.....")
         start = time.time()
-        if rgb is None:
+        if depth_gen and rgb is None:
             rgb = torch.tensor(getRandomColor(xyz.shape[0])).float().to(self.device)
         if depth_gen:
             self.getDepth(xyz, flag, rgb)
@@ -139,17 +170,43 @@ class DepthPrompting:
         )
         if img_gen:
             print(" Image Generation.....")
-            prompt_label = resolve_prompt_label(flag, self.cfg)
-            self.image = self.depth2Image.generate(
-                self.depth,
-                prompt_label,
-                size=self.cfg.generate_res,
-                input_size=depth_input_res,
-                mode="depth",
-            )
+            if self.cfg.control_model == "depth_passthrough":
+                self.image = self.depth_to_white_bg_image(self.depth, self.cfg.generate_res)
+            elif self.semantic_selected_image is not None:
+                # The semantic selector already generated this exact candidate at
+                # final resolution. Reuse it instead of running Qwen-Image twice.
+                self.image = self.semantic_selected_image
+            else:
+                self._load_depth2image()
+                prompt_label = resolve_prompt_label(flag, self.cfg)
+                scale_overrides = getattr(self.cfg, "qwen_controlnet_conditioning_scale_overrides", {}) or {}
+                controlnet_conditioning_scale = float(
+                    scale_overrides.get(
+                        str(flag),
+                        getattr(self.cfg, "qwen_controlnet_conditioning_scale", 1.0),
+                    )
+                )
+                self.image = self.depth2Image.generate(
+                    self.depth,
+                    prompt_label,
+                    size=self.cfg.generate_res,
+                    input_size=depth_input_res,
+                    mode="depth",
+                    controlnet_conditioning_scale=controlnet_conditioning_scale,
+                )
             self.image.save(sample_file(self.cfg, flag, "img.png"))
         end = time.time()
         print(f" Take {int(end-start)} seconds")
+
+    def depth_to_white_bg_image(self, depth, size, threshold=4):
+        depth_l = depth.convert("L")
+        if depth_l.size != (size, size):
+            depth_l = depth_l.resize((size, size))
+        depth_np = np.asarray(depth_l, dtype=np.uint8)
+        mask = depth_np > threshold
+        rgb = np.full((size, size, 3), 255, dtype=np.uint8)
+        rgb[mask] = np.repeat(depth_np[mask, None], 3, axis=1)
+        return Image.fromarray(rgb)
 
     def viewpoint_select(self, xyz):
         """选择最佳视角，包含启发式防止视角翻转逻辑"""
@@ -210,19 +267,406 @@ class DepthPrompting:
 
         return best_view_idx
 
+    def _canonical_axes(self, xyz):
+        """Estimate a stable horizontal object frame while keeping a known up axis."""
+        axis_name = str(getattr(self.cfg, "canonical_up_axis", "y")).lower()
+        axis_index = {"x": 0, "y": 1, "z": 2}.get(axis_name, 1)
+        up = np.zeros(3, dtype=np.float32)
+        up[axis_index] = 1.0
+
+        points = xyz.detach().cpu().numpy().astype(np.float64)
+        centered = points - np.median(points, axis=0, keepdims=True)
+        horizontal_indices = [idx for idx in range(3) if idx != axis_index]
+        horizontal = centered[:, horizontal_indices]
+
+        # Trim distant points before PCA so a few scan outliers cannot rotate the car.
+        radius = np.linalg.norm(horizontal, axis=1)
+        keep = radius <= np.quantile(radius, 0.98)
+        covariance = np.cov(horizontal[keep].T)
+        eigenvalues, eigenvectors = np.linalg.eigh(covariance)
+        principal_2d = eigenvectors[:, int(np.argmax(eigenvalues))]
+        length_axis = np.zeros(3, dtype=np.float32)
+        length_axis[horizontal_indices] = principal_2d.astype(np.float32)
+        length_axis /= max(np.linalg.norm(length_axis), 1e-8)
+
+        # Remove PCA's arbitrary sign to keep runs reproducible.
+        dominant = int(np.argmax(np.abs(length_axis)))
+        if length_axis[dominant] < 0:
+            length_axis = -length_axis
+        side_axis = np.cross(up, length_axis)
+        side_axis /= max(np.linalg.norm(side_axis), 1e-8)
+        return up, length_axis, side_axis
+
+    def _canonical_candidate_cameras(self, xyz):
+        up, length_axis, side_axis = self._canonical_axes(xyz)
+        elevations = getattr(self.cfg, "canonical_elevations", [12, 18, 24])
+        azimuths = getattr(
+            self.cfg,
+            "canonical_azimuths",
+            [30, 45, 60, 120, 135, 150, 210, 225, 240, 300, 315, 330],
+        )
+        distance = float(self.cfg.distance)
+        cameras = []
+        candidates = []
+        for elevation_deg in elevations:
+            elevation = math.radians(float(elevation_deg))
+            for azimuth_deg in azimuths:
+                azimuth = math.radians(float(azimuth_deg))
+                horizontal = (
+                    math.cos(azimuth) * length_axis
+                    + math.sin(azimuth) * side_axis
+                )
+                direction = (
+                    math.cos(elevation) * horizontal + math.sin(elevation) * up
+                )
+                direction /= max(np.linalg.norm(direction), 1e-8)
+                eye = direction * distance
+
+                # Project object-up onto the image plane. This removes camera roll.
+                forward = -direction
+                camera_up = up - np.dot(up, forward) * forward
+                camera_up /= max(np.linalg.norm(camera_up), 1e-8)
+                camera = kal.render.camera.Camera.from_args(
+                    eye=torch.tensor(eye, dtype=torch.float32),
+                    at=torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32),
+                    up=torch.tensor(camera_up, dtype=torch.float32),
+                    fov=math.pi * float(self.cfg.fovy) / 180.0,
+                    width=int(self.cfg.cam_res),
+                    height=int(self.cfg.cam_res),
+                    device=self.device,
+                )
+                cameras.append(camera)
+                candidates.append(
+                    {
+                        "viewpoint": eye.astype(np.float32),
+                        "elevation": float(elevation_deg),
+                        "azimuth": float(azimuth_deg),
+                    }
+                )
+        return cameras, candidates
+
+    def _score_canonical_projection(self, point_uv, visible):
+        """Score how complete, coherent and conventionally framed a projection is."""
+        score_res = int(getattr(self.cfg, "canonical_score_res", 160))
+        uv = point_uv[visible].detach().cpu().numpy()
+        if len(uv) == 0:
+            return {"score": -1e9}
+
+        pixels = np.clip((uv * score_res).astype(np.int32), 0, score_res - 1)
+        mask = np.zeros((score_res, score_res), dtype=np.uint8)
+        mask[pixels[:, 1], pixels[:, 0]] = 255
+        kernel_size = int(getattr(self.cfg, "canonical_score_point_size", 5))
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+        dense = cv2.dilate(mask, kernel, iterations=1)
+        dense = cv2.morphologyEx(dense, cv2.MORPH_CLOSE, kernel, iterations=2)
+
+        ys, xs = np.where(dense > 0)
+        if len(xs) == 0:
+            return {"score": -1e9}
+        width = int(xs.max() - xs.min() + 1)
+        height = int(ys.max() - ys.min() + 1)
+        bbox_area = max(width * height, 1)
+        silhouette_area = int((dense > 0).sum())
+
+        component_count, _, stats, _ = cv2.connectedComponentsWithStats(dense)
+        largest_component = (
+            int(stats[1:, cv2.CC_STAT_AREA].max()) if component_count > 1 else 0
+        )
+        connectedness = largest_component / max(silhouette_area, 1)
+
+        contours, _ = cv2.findContours(dense, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        hull_mask = np.zeros_like(dense)
+        for contour in contours:
+            cv2.drawContours(hull_mask, [cv2.convexHull(contour)], -1, 255, -1)
+        hull_area = max(int((hull_mask > 0).sum()), 1)
+        solidity = silhouette_area / hull_area
+
+        coarse = np.unique(pixels // 4, axis=0).shape[0]
+        max_coarse = max((score_res // 4) ** 2, 1)
+        grid_coverage = coarse / max_coarse
+        visible_ratio = float(visible.float().mean().item())
+        bbox_fill = silhouette_area / bbox_area
+        aspect = width / max(height, 1)
+        aspect_score = math.exp(-abs(math.log(max(aspect, 1e-4) / 1.65)))
+
+        weights = getattr(self.cfg, "canonical_score_weights", {}) or {}
+        score = (
+            float(weights.get("visible", 0.28)) * visible_ratio
+            + float(weights.get("grid", 0.18)) * grid_coverage
+            + float(weights.get("connected", 0.18)) * connectedness
+            + float(weights.get("solidity", 0.16)) * solidity
+            + float(weights.get("fill", 0.08)) * bbox_fill
+            + float(weights.get("aspect", 0.12)) * aspect_score
+        )
+        return {
+            "score": float(score),
+            "visible_ratio": visible_ratio,
+            "grid_coverage": float(grid_coverage),
+            "connectedness": float(connectedness),
+            "solidity": float(solidity),
+            "bbox_fill": float(bbox_fill),
+            "aspect": float(aspect),
+            "aspect_score": float(aspect_score),
+        }
+
+    def _candidate_depth_image(self, point_uv, point_depth, visible, size=224):
+        selected_uv = point_uv[visible]
+        selected_depth = point_depth[visible]
+        if selected_uv.shape[0] == 0:
+            return Image.new("RGB", (size, size), "black")
+        point_pixels = (selected_uv * int(self.cfg.res)).long()
+        point_pixels = torch.stack(
+            (point_pixels[:, 1], point_pixels[:, 0]), dim=-1
+        ).clip(0, int(self.cfg.res) - 1)
+        colors = torch.ones(
+            (point_pixels.shape[0], 3), device=point_pixels.device
+        )
+        _, raw_depth, hole_mask, _ = self.getRawDepth(
+            point_pixels,
+            selected_depth,
+            colors=colors,
+            dataset=self.cfg.dataset,
+            res=int(self.cfg.res),
+            point_size=int(self.cfg.point_size),
+            mask_pixel_rate=int(self.cfg.mask_pixel_rate),
+        )
+        depth_np = (
+            raw_depth.permute(1, 2, 0).detach().cpu().numpy() * 255
+        ).astype(np.uint8)
+        mask_np = (
+            hole_mask[0].detach().cpu().numpy() * 255
+        ).astype(np.uint8)
+        inpainted = cv2.inpaint(depth_np, mask_np, 2, cv2.INPAINT_NS)
+        image = Image.fromarray(inpainted).convert("RGB")
+        if image.size != (size, size):
+            image = image.resize((size, size), Image.Resampling.LANCZOS)
+        return image
+
+    def _semantic_rerank_candidates(
+        self, flag, candidates, point_uvs, point_depths, visibility
+    ):
+        sample_dir(self.cfg, flag).mkdir(parents=True, exist_ok=True)
+        top_k = min(int(getattr(self.cfg, "semantic_view_top_k", 6)), len(candidates))
+        geometry_order = sorted(
+            range(len(candidates)),
+            key=lambda index: candidates[index]["score"],
+            reverse=True,
+        )
+        # Repeated elevations of one azimuth provide little semantic diversity.
+        # Keep only the best geometry candidate per azimuth before VLM ranking.
+        ranked_indices = []
+        used_azimuths = set()
+        for index in geometry_order:
+            azimuth = float(candidates[index]["azimuth"])
+            if azimuth in used_azimuths:
+                continue
+            ranked_indices.append(index)
+            used_azimuths.add(azimuth)
+            if len(ranked_indices) == top_k:
+                break
+
+        use_generated = bool(
+            getattr(self.cfg, "semantic_view_use_generated_previews", True)
+        )
+        generated_images = {}
+        category = resolve_prompt_label(flag, self.cfg)
+        if use_generated:
+            if self.cfg.control_model not in {"qwen", "qwen_edit"}:
+                raise ValueError(
+                    "semantic generated-preview ranking requires qwen or qwen_edit"
+                )
+            self._load_depth2image()
+            preview_size = int(
+                getattr(self.cfg, "semantic_view_preview_size", self.cfg.generate_res)
+            )
+            input_size = int(getattr(self.cfg, "qwen_depth_input_res", 512))
+            scale = float(
+                getattr(self.cfg, "qwen_controlnet_conditioning_scale", 1.0)
+            )
+            seed = int(getattr(self.cfg, "semantic_view_preview_seed", 12345))
+            print(
+                f" Generating {len(ranked_indices)} Qwen view previews "
+                f"(ControlNet scale={scale:.2f})..."
+            )
+            for display_id, candidate_index in enumerate(ranked_indices):
+                depth_image = self._candidate_depth_image(
+                    point_uvs[candidate_index],
+                    point_depths[candidate_index],
+                    visibility[candidate_index],
+                    size=input_size,
+                )
+                depth_image.save(
+                    sample_file(
+                        self.cfg, flag, f"view_candidate_{display_id}_depth.png"
+                    )
+                )
+                generated = self.depth2Image.generate(
+                    depth_image,
+                    category,
+                    size=preview_size,
+                    input_size=input_size,
+                    mode="depth",
+                    controlnet_conditioning_scale=scale,
+                    seed=seed,
+                )
+                generated.save(
+                    sample_file(self.cfg, flag, f"view_candidate_{display_id}.png")
+                )
+                generated_images[display_id] = generated.copy()
+            # Qwen3-VL needs the GPU next. The selected preview is retained as PIL.
+            self.close()
+
+        tile_size = int(getattr(self.cfg, "semantic_view_tile_size", 224))
+        columns = 4
+        rows = math.ceil(top_k / columns)
+        label_height = 28
+        sheet = Image.new("RGB", (columns * tile_size, rows * (tile_size + label_height)), "white")
+        draw = ImageDraw.Draw(sheet)
+        metadata = []
+        for display_id, candidate_index in enumerate(ranked_indices):
+            if use_generated:
+                tile = generated_images[display_id].resize((tile_size, tile_size))
+            else:
+                tile = self._candidate_depth_image(
+                    point_uvs[candidate_index],
+                    point_depths[candidate_index],
+                    visibility[candidate_index],
+                    size=tile_size,
+                )
+            x = (display_id % columns) * tile_size
+            y = (display_id // columns) * (tile_size + label_height)
+            sheet.paste(tile, (x, y + label_height))
+            draw.rectangle((x, y, x + tile_size, y + label_height), fill="white")
+            draw.text((x + 8, y + 5), f"ID {display_id}", fill="black")
+            metadata.append(
+                {
+                    "id": display_id,
+                    "candidate_index": candidate_index,
+                    "azimuth": candidates[candidate_index]["azimuth"],
+                    "elevation": candidates[candidate_index]["elevation"],
+                }
+            )
+        sheet_path = sample_file(self.cfg, flag, "view_candidates.png")
+        sheet.save(sheet_path)
+
+        from tools.qwen3_vl_view_selector import select_canonical_view
+
+        selector_path = getattr(
+            self.cfg,
+            "semantic_view_model_path",
+            "/opt/data/private/cr/resources/Qwen3-VL-8B-Instruct",
+        )
+        selected_id, response = select_canonical_view(
+            sheet,
+            metadata,
+            selector_path,
+            category,
+            candidate_kind="generated reconstructions" if use_generated else "depth maps",
+        )
+        response_path = sample_file(self.cfg, flag, "view_semantic_selection.txt")
+        with open(response_path, "w") as handle:
+            handle.write(response)
+        if use_generated:
+            self.semantic_selected_image = generated_images[selected_id]
+        return metadata[selected_id]["candidate_index"], response
+
+    def canonical_viewpoint_select(self, xyz, flag):
+        cameras, candidates = self._canonical_candidate_cameras(xyz)
+        print(f" Scoring {len(cameras)} upright canonical viewpoints...")
+        point_uvs, point_depths, _ = self.getUvs(
+            cameras, xyz, rescale=self.cfg.rescale, padding=self.cfg.padding
+        )
+        viewpoints = [candidate["viewpoint"] for candidate in candidates]
+        if str(getattr(self.cfg, "canonical_visibility", "hpr")).lower() == "all":
+            visibility = torch.ones(
+                (len(viewpoints), xyz.shape[0]),
+                dtype=torch.bool,
+                device=xyz.device,
+            )
+        else:
+            visibility = self.getVisiblePoints(
+                xyz, viewpoints, self.cfg.removal_radius
+            )
+
+        for index, candidate in enumerate(candidates):
+            candidate.update(
+                self._score_canonical_projection(point_uvs[index], visibility[index])
+            )
+        geometry_best_index = max(
+            range(len(candidates)), key=lambda idx: candidates[idx]["score"]
+        )
+        best_index = geometry_best_index
+        if bool(getattr(self.cfg, "semantic_view_selector", False)):
+            try:
+                best_index, semantic_response = self._semantic_rerank_candidates(
+                    flag, candidates, point_uvs, point_depths, visibility
+                )
+                print(f" Qwen3-VL semantic view selection: {semantic_response.strip()}")
+            except Exception as error:
+                print(
+                    " Qwen3-VL view selection failed; using geometry fallback: "
+                    f"{error}"
+                )
+        selected = candidates[best_index]
+        print(
+            " Selected canonical view: "
+            f"azimuth={selected['azimuth']:.0f}, "
+            f"elevation={selected['elevation']:.0f}, score={selected['score']:.4f}"
+        )
+
+        output = []
+        for candidate in sorted(candidates, key=lambda item: item["score"], reverse=True):
+            serialized = dict(candidate)
+            serialized["viewpoint"] = candidate["viewpoint"].tolist()
+            output.append(serialized)
+        sample_dir(self.cfg, flag).mkdir(parents=True, exist_ok=True)
+        with open(sample_file(self.cfg, flag, "view_scores.json"), "w") as handle:
+            json.dump(output, handle, indent=2)
+        return (
+            cameras[best_index],
+            selected["viewpoint"],
+            point_uvs[best_index],
+            point_depths[best_index],
+            visibility[best_index],
+        )
+
     def getDepth(self, xyz, flag, rgb):
         with torch.no_grad():
-            best_view_idx = self.viewpoint_select(xyz)
+            projection = getattr(self.cfg, "depth_projection", "view_select")
+            if projection == "xz_from_pos_y":
+                selected_point_uvs, selected_point_depths, visible_point_idx = (
+                    self.project_xz_from_pos_y(xyz)
+                )
+                self.view = np.array([0.0, float(self.cfg.distance), 0.0], dtype=np.float32)
+                self.cam = self.create_pos_y_camera()
+            elif projection == "reference_view":
+                (
+                    self.cam,
+                    self.view,
+                    selected_point_uvs,
+                    selected_point_depths,
+                    visible_point_idx,
+                ) = self.project_reference_view(xyz)
+            elif projection == "canonical_view":
+                (
+                    self.cam,
+                    self.view,
+                    selected_point_uvs,
+                    selected_point_depths,
+                    visible_point_idx,
+                ) = self.canonical_viewpoint_select(xyz, flag)
+            else:
+                best_view_idx = self.viewpoint_select(xyz)
 
-            self.view = self.viewpoints[best_view_idx]
-            self.cam = self.cameras[best_view_idx]
+                self.view = self.viewpoints[best_view_idx]
+                self.cam = self.cameras[best_view_idx]
 
-            # 渲染选中的视角
-            point_uvs, point_depths, _ = self.getUvs([self.cam], xyz, rescale=self.cfg.rescale, padding=self.cfg.padding)
-            selected_point_uvs = point_uvs[0]
-            selected_point_depths = point_depths[0]
+                # 渲染选中的视角
+                point_uvs, point_depths, _ = self.getUvs([self.cam], xyz, rescale=self.cfg.rescale, padding=self.cfg.padding)
+                selected_point_uvs = point_uvs[0]
+                selected_point_depths = point_depths[0]
 
-            visible_point_idx = self.getVisiblePoints(xyz, [self.view], self.cfg.removal_radius)[0]
+                visible_point_idx = self.getVisiblePoints(xyz, [self.view], self.cfg.removal_radius)[0]
 
             # 渲染选中的视角
             point_pixels = (selected_point_uvs * self.cfg.res).long()
@@ -289,6 +733,69 @@ class DepthPrompting:
             torch.save(self.cam, sample_file(self.cfg, flag, "camera.pth"))
             self.save_depth_view_point_cloud(flag, xyz, rgb, self.view)
 
+
+    def create_pos_y_camera(self):
+        return kal.render.camera.Camera.from_args(
+            eye=torch.tensor([0.0, float(self.cfg.distance), 0.0]).float(),
+            at=torch.tensor([0.0, 0.0, 0.0]).float(),
+            up=torch.tensor([0.0, 0.0, 1.0]).float(),
+            fov=math.pi * self.cfg.fovy / 180,
+            width=self.cfg.cam_res,
+            height=self.cfg.cam_res,
+            device=self.device,
+        )
+
+    def project_reference_view(self, points):
+        eye_direction = np.asarray(
+            getattr(
+                self.cfg,
+                "reference_eye_direction",
+                [-0.14270581, -0.75454755, -0.64054122],
+            ),
+            dtype=np.float32,
+        )
+        eye_direction /= max(np.linalg.norm(eye_direction), 1e-8)
+        camera_up = np.asarray(
+            getattr(
+                self.cfg,
+                "reference_camera_up",
+                [0.39445910, -0.63690607, 0.66238408],
+            ),
+            dtype=np.float32,
+        )
+        camera_up -= np.dot(camera_up, eye_direction) * eye_direction
+        camera_up /= max(np.linalg.norm(camera_up), 1e-8)
+        viewpoint = eye_direction * float(self.cfg.distance)
+        camera = kal.render.camera.Camera.from_args(
+            eye=torch.tensor(viewpoint, dtype=torch.float32),
+            at=torch.tensor([0.0, 0.0, 0.0], dtype=torch.float32),
+            up=torch.tensor(camera_up, dtype=torch.float32),
+            fov=math.pi * float(self.cfg.fovy) / 180.0,
+            width=int(self.cfg.cam_res),
+            height=int(self.cfg.cam_res),
+            device=self.device,
+        )
+        point_uvs, point_depths, _ = self.getUvs(
+            [camera], points, rescale=self.cfg.rescale, padding=self.cfg.padding
+        )
+        visible = torch.ones(points.shape[0], dtype=torch.bool, device=points.device)
+        return camera, viewpoint, point_uvs[0], point_depths[0], visible
+
+    def project_xz_from_pos_y(self, points):
+        padding = float(self.cfg.padding)
+        xz = points[:, [0, 2]]
+        xz_min = xz.min(dim=0).values
+        xz_max = xz.max(dim=0).values
+        xz_center = (xz_min + xz_max) * 0.5
+        xz_scale = (xz_max - xz_min).max().clamp_min(1e-8)
+        point_uvs = (xz - xz_center) / xz_scale
+        point_uvs = point_uvs * (1 - 2 * padding) + 0.5
+        point_depths = -points[:, 1]
+        viewpoint = np.array([0.0, float(self.cfg.distance), 0.0], dtype=np.float32)
+        visible_point_idx = self.getVisiblePoints(
+            points, [viewpoint], self.cfg.removal_radius
+        )[0]
+        return point_uvs, point_depths, visible_point_idx
 
     def getUvs(self, cams, points, rescale=True, padding=0.15):
         transformed_points = torch.zeros(

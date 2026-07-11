@@ -21,6 +21,40 @@
 - Current Qwen ControlNet/Nunchaku test pins are `diffusers==0.36.0` and
   `transformers==4.57.6`.
 
+## Experiment State Recording
+- Maintain `PLAN.md` as the active refactor/task plan. Before making pipeline,
+  registration, Qwen, MoGe, Hunyuan, FreeReg, or cleanup changes, read `PLAN.md`
+  and check which stage the work belongs to.
+- After completing or changing a planned stage, update `PLAN.md` with status,
+  output paths, and any new risks or decisions.
+- Do not mark a planned stage complete unless the relevant outputs exist and
+  have been verified.
+- Maintain `PROJECT_STATE.md` as the canonical record for good outputs,
+  accepted experiments, and fragile parameter choices.
+- When the user says an output is good, correct, should be kept, or uses similar
+  language such as "效果很好", "这个是对的", "保留这个", immediately append or
+  update an entry in `PROJECT_STATE.md` before continuing with more experiments.
+- Each accepted-result entry must include:
+  - timestamp and sample id;
+  - exact output file path(s);
+  - input file path(s);
+  - model name/path and checkpoint/transformer path;
+  - full prompt and negative prompt, copied verbatim;
+  - generation parameters such as resolution, resize policy, seed, steps,
+    `true_cfg_scale`, guidance scale, and any scheduler/backend choices;
+  - postprocessing steps such as RMBG, resize, masks, MoGe, Hunyuan, FreeReg,
+    ICP, or coordinate flips;
+  - what the user approved and what should not be changed without asking.
+- If any of those fields are unknown because they were not recorded at the time,
+  write `UNKNOWN` explicitly and mark the result as not exactly reproducible.
+  Do not later present guesses as facts.
+- Before changing prompts, model paths, generation resolution, seeds, or
+  registration parameters, check `PROJECT_STATE.md` for accepted baselines and
+  preserve or copy them instead of overwriting.
+- For one-off experiments, save the prompt next to the output using a descriptive
+  `*_prompt.txt` file. For scripted/main-flow experiments, keep prompt builders
+  in code and add tests for prompt text when feasible.
+
 ## Model Download Notes
 - Nunchaku Qwen transformer weights should come from ModelScope repo
   `nunchaku-tech/nunchaku-qwen-image`, not Hugging Face.
@@ -33,7 +67,7 @@
   shards (`transformer/*.safetensors`) when downloading `Qwen/Qwen-Image`.
 - Qwen ControlNet Union files must exist at `models/Qwen-Image-ControlNet-Union`.
 - Stage 1 uses a random seed by default. The prompt format is
-  `a {flag} on a pure white background`, with ControlNet conditioning scale
+  `a {flag}`, with ControlNet conditioning scale
   currently set in `tools/qwen_depth.py`.
 - The default Hunyuan3D path is shape-only and uses `Hunyuan3D-2.1`.
   Download `AI-ModelScope/Hunyuan3D-2.1` into `models/Hunyuan3D-2.1`,
