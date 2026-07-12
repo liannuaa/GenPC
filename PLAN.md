@@ -234,10 +234,25 @@ Redwood `01184` original F-FreeReg experiment:
   `01184_freereg_original_depthpro_objectmask_complete_registered_to_object_depthpro.ply`,
   `01184_freereg_original_depthpro_objectmask_gray_object_depthpro_blue_complete_fused.ply`,
   and `01184_freereg_original_depthpro_objectmask_info.json`.
+- `01184` fixed-uv/Sim3 FreeReg probe:
+  `scripts/run_freereg_original_depthpro.py` was updated to project YOHO image
+  keypoints to uv directly and to apply FreeReg's estimated scale as a Sim3
+  transform. This reduced the complete-vs-DepthPro bbox-center z offset from
+  about `0.426` to `0.018` and reduced complete-to-DepthPro nearest-neighbor
+  mean distance from about `0.393` to `0.176`.
+- Fixed-uv/Sim3 outputs:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_fixeduv_sim3_gray_object_depthpro_blue_complete_fused.ply`
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_fixeduv_sim3_complete_registered_to_object_depthpro.ply`
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_fixeduv_sim3_info.json`
+- A bbox-center translation-only probe was also generated:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_fixeduv_sim3_bboxshift_gray_object_depthpro_blue_complete_fused.ply`
+  It aligns the bounding-box centers but does not materially improve
+  nearest-neighbor distance, so it should remain a visualization/debug probe
+  rather than a final registration step.
 
 ## Stage 4 - Complete Back to Partial
 
-Status: design target, not fully integrated.
+Status: implemented experimentally for Redwood `01184`, not fully integrated.
 
 Flow:
 1. Use Stage 1 index bridge:
@@ -258,6 +273,20 @@ Open work:
 - Implement composition cleanly inside the main pipeline.
 - Define saved output names and cleanup behavior.
 - Add tests for transform direction and coordinate-frame composition.
+
+Redwood `01184` composed output:
+- Complete aligned to raw partial:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_complete_to_partial_depthpro_moge_complete_aligned_to_raw_partial.ply`
+- Fused visualization:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_complete_to_partial_depthpro_moge_raw_partial_gray_complete_blue_aligned.ply`
+- Transform:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_complete_to_partial_depthpro_moge_complete_to_raw_partial_transform.npy`
+- Metadata:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_complete_to_partial_depthpro_moge_info.json`
+- Metric against `data/GT/01184.ply`, sampled with `metric_num_points=16384`
+  and `metric_seed=1184`: `CD-L1 x1e2 = 1.745359`, `EMD x1e2 =
+  2.428691`.
+- Metric reporting now uses `x1e2` columns and printed labels in `main.py`.
 
 ## Current Risks
 

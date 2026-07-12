@@ -197,7 +197,7 @@ def metric(flag, cfg):
         label = getCategory(flag)
     except KeyError:
         label = flag
-    print(f"Flag: {label}, CD-L1 x1e3: {cd.item() * 1000:.3f}, EMD x1e3: {emd.item() * 1000:.3f}")
+    print(f"Flag: {label}, CD-L1 x1e2: {cd.item() * 100:.3f}, EMD x1e2: {emd.item() * 100:.3f}")
     return cd.item(), emd.item()
 
 
@@ -215,8 +215,8 @@ def write_metric_results(cfg, results, verbose=False):
                 "category",
                 "cd_l1",
                 "emd",
-                "cd_l1_x1e3",
-                "emd_x1e3",
+                "cd_l1_x1e2",
+                "emd_x1e2",
             ],
         )
         writer.writeheader()
@@ -227,8 +227,8 @@ def write_metric_results(cfg, results, verbose=False):
                     "category": result["flag"],
                     "cd_l1": result["cd"],
                     "emd": result["emd"],
-                    "cd_l1_x1e3": result["cd"] * 1000,
-                    "emd_x1e3": result["emd"] * 1000,
+                    "cd_l1_x1e2": result["cd"] * 100,
+                    "emd_x1e2": result["emd"] * 100,
                 }
             )
 
@@ -244,8 +244,8 @@ def write_metric_results(cfg, results, verbose=False):
                 "count",
                 "cd_l1",
                 "emd",
-                "cd_l1_x1e3",
-                "emd_x1e3",
+                "cd_l1_x1e2",
+                "emd_x1e2",
             ],
         )
         writer.writeheader()
@@ -259,14 +259,14 @@ def write_metric_results(cfg, results, verbose=False):
                     "count": len(category_items),
                     "cd_l1": category_cd,
                     "emd": category_emd,
-                    "cd_l1_x1e3": category_cd * 1000,
-                    "emd_x1e3": category_emd * 1000,
+                    "cd_l1_x1e2": category_cd * 100,
+                    "emd_x1e2": category_emd * 100,
                 }
             )
             if verbose:
                 print(
                     f"Category: {category}, Count: {len(category_items)}, "
-                    f"CD-L1 x1e3: {category_cd * 1000:.6f}, EMD x1e3: {category_emd * 1000:.6f}"
+                    f"CD-L1 x1e2: {category_cd * 100:.6f}, EMD x1e2: {category_emd * 100:.6f}"
                 )
     return sample_metrics_path, category_metrics_path
 
@@ -450,12 +450,12 @@ def main(cfg):
     if results:
         print("\n=== 结果总结 ===")
         for result in results:
-            print(f"Category: {result['flag']}, CD-L1 x1e3: {result['cd'] * 1000:.6f}, EMD x1e3: {result['emd'] * 1000:.6f}")
+            print(f"Category: {result['flag']}, CD-L1 x1e2: {result['cd'] * 100:.6f}, EMD x1e2: {result['emd'] * 100:.6f}")
 
         avg_cd = sum(r['cd'] for r in results) / len(results)
         avg_emd = sum(r['emd'] for r in results) / len(results)
-        print(f"平均 CD-L1 x1e3: {avg_cd * 1000:.6f}")
-        print(f"平均 EMD x1e3: {avg_emd * 1000:.6f}")
+        print(f"平均 CD-L1 x1e2: {avg_cd * 100:.6f}")
+        print(f"平均 EMD x1e2: {avg_emd * 100:.6f}")
 
         print("\n=== 按类别结果 ===")
         sample_metrics_path, category_metrics_path = write_metric_results(

@@ -229,3 +229,87 @@ Important caveat:
     `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_single_stage_16steps_512.png`
   - Prompt/parameters:
     `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_single_stage_16steps_prompt.txt`
+
+### 2026-07-12 23:58 CST - 01184 Fixed-UV Sim3 FreeReg Registration
+
+Status: accepted by user as very good complete-to-monocular-depth registration.
+
+Sample:
+- `01184`
+
+Primary accepted output:
+- Fused visualization:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_fixeduv_sim3_gray_object_depthpro_blue_complete_fused.ply`
+
+Input files:
+- Completed/refined semantic image:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/img.png`
+- Hunyuan complete point cloud:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_hunyuan2.1.ply`
+- RMBG object mask:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_moge_to_raw_partial_object_mask.png`
+
+Model/checkpoint paths:
+- FreeReg root: `/opt/data/private/cr/lab/FreeReg`
+- FreeReg DepthPro checkpoint:
+  `/opt/data/private/cr/lab/FreeReg/tools/DepthPro/checkpoints/depth_pro.pt`
+- FreeReg YOHO FCGF checkpoint:
+  `/opt/data/private/cr/lab/FreeReg/tools/YOHO/model/Backbone/best_val_checkpoint.pth`
+- FreeReg YOHO checkpoint:
+  `/opt/data/private/cr/lab/FreeReg/tools/YOHO/model/PartI_train/model_best.pth`
+- Image generation pipeline: `models/Qwen-Image-Edit-2511`
+- Qwen edit Nunchaku transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+- Hunyuan3D model: `models/Hunyuan3D-2.1`
+- RMBG model: `models/RMBG-2.0`
+
+Qwen prompts and generation parameters for `img.png`:
+- Final recorded prompt:
+  `根据这张rubbish bin图生成更贴近真实rubbish bin的照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景为真实场景。`
+- Negative prompt: `' '`
+- `true_cfg_scale`: `4.0`
+- `num_inference_steps`: `16`
+- `refine_stage`: `True`
+- `refine_steps`: `16`
+- Stage-1 prompt: `UNKNOWN` in saved prompt file; current code constructs it in
+  `tools/qwen_image_edit.py::build_completion_prompt`.
+- Generation resolution policy: Qwen pipeline output is 1024x1024 then final
+  image is resized to 512x512.
+- Seed: `UNKNOWN` / random unless explicitly set elsewhere.
+
+FreeReg parameters:
+- Script: `scripts/run_freereg_original_depthpro.py`
+- Output prefix: `01184_freereg_original_depthpro_fixeduv_sim3`
+- `nkpts`: `5000`
+- `w_2d`: `0.5`
+- object mask threshold: `128`
+- extra erode pixels: `0`
+- max DepthPro points: `50000`
+- random seed: `1184`
+- object DepthPro points: `49578`
+- complete points: `100000`
+- image keypoints: `5000`
+- complete keypoints: `5000`
+- YOHO matches: `396`
+- FreeReg scale: `1.122206687927246`
+- Intrinsic:
+  `[[517.53125, 0.0, 255.5], [0.0, 517.53125, 255.5], [0.0, 0.0, 1.0]]`
+
+Critical implementation details:
+- Use RMBG object mask before DepthPro point-cloud construction so ground and
+  background points are not included as FreeReg targets.
+- Use YOHO image keypoint uv coordinates directly for FreeReg 2D scoring.
+  Do not index dense DepthPro point uv with YOHO keypoint indices.
+- Apply FreeReg's estimated scale as a Sim3 transform. The older objectmask
+  result did not record/apply this scale in the final saved transform.
+
+Measured improvement versus older objectmask output:
+- Bbox-center z offset decreased from about `0.426` to about `0.018`.
+- Complete-to-DepthPro nearest-neighbor mean decreased from about `0.393` to
+  about `0.176`.
+
+Do not change without asking:
+- Do not overwrite the accepted fused visualization path listed above.
+- Do not remove fixed-uv or Sim3 handling from `scripts/run_freereg_original_depthpro.py`.
+- Do not switch this accepted baseline back to unmasked DepthPro or rigid-only
+  FreeReg output.

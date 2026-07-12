@@ -61,10 +61,49 @@ def write_colored_pcd(path, points, color):
     return pcd
 
 
+def sim3_matrix(scale, transform):
+    matrix = np.asarray(transform, dtype=np.float64).copy()
+    scale_matrix = np.eye(4, dtype=np.float64)
+    scale_matrix[:3, :3] *= float(scale)
+    return matrix @ scale_matrix
+
+
+def apply_matrix(points, transform):
+    points = np.asarray(points, dtype=np.float64)
+    hom = np.c_[points, np.ones(len(points), dtype=np.float64)]
+    return (np.asarray(transform, dtype=np.float64) @ hom.T).T[:, :3]
+
+
+def estimate_freereg_sim3(pipe, image_kpt_uvs, image_kpts, complete_kpts, matches):
+    solver = pipe.solver
+    solver.ird_3d = pipe.vs * 5 if pipe.ir_3d is None else pipe.ir_3d
+    solver.ird_2d = max(10, (pipe.H + pipe.W) / 200.0) if pipe.ir_2d is None else pipe.ir_2d
+
+    matched_image_uvs = image_kpt_uvs[matches[:, 0]]
+    matched_image_kpts = image_kpts[matches[:, 0]]
+    matched_complete_kpts = complete_kpts[matches[:, 1]]
+    scales, hypotheses = solver.gen_hypos(
+        matched_image_kpts,
+        matched_complete_kpts,
+        solver.iters,
+        solver.ird_3d,
+        np_per_hypo=solver.np_per_hypo,
+    )
+    scale, image_to_complete_rigid = solver.ransac(
+        matched_image_uvs,
+        matched_image_kpts,
+        matched_complete_kpts,
+        scales,
+        hypotheses,
+        thres2d=solver.ird_2d,
+        thres3d=solver.ird_3d,
+    )
+    return float(scale), image_to_complete_rigid, sim3_matrix(scale, image_to_complete_rigid)
+
+
 def run(args):
     freereg_root = add_freereg_to_path(args.freereg_root)
     from demo import Pipe
-    from Utils.utils import transform_points
 
     sample_dir = Path(args.sample_dir)
     image_path = sample_dir / args.image_name
@@ -102,16 +141,23 @@ def run(args):
     )
 
     image_kpts, image_feats = pipe._extract_yoho(image_pc, pipe.nkpts)
-    image_uvs, _ = pipe.projector.proj_3to2(image_pc, intrinsic, np.eye(4))
+    image_kpt_uvs, _ = pipe.projector.proj_3to2(image_kpts, intrinsic, np.eye(4))
     complete_kpts, complete_feats = pipe._extract_yoho(complete_for_reg, pipe.nkpts)
     matches = pipe._match(image_feats, complete_feats).astype(np.int16)
     print(f"[FreeReg masked] matches={len(matches)}")
     if len(matches) < 4:
         raise RuntimeError("Not enough FreeReg descriptor matches.")
 
-    image_to_complete = pipe._pose(image_uvs, image_kpts, complete_kpts, matches, intrinsic)
+    pipe.solver.set_intrinsic(intrinsic)
+    freereg_scale, image_to_complete_rigid, image_to_complete = estimate_freereg_sim3(
+        pipe,
+        image_kpt_uvs,
+        image_kpts,
+        complete_kpts,
+        matches,
+    )
     complete_to_image = np.linalg.inv(image_to_complete)
-    registered_complete_points = transform_points(complete_for_reg, complete_to_image)
+    registered_complete_points = apply_matrix(complete_for_reg, complete_to_image)
 
     image_points_path = Path(str(out_prefix) + "_object_depthpro_points.ply")
     registered_path = Path(str(out_prefix) + "_complete_registered_to_object_depthpro.ply")
@@ -139,7 +185,10 @@ def run(args):
         "image_keypoints": int(len(image_kpts)),
         "complete_keypoints": int(len(complete_kpts)),
         "matches": int(len(matches)),
+        "fixed_uv": True,
+        "freereg_scale": float(freereg_scale),
         "intrinsic": intrinsic.tolist(),
+        "image_to_complete_rigid": image_to_complete_rigid.tolist(),
         "image_to_complete": image_to_complete.tolist(),
         "complete_to_image": complete_to_image.tolist(),
         "outputs": {
