@@ -31,6 +31,10 @@
 - Maintain `PLAN.md` as the active refactor/task plan. Before making pipeline,
   registration, Qwen, MoGe, Hunyuan, FreeReg, or cleanup changes, read `PLAN.md`
   and check which stage the work belongs to.
+- Treat `docs/core_registration_pipeline.md` as the canonical description of
+  the project's core registration method. Before changing partial-to-image,
+  MoGe, Hunyuan, FreeReg, DepthPro, or complete-to-partial composition logic,
+  read that document and update it if the method changes.
 - After completing or changing a planned stage, update `PLAN.md` with status,
   output paths, and any new risks or decisions.
 - Do not mark a planned stage complete unless the relevant outputs exist and

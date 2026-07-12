@@ -161,7 +161,8 @@ Redwood `01184` experiment:
 
 ## Stage 3 - MoGe to Complete Registration
 
-Status: experimental and currently unstable with original F-FreeReg.
+Status: implemented experimentally with fixed-uv/Sim3 F-FreeReg; still unstable
+for some generated samples.
 
 Intended FreeReg input:
 - Image: the same completed image used by MoGe, with background.
@@ -249,10 +250,15 @@ Redwood `01184` original F-FreeReg experiment:
   It aligns the bounding-box centers but does not materially improve
   nearest-neighbor distance, so it should remain a visualization/debug probe
   rather than a final registration step.
+- FreeReg source used by `scripts/run_freereg_original_depthpro.py` is now
+  vendored under `third_party/FreeReg`. The vendored code contains source only;
+  checkpoints are intentionally excluded and can be provided through
+  `FREEREG_DEPTHPRO_CKPT`, `FREEREG_FCGF_CKPT`, and `FREEREG_YOHO_CKPT`.
 
 ## Stage 4 - Complete Back to Partial
 
-Status: implemented experimentally for Redwood `01184`, not fully integrated.
+Status: implemented experimentally for the default Redwood batch, not fully
+integrated into `main.py`.
 
 Flow:
 1. Use Stage 1 index bridge:
@@ -287,6 +293,23 @@ Redwood `01184` composed output:
   and `metric_seed=1184`: `CD-L1 x1e2 = 1.745359`, `EMD x1e2 =
   2.428691`.
 - Metric reporting now uses `x1e2` columns and printed labels in `main.py`.
+
+Redwood batch run on 2026-07-13:
+- Samples:
+  `01184`, `05117`, `05452`, `06127`, `06145`, `06188`, `06830`, `07136`,
+  `07306`, `09639`.
+- Registration summary:
+  `workspace/redwood_stage1_qwen_refine_preview/redwood_complete_to_partial_registration_summary.csv`
+- Metric summary:
+  `workspace/redwood_stage1_qwen_refine_preview/redwood_complete_to_partial_metrics.csv`
+- Normal-scale outputs:
+  `01184`, `05117`, `05452`, `07306`, `09639`.
+- Suspicious or failed outputs:
+  `06127` has low DepthPro-to-MoGe inlier ratio and higher metric;
+  `06145`, `06188`, `06830`, and `07136` have large complete-to-partial
+  translations caused by unstable FreeReg results.
+- Core method documentation:
+  `docs/core_registration_pipeline.md`.
 
 ## Current Risks
 

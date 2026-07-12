@@ -173,6 +173,25 @@ CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python mai
   --config configs/config.yaml
 ```
 
+### Core Registration Method
+
+The current reconstruction-registration path is documented in
+`docs/core_registration_pipeline.md`. In short, GenPC now uses the saved
+partial-depth camera to build a partial-to-MoGe pixel bridge, uses fixed-uv
+Sim3 F-FreeReg to align the Hunyuan complete point cloud to the image/DepthPro
+frame, estimates a same-pixel DepthPro-to-MoGe Sim3 bridge, then composes:
+
+```text
+complete_to_partial =
+    moge_to_partial
+    @ depthpro_to_moge
+    @ complete_to_depthpro
+```
+
+The FreeReg source used by this path is vendored under `third_party/FreeReg`;
+large checkpoints are not committed and can be configured with
+`FREEREG_DEPTHPRO_CKPT`, `FREEREG_FCGF_CKPT`, and `FREEREG_YOHO_CKPT`.
+
 Useful CLI overrides:
 
 ```bash

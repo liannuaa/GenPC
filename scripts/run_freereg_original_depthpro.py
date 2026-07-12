@@ -10,13 +10,19 @@ from PIL import Image
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_FREEREG_ROOT = PROJECT_ROOT.parent / "FreeReg"
+DEFAULT_FREEREG_ROOT = PROJECT_ROOT / "third_party" / "FreeReg"
+LEGACY_FREEREG_ROOT = PROJECT_ROOT.parent / "FreeReg"
 
 
 def add_freereg_to_path(freereg_root):
     freereg_root = Path(freereg_root).resolve()
-    if str(freereg_root) not in sys.path:
-        sys.path.insert(0, str(freereg_root))
+    if not freereg_root.exists() and LEGACY_FREEREG_ROOT.exists():
+        freereg_root = LEGACY_FREEREG_ROOT.resolve()
+
+    depthpro_src = freereg_root / "tools" / "DepthPro" / "src"
+    for path in (str(depthpro_src), str(freereg_root)):
+        if path not in sys.path:
+            sys.path.insert(0, path)
     return freereg_root
 
 
