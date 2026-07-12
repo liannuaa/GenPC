@@ -16,7 +16,7 @@ GenPC completes real-world partial scans without task-specific training by lever
 - PyTorch >= 2
 
 > Note
-> The current default pipeline uses `Qwen-Image` with `Qwen-Image-ControlNet-Union` and a Nunchaku 4-step transformer for image generation, then `Hunyuan3D-2.1` for image-to-3D generation. The environment below focuses on that default path and does not try to keep every optional backend in the repo fully provisioned at the same time.
+> The current default pipeline uses `Qwen-Image-Edit-2511` with a Nunchaku edit transformer for single-stage depth-to-RGB completion, then `Hunyuan3D-2.1` for image-to-3D generation. The environment below focuses on that default path and does not try to keep every optional backend in the repo fully provisioned at the same time.
 
 ### Environment setup
 ```bash
@@ -50,7 +50,7 @@ pip install warp-lang ipyevents ipycanvas "jupyter_client<8" tornado usd-core
 pip install --no-build-isolation git+https://github.com/NVlabs/nvdiffrast.git
 pip install --no-build-isolation git+https://github.com/facebookresearch/pytorch3d.git
 
-# Nunchaku for Qwen-Image ControlNet
+# Nunchaku for Qwen-Image-Edit
 # Use the source build directly. On this machine, the official torch2.6 / cp310
 # wheel installs but fails at import time with an ABI error such as:
 #   undefined symbol: c10::detail::torchInternalAssertFail
@@ -78,42 +78,25 @@ git clone --depth 1 https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1 ../Hunyuan3
 
 ### Model downloads
 ```bash
-# Image generator transformer: Nunchaku Qwen-Image 4-step
+# Image editor transformer: Nunchaku Qwen-Image-Edit 2511
 python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
     'nunchaku-tech/nunchaku-qwen-image',
-    local_dir='models/nunchaku-qwen-image',
+    local_dir='models/nunchaku-qwen-image-edit',
     allow_patterns=[
-        'svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors',
+        'nunchaku_qwen_image_2511_balance_int4.safetensors',
     ],
     max_workers=4,
 )
 PY
 
-# Qwen pipeline weights (ModelScope)
-# The Nunchaku transformer above replaces Qwen's full transformer weights.
-# Keep the pipeline components and transformer config, but skip the large
-# transformer/*.safetensors shards.
+# Qwen-Image-Edit-2511 pipeline weights (ModelScope)
 python - <<'PY'
 from modelscope.hub.snapshot_download import snapshot_download
 snapshot_download(
-    'Qwen/Qwen-Image',
-    local_dir='models/Qwen-Image',
-    ignore_patterns=[
-        'transformer/*.safetensors',
-        'transformer/*.bin',
-    ],
-    max_workers=4,
-)
-PY
-
-# Qwen Image ControlNet Union
-python - <<'PY'
-from modelscope.hub.snapshot_download import snapshot_download
-snapshot_download(
-    'Qwen/Qwen-Image-ControlNet-Union',
-    local_dir='models/Qwen-Image-ControlNet-Union',
+    'Qwen/Qwen-Image-Edit-2511',
+    local_dir='models/Qwen-Image-Edit-2511',
     max_workers=4,
 )
 PY
@@ -166,9 +149,8 @@ PY
 # PY
 
 # Current default local paths:
-# - Qwen transformer: models/nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors
-# - Qwen pipeline: models/Qwen-Image
-# - Qwen ControlNet: models/Qwen-Image-ControlNet-Union
+# - Qwen edit transformer: models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors
+# - Qwen edit pipeline: models/Qwen-Image-Edit-2511
 # - Hunyuan3D-2.1: models/Hunyuan3D-2.1
 # - RMBG-2.0: models/RMBG-2.0
 ```
@@ -180,7 +162,7 @@ PY
 CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py
 
 # Checked-in default path:
-# Stage 1 uses Qwen-Image ControlNet, then Stage 2 uses Hunyuan3D-2.1.
+# Stage 1 uses Qwen-Image-Edit-2511, then Stage 2 uses Hunyuan3D-2.1.
 # The default config has run_stage1/run_stage2/run_metric all set to true.
 ```
 
@@ -211,15 +193,18 @@ Key config fields in `configs/config.yaml`:
 - `paths.output_dir`: workspace directory for generated outputs.
 - `paths.models_dir`: root directory for local model weights.
 - `paths.hunyuan_repo_root`: local clone of `Tencent-Hunyuan/Hunyuan3D-2.1`.
-- `models.qwen_transformer_path`: Qwen/Nunchaku transformer path, relative to `paths.models_dir` unless absolute.
-- `models.qwen_pipeline_path`: Qwen pipeline directory, relative to `paths.models_dir` unless absolute.
-- `models.qwen_controlnet_path`: Qwen Image ControlNet Union directory, relative to `paths.models_dir` unless absolute.
+- `models.qwen_edit_transformer_path`: Qwen-Image-Edit Nunchaku transformer path, relative to `paths.models_dir` unless absolute.
+- `models.qwen_edit_pipeline_path`: Qwen-Image-Edit pipeline directory, relative to `paths.models_dir` unless absolute.
 - `models.rmbg_model_path`: RMBG-2.0 directory, relative to `paths.models_dir` unless absolute.
 - `models.hunyuan_model_path`: Hunyuan3D-2.1 weights directory, relative to `paths.models_dir` unless absolute.
 - `sample_ids`: empty means run every `.ply` directly under `paths.data_dir`; set `["07136"]` for a single sample.
 - `input_paths`: optional per-sample explicit input paths for external files.
 - `gt_paths`: optional per-sample explicit GT paths for metric.
-- `outputs.save_intermediates`: default `false`; set `true` to keep debug and intermediate files.
+- `outputs.keep_profile`: default `lean`; keeps only useful pipeline artifacts
+  such as core Stage 1 files, Hunyuan PLY, MoGe object/index/transform outputs,
+  masked FreeReg outputs, and final fused PLYs.
+- `outputs.save_intermediates`: default `false`; set `true` to keep all debug
+  and intermediate files for focused experiments.
 - `run_stage1`, `run_stage2`, `run_metric`: enable or skip each pipeline stage.
 
 By default, a completed sample directory keeps only:
@@ -250,14 +235,17 @@ CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python mai
 ### Current default config
 The checked-in default config is:
 
-- `control_model: "qwen"`
+- `control_model: "qwen_edit"`
 - `generative_model: "hunyuan2.1"`
 - `rembg_model: "RMBG"`
 - `paths.models_dir: "models"`
 - `models.hunyuan_model_path: "Hunyuan3D-2.1"`
-- `models.qwen_transformer_path: "nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors"`
-- `models.qwen_pipeline_path: "Qwen-Image"`
-- `models.qwen_controlnet_path: "Qwen-Image-ControlNet-Union"`
+- `models.qwen_edit_transformer_path: "nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors"`
+- `models.qwen_edit_pipeline_path: "Qwen-Image-Edit-2511"`
+- `qwen_edit_steps: 16`
+- `qwen_edit_true_cfg_scale: 4.0`
+- `qwen_edit_negative_prompt: " "`
+- `qwen_edit_generate_res: 1024`
 - `hunyuan_shape_subfolder: "hunyuan3d-dit-v2-1"`
 - `hunyuan_shape_steps: 50`
 - `hunyuan_seed: null` (random Hunyuan seed; set an integer for reproducibility)
@@ -270,7 +258,7 @@ The checked-in default config is:
 This means the default pipeline is:
 
 1. `DepthPrompting` renders depth / mask guidance from the partial point cloud.
-2. `Qwen-Image` + `Qwen-Image-ControlNet-Union` generates the completed reference image with prompt `a {flag} on a pure white background`.
+2. `Qwen-Image-Edit-2511` directly converts the incomplete depth image into a completed realistic RGB/semantic image in one edit stage. The Plus pipeline output is resized to `generate_res`.
 3. `Hunyuan3D-2.1` generates the 3D asset with the regular 50-step shape path; FlashVDM is disabled.
 4. `ScaleAdapter` aligns and fuses the generated result back to the input scan.
 

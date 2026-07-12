@@ -33,6 +33,9 @@ class ScaleAdapter():
         elif self.cfg.generative_model in ("hunyuan2.0", "hunyuan2.1"):
             from tools.hunyuan3d_2 import hunyuan3d_2
             self.generative = hunyuan3d_2
+        elif self.cfg.generative_model == "hunyuan3d_omni":
+            from tools.hunyuan3d_omni import hunyuan3d_omni
+            self.generative = hunyuan3d_omni
         elif self.cfg.generative_model == 'trellis':
             from trellis import trellis
             self.generative = trellis

@@ -60,6 +60,56 @@ Open work:
 - Preserve accepted `car__132` outputs while refactoring.
 - Recover or establish a reproducible Qwen completion prompt/settings baseline.
 
+Current Qwen completion direction:
+- Use Qwen-Image-Edit-2511 with `QwenImageEditPlusPipeline`.
+- Use one edit stage: input is the projected incomplete depth image, output is a
+  complete realistic RGB/semantic image.
+- Prompt asks to generate a complete realistic object photo from the incomplete
+  depth image while preserving contour, pose, orientation, and camera viewpoint.
+- Current default inference steps are `16`.
+- Current CFG settings are `true_cfg_scale=4.0` and `negative_prompt=" "`.
+- Do not pass `height` or `width`; the Plus pipeline outputs 1024x1024 from the
+  512x512 depth input, then the final image is resized to 512x512.
+- Qwen now runs an optional second refinement stage from the first completed
+  semantic/RGB image. The second stage keeps only object outline, size,
+  category, orientation, pose, and camera viewpoint, while making the object
+  and background a more realistic scene.
+- Default projection is the original `view_select` path, which selects the
+  camera with the most visible partial points. The semantic view candidate
+  preview/selection experiment has been removed from the default pipeline.
+
+Redwood Stage 1 preview generated with this default projection:
+- Output root:
+  `workspace/redwood_stage1_qwen_single16_view_select_preview`
+- Samples: `01184`, `05117`, `05452`
+- Per-sample outputs: `depth.png`, `img.png`, `qwen_edit_prompt.txt`,
+  `point_uv.npy`, `camera.pth`, `viewpoint.npy`
+- Contact sheet:
+  `workspace/redwood_stage1_qwen_single16_view_select_preview/redwood_stage1_depth_vs_qwen_preview.png`
+- Status: generated and verified as 512x512 outputs; awaiting user visual
+  acceptance.
+- Update: `05117` prompt label override changed from `chair` to `red chair`
+  through `configs/config.yaml::prompt_overrides`, then `05117` Stage 1 was
+  regenerated in the same output root.
+- `depth_view_point_cloud.ply` is not needed by the current index bridge and
+  should not be saved by default; `save_depth_view_point_cloud` is now `false`.
+- Partial-to-MoGe registration was run for `01184`, `05117`, and `05452` using
+  raw partial point clouds from `data/<sample>.ply`, MoGeV2 on `img.png`, and
+  RMBG-2.0 object masks. Summary:
+  `workspace/redwood_stage1_qwen_single16_view_select_preview/redwood_moge_to_raw_partial_summary.csv`
+- MoGe object extraction erodes the RMBG object mask by default
+  (`object_mask_erode_pixels=2`) before filtering MoGe points. This removes
+  edge/background points such as the extra environment points seen in `01184`
+  while keeping the partial-to-MoGe registration stable.
+- Two-stage Qwen refinement preview was generated for all default Redwood
+  samples in:
+  `workspace/redwood_stage1_qwen_refine_preview`
+- The full contact sheet is:
+  `workspace/redwood_stage1_qwen_refine_preview/redwood_qwen_refine_all_preview.png`
+- Each sample keeps `qwen_edit_stage1.png` at 1024x1024 and final `img.png` at
+  512x512. The `06127` category override experiment was reverted; it uses the
+  dataset label `a vase with leafy plant`.
+
 ## Stage 2 - Completed Image to Complete 3D Point Cloud
 
 Status: implemented experimentally, needs integration.
@@ -89,6 +139,25 @@ Open work:
 - Make Qwen completion reproducible.
 - Formalize when to keep background and when to remove it.
 - Integrate Hunyuan generation and point sampling as a pipeline stage.
+
+Redwood `01184` experiment:
+- Input image:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/img.png`
+- RMBG image for Hunyuan:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/img_sam.png`
+- Hunyuan complete point cloud:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_hunyuan2.1.ply`
+- Status: generated and verified as 100000 points.
+- Decision: Hunyuan3D-2.1 should only keep the final sampled `.ply` in the
+  main workflow. Intermediate `_shape.glb` and final `.glb` files are not
+  retained by default.
+- Output cleanup decision: default runs now use `outputs.keep_profile: lean`
+  with `outputs.save_intermediates: false`. The lean profile keeps core Stage 1
+  files, `img_sam.png`, final Hunyuan PLY, MoGe object/index/transform metadata,
+  masked FreeReg outputs, and final fused/inspection PLYs. Debug previews,
+  unmasked FreeReg outputs, raw MoGe projection arrays, hits-only PLYs, stage
+  Qwen images, and GLB files are removed unless `outputs.save_intermediates:
+  true` or `outputs.keep_profile: debug` is set.
 
 ## Stage 3 - MoGe to Complete Registration
 
@@ -123,6 +192,48 @@ Open work:
 - If needed, add fallback refinement such as similarity ICP or projection
   silhouette consistency, but keep that separate from the original FreeReg
   experiment.
+
+Redwood `01184` original F-FreeReg experiment:
+- Image input:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/img.png`
+- Complete point cloud input:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_hunyuan2.1.ply`
+- DepthPro image point cloud:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_image_points.ply`
+- Complete registered to DepthPro image frame:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_complete_registered_to_image.ply`
+- Fused visualization:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_gray_image_blue_complete_fused.ply`
+- Metadata:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_info.json`
+- Status: generated; original F-FreeReg produced 112 YOHO descriptor matches.
+- MoGe object extraction for the same image was also generated with RMBG erode
+  2 pixels:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_moge_to_raw_partial_moge_object_only.ply`
+- Issue found: the unmasked DepthPro image point cloud includes ground/background
+  points because original F-FreeReg backprojects the whole image.
+- Masked rerun: `scripts/run_freereg_original_depthpro.py` now supports an
+  RMBG object mask so DepthPro backprojection keeps only object pixels.
+- Masked `01184` outputs:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_objectmask_object_depthpro_points.ply`
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_objectmask_complete_registered_to_object_depthpro.ply`
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_objectmask_gray_object_depthpro_blue_complete_fused.ply`
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_freereg_original_depthpro_objectmask_info.json`
+- Masked rerun status: generated; object DepthPro target has 49578 points and
+  original F-FreeReg produced 396 YOHO descriptor matches.
+- The current `01184` experiment directory was cleaned with the lean profile.
+  Retained files are:
+  `depth.png`, `img.png`, `camera.pth`, `point_uv.npy`,
+  `qwen_edit_prompt.txt`, `img_sam.png`, `01184_hunyuan2.1.ply`,
+  `01184_moge_to_raw_partial_moge_object_only.ply`,
+  `01184_moge_to_raw_partial_partial_to_moge_index.npy`,
+  `01184_moge_to_raw_partial_moge_to_raw_partial_transform.npy`,
+  `01184_moge_to_raw_partial_info.json`,
+  `01184_moge_to_raw_partial_object_mask.png`,
+  `01184_moge_to_raw_partial_raw_partial_gray_moge_red_aligned.ply`,
+  `01184_freereg_original_depthpro_objectmask_complete_registered_to_object_depthpro.ply`,
+  `01184_freereg_original_depthpro_objectmask_gray_object_depthpro_blue_complete_fused.ply`,
+  and `01184_freereg_original_depthpro_objectmask_info.json`.
 
 ## Stage 4 - Complete Back to Partial
 

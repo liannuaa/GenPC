@@ -214,8 +214,7 @@ def glb2ply(glb_path, ply_path=None):
         print(f"Exported {glb_path} to {ply_path}")
     return mesh
 
-def glb2point(glb_path, down_sample=None, num_points=16384):
-    mesh = trimesh.load(glb_path, file_type='glb')
+def mesh2point(mesh, down_sample=None, num_points=16384):
     if isinstance(mesh, trimesh.Scene):
         mesh = mesh.dump(concatenate=True)
     # Convert texture to vertex colors (bake the texture)
@@ -247,6 +246,11 @@ def glb2point(glb_path, down_sample=None, num_points=16384):
     if down_sample:
         pcd = pcd.voxel_down_sample(voxel_size=down_sample)
     return pcd
+
+
+def glb2point(glb_path, down_sample=None, num_points=16384):
+    mesh = trimesh.load(glb_path, file_type='glb')
+    return mesh2point(mesh, down_sample=down_sample, num_points=num_points)
 
 
 def smooth_depth(flag):

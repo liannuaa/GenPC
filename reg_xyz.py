@@ -13,8 +13,21 @@ from utils.dataUtils import (
 from copy import deepcopy
 from utils.loss_util import Completionloss
 from optim_registration.diff_obj_pose import object_pose_optimization
+from optim_registration.geotransformer_registration import estimate_geotransformer_transform
 from fpsample import fps_sampling
 from utils.runtime import sample_file, save_intermediates
+
+
+def hex_to_rgb01(hex_color):
+    color = str(hex_color).strip()
+    if color.startswith("#"):
+        color = color[1:]
+    if len(color) != 6:
+        raise ValueError(f"Expected 6-digit hex color, got {hex_color}")
+    return np.array(
+        [int(color[i : i + 2], 16) / 255.0 for i in range(0, 6, 2)],
+        dtype=np.float64,
+    )
 
 
 def rotation_matrix_from_axis_angle(axis_angle):
@@ -191,6 +204,8 @@ def filter_completion_points(source_pcd, target_pcd, min_distance=0.0001, max_di
     source_kdtree = o3d.geometry.KDTreeFlann(source_pcd)
     target_points = np.asarray(target_pcd.points)
     target_colors = np.asarray(target_pcd.colors)
+    if len(target_colors) != len(target_points):
+        target_colors = np.ones((len(target_points), 3), dtype=np.float64) * 0.5
     mask = np.ones(len(target_points), dtype=bool)
 
     for i, point in enumerate(target_points):
@@ -343,6 +358,79 @@ def registration_candidate_loss(
     return loss
 
 
+def save_registered_and_fused(cfg, flag, source_pcd, target_pcd, sample_override):
+    o3d.io.write_point_cloud(str(sample_file(cfg, flag, f"{flag}_registered_gen.ply")), target_pcd)
+    if bool(getattr(cfg, "reg_skip_fuse_after_registered", False)):
+        return
+
+    fuse_min_distance = float(sample_override.get("fuse_min_distance", getattr(cfg, "reg_fuse_min_distance", 0.0001)))
+    fuse_max_distance = sample_override.get("fuse_max_distance", getattr(cfg, "reg_fuse_max_distance", None))
+    if fuse_max_distance is not None:
+        fuse_max_distance = float(fuse_max_distance)
+    filtered_target_pcd = filter_completion_points(
+        source_pcd,
+        target_pcd,
+        min_distance=fuse_min_distance,
+        max_distance=fuse_max_distance,
+    )
+    fused_pcd = source_pcd + filtered_target_pcd
+    fused_pcd_xyz = np.asarray(fused_pcd.points)
+    fused_pcd_color = np.asarray(fused_pcd.colors)
+    fused_indices = fps_sampling(fused_pcd_xyz, 20000)
+    fused_pcd_xyz = fused_pcd_xyz[fused_indices]
+    fused_pcd_color = fused_pcd_color[fused_indices]
+    fused_pcd = numpy2o3d(fused_pcd_xyz, fused_pcd_color)
+    fuse_denoise = bool(sample_override.get("fuse_denoise", getattr(cfg, "reg_fuse_denoise", True)))
+    if fuse_denoise:
+        denoise_nb_neighbors = int(
+            sample_override.get(
+                "fuse_denoise_nb_neighbors",
+                getattr(cfg, "reg_fuse_denoise_nb_neighbors", 20),
+            )
+        )
+        denoise_std_ratio = float(
+            sample_override.get(
+                "fuse_denoise_std_ratio",
+                getattr(cfg, "reg_fuse_denoise_std_ratio", 2.5),
+            )
+        )
+        fused_pcd = remove_noise_from_point_cloud(
+            fused_pcd,
+            nb_neighbors=denoise_nb_neighbors,
+            std_ratio=denoise_std_ratio,
+        )
+    fused_color_hex = sample_override.get(
+        "fused_color_hex",
+        getattr(cfg, "reg_fused_color_hex", None),
+    )
+    if fused_color_hex:
+        fused_uniform_color = hex_to_rgb01(fused_color_hex)
+        fused_colors = np.tile(fused_uniform_color[None, :], (len(fused_pcd.points), 1))
+        fused_pcd.colors = o3d.utility.Vector3dVector(fused_colors)
+    o3d.io.write_point_cloud(str(sample_file(cfg, flag, f"{flag}_fused.ply")), fused_pcd)
+
+    if not save_intermediates(cfg):
+        return
+
+    source_xyz = np.asarray(source_pcd.points)
+    source_red = np.tile(np.array([[1.0, 0.0, 0.0]], dtype=np.float64), (len(source_xyz), 1))
+    target_xyz = np.asarray(filtered_target_pcd.points)
+    target_color = np.asarray(filtered_target_pcd.colors)
+    target_keep = max(0, 20000 - len(source_xyz))
+    if len(target_xyz) > target_keep > 0:
+        target_indices = fps_sampling(target_xyz, target_keep)
+        target_xyz = target_xyz[target_indices]
+        target_color = target_color[target_indices]
+    elif target_keep == 0:
+        target_xyz = np.empty((0, 3), dtype=np.float64)
+        target_color = np.empty((0, 3), dtype=np.float64)
+
+    fused_color_xyz = np.concatenate([source_xyz, target_xyz], axis=0)
+    fused_color_rgb = np.concatenate([source_red, target_color], axis=0)
+    fused_color_pcd = numpy2o3d(fused_color_xyz, fused_color_rgb)
+    o3d.io.write_point_cloud(str(sample_file(cfg, flag, f"{flag}_fused_color.ply")), fused_color_pcd)
+	
+	
 def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     path = Path(cfg.output_path)
     sample_overrides = getattr(cfg, "reg_sample_overrides", {}) or {}
@@ -360,6 +448,46 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
     if not glb_path.exists():
         # print(f"Path {path}/{flag}/{flag}_{cfg.generative_model}.glb does not exist.")
         raise FileNotFoundError(f"Path {glb_path} does not exist.")
+    source_pcd = o3d.io.read_point_cloud(str(color_point_path))
+    target_pcd = load_generated_point_cloud(str(path), flag, cfg.generative_model)
+    reg_backend = str(sample_override.get("backend", getattr(cfg, "reg_backend", "geotransformer"))).lower()
+    if reg_backend == "geotransformer":
+        weights_path = sample_override.get(
+            "geotransformer_weights",
+            getattr(
+                cfg,
+                "reg_geotransformer_weights",
+                "third_party/GeoTransformer/weights/geotransformer-modelnet.pth.tar",
+            ),
+        )
+        transform, info = estimate_geotransformer_transform(
+            source_pcd,
+            target_pcd,
+            weights_path=weights_path,
+            device=getattr(cfg, "device", "cuda"),
+            num_points=int(sample_override.get(
+                "geotransformer_num_points",
+                getattr(cfg, "reg_geotransformer_num_points", 717),
+            )),
+            seed=int(sample_override.get(
+                "geotransformer_seed",
+                getattr(cfg, "reg_geotransformer_seed", 7351),
+            )),
+        )
+        target_pcd.transform(transform)
+        print(
+            "geotransformer "
+            f"corr:{info['num_correspondences']}, "
+            f"scale:{info['uniform_scale']:.6f}"
+        )
+        save_registered_and_fused(cfg, flag, source_pcd, target_pcd, sample_override)
+        return
+
+    one_sided_registration = reg_backend == "one_sided"
+    if one_sided_registration:
+        cd_inv_weight = 0.0
+        print("one-sided registration: optimizing partial -> generated only")
+
     diff_transform = np.eye(4)
     if diff_init:
         diff_transform = object_pose_optimization(
@@ -380,12 +508,18 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
             scale_reg_weight=float(getattr(cfg, "reg_pose_scale_reg_weight", 0.1)),
             pose_mask_weight=float(getattr(cfg, "reg_pose_mask_weight", 1.0)),
             pose_cd_weight=float(getattr(cfg, "reg_pose_cd_weight", 3.0)),
-            pose_cd_inv_weight=float(getattr(cfg, "reg_pose_cd_inv_weight", 0.5)),
-            pose_cd_direction=getattr(cfg, "reg_pose_cd_direction", "complete_to_partial"),
+            pose_cd_inv_weight=(
+                0.0
+                if one_sided_registration
+                else float(getattr(cfg, "reg_pose_cd_inv_weight", 0.5))
+            ),
+            pose_cd_direction=(
+                "partial_to_complete"
+                if one_sided_registration
+                else getattr(cfg, "reg_pose_cd_direction", "complete_to_partial")
+            ),
         )
         diff_transform = np.linalg.inv(diff_transform)
-    source_pcd = o3d.io.read_point_cloud(str(color_point_path))
-    target_pcd = load_generated_point_cloud(str(path), flag, cfg.generative_model)
     # 初步对齐到complete的标准坐标系下
     source_pcd.transform(diff_transform)
     # o3d.visualization.draw_geometries([source_pcd, target_pcd], window_name="ICP with Scaling Input")
@@ -512,7 +646,11 @@ def reg(cfg, flag, cd_inv_weight=0.5, diff_init=True, reg_fine_xyz=False):
             lr=float(sample_override.get("torch_refine_lr", getattr(cfg, "reg_torch_refine_lr", 0.01))),
             source_points=int(sample_override.get("torch_refine_source_points", getattr(cfg, "reg_torch_refine_source_points", 2048))),
             target_points=int(sample_override.get("torch_refine_target_points", getattr(cfg, "reg_torch_refine_target_points", 4096))),
-            inverse_weight=float(sample_override.get("torch_refine_inverse_weight", getattr(cfg, "reg_torch_refine_inverse_weight", 0.15))),
+            inverse_weight=(
+                0.0
+                if one_sided_registration
+                else float(sample_override.get("torch_refine_inverse_weight", getattr(cfg, "reg_torch_refine_inverse_weight", 0.15)))
+            ),
             inverse_trim_ratio=float(sample_override.get("torch_refine_inverse_trim_ratio", getattr(cfg, "reg_torch_refine_inverse_trim_ratio", 0.25))),
             scale_min=float(sample_override.get("torch_refine_scale_min", getattr(cfg, "reg_torch_refine_scale_min", 0.75))),
             scale_max=float(sample_override.get("torch_refine_scale_max", getattr(cfg, "reg_torch_refine_scale_max", 1.25))),

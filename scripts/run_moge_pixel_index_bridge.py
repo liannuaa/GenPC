@@ -89,15 +89,36 @@ def colors_for_moge_hits(num_points, hit_indices):
     return colors
 
 
-def filter_moge_points_by_object_mask(points, colors, pixel_xy, object_mask, alpha_threshold):
-    points = np.asarray(points, dtype=np.float64)
-    colors = np.asarray(colors, dtype=np.float64)
-    pixel_xy = np.asarray(pixel_xy, dtype=np.float64)
+def prepare_object_mask(object_mask, alpha_threshold, erode_pixels=0):
     object_mask = np.asarray(object_mask)
     if object_mask.ndim == 3:
         object_mask = object_mask[..., -1]
     if object_mask.ndim != 2:
         raise ValueError(f"object_mask must be 2D or RGBA-like, got {object_mask.shape}")
+
+    binary = (object_mask >= int(alpha_threshold)).astype(np.uint8) * 255
+    erode_pixels = int(erode_pixels)
+    if erode_pixels > 0:
+        import cv2
+
+        kernel_size = erode_pixels * 2 + 1
+        kernel = np.ones((kernel_size, kernel_size), dtype=np.uint8)
+        binary = cv2.erode(binary, kernel, iterations=1)
+    return binary
+
+
+def filter_moge_points_by_object_mask(
+    points,
+    colors,
+    pixel_xy,
+    object_mask,
+    alpha_threshold,
+    erode_pixels=0,
+):
+    points = np.asarray(points, dtype=np.float64)
+    colors = np.asarray(colors, dtype=np.float64)
+    pixel_xy = np.asarray(pixel_xy, dtype=np.float64)
+    object_mask = prepare_object_mask(object_mask, alpha_threshold, erode_pixels)
     if len(points) != len(colors) or len(points) != len(pixel_xy):
         raise ValueError(
             "points, colors, and pixel_xy must have the same first dimension: "
@@ -109,7 +130,7 @@ def filter_moge_points_by_object_mask(points, colors, pixel_xy, object_mask, alp
     in_bounds = (xy[:, 0] >= 0) & (xy[:, 0] < width) & (xy[:, 1] >= 0) & (xy[:, 1] < height)
     keep = np.zeros(len(xy), dtype=bool)
     valid_indices = np.where(in_bounds)[0]
-    keep[valid_indices] = object_mask[xy[valid_indices, 1], xy[valid_indices, 0]] >= int(alpha_threshold)
+    keep[valid_indices] = object_mask[xy[valid_indices, 1], xy[valid_indices, 0]] > 0
     original_indices = np.where(keep)[0].astype(np.int64)
     return MogeObjectPoints(
         points=points[keep],
@@ -278,6 +299,11 @@ def run(args):
         )
     else:
         object_mask = np.full((image_size, image_size), 255, dtype=np.uint8)
+    object_mask = prepare_object_mask(
+        object_mask,
+        alpha_threshold=args.object_alpha_threshold,
+        erode_pixels=args.object_mask_erode_pixels,
+    )
     save_mask_png(object_mask_path, object_mask)
     object_moge = filter_moge_points_by_object_mask(
         points=full_moge_points,
@@ -285,6 +311,7 @@ def run(args):
         pixel_xy=full_moge_pixel_xy,
         object_mask=object_mask,
         alpha_threshold=args.object_alpha_threshold,
+        erode_pixels=0,
     )
 
     index_result = build_partial_to_moge_index(
@@ -343,6 +370,7 @@ def run(args):
         "max_pixel_distance": float(args.max_pixel_distance),
         "use_rmbg_mask": bool(args.use_rmbg_mask),
         "object_alpha_threshold": int(args.object_alpha_threshold),
+        "object_mask_erode_pixels": int(args.object_mask_erode_pixels),
         "moge": moge_info,
         "outputs": {
             "moge_points": str(moge_points_path),
@@ -374,6 +402,7 @@ def parse_args():
     parser.add_argument("--max_pixel_distance", type=float, default=2.0)
     parser.add_argument("--rmbg_model", default=str(PROJECT_ROOT / "models" / "RMBG-2.0"))
     parser.add_argument("--object_alpha_threshold", type=int, default=128)
+    parser.add_argument("--object_mask_erode_pixels", type=int, default=2)
     parser.add_argument("--use_rmbg_mask", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--output_prefix", default="car__132_moge_pixel_bridge")
     return parser.parse_args()

@@ -15,6 +15,7 @@ from scripts.run_moge_pixel_index_bridge import (
     build_partial_to_moge_index,
     colors_for_moge_hits,
     filter_moge_points_by_object_mask,
+    prepare_object_mask,
     run_moge_with_pixels,
     run_rmbg_mask,
     save_mask_png,
@@ -109,6 +110,11 @@ def run(args):
     rmbg_path = prefix.with_name(prefix.name + "_rmbg.png")
     object_mask_path = prefix.with_name(prefix.name + "_object_mask.png")
     object_mask = run_rmbg_mask(image_path, rmbg_path, args.rmbg_model)
+    object_mask = prepare_object_mask(
+        object_mask,
+        alpha_threshold=args.object_alpha_threshold,
+        erode_pixels=args.object_mask_erode_pixels,
+    )
     save_mask_png(object_mask_path, object_mask)
     object_moge = filter_moge_points_by_object_mask(
         points=full_moge_points,
@@ -116,6 +122,7 @@ def run(args):
         pixel_xy=full_moge_pixels,
         object_mask=object_mask,
         alpha_threshold=args.object_alpha_threshold,
+        erode_pixels=0,
     )
 
     index_result = build_partial_to_moge_index(
@@ -170,6 +177,8 @@ def run(args):
         "image_size": image_size,
         "full_moge_points": int(len(full_moge_points)),
         "moge_object_points": int(len(object_moge.points)),
+        "object_alpha_threshold": int(args.object_alpha_threshold),
+        "object_mask_erode_pixels": int(args.object_mask_erode_pixels),
         "matched_partial_points": int(valid.sum()),
         "match_ratio": float(valid.sum() / max(len(partial_points), 1)),
         "used_correspondences": int(len(source)),
@@ -214,6 +223,7 @@ def parse_args():
     parser.add_argument("--padding", type=float, default=0.15)
     parser.add_argument("--max_pixel_distance", type=float, default=2.0)
     parser.add_argument("--object_alpha_threshold", type=int, default=128)
+    parser.add_argument("--object_mask_erode_pixels", type=int, default=2)
     parser.add_argument("--ransac_iterations", type=int, default=5000)
     parser.add_argument("--ransac_threshold", type=float, default=0.08)
     parser.add_argument("--max_correspondences", type=int, default=4000)

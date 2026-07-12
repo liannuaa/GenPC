@@ -1,4 +1,5 @@
 from pathlib import Path
+from fnmatch import fnmatch
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -83,6 +84,14 @@ def save_intermediates(cfg):
     return bool(value)
 
 
+def output_keep_profile(cfg):
+    outputs = cfg_section(cfg, "outputs")
+    value = _mapping_get(outputs, "keep_profile")
+    if value is None:
+        value = getattr(cfg, "keep_profile", None)
+    return str(value or "final").lower()
+
+
 def normalize_runtime_config(cfg):
     resolved_output = output_dir(cfg)
     cfg.output_path = str(resolved_output)
@@ -99,23 +108,69 @@ def require_path(path, label):
     return path
 
 
-def cleanup_intermediates(cfg, flag):
-    if save_intermediates(cfg):
-        return
+def _profile_keep_patterns(flag, profile, stage):
+    flag = str(flag)
+    if profile in {"debug", "full", "all"}:
+        return ["*"]
+    if profile == "lean":
+        base = [
+            "depth.png",
+            "img.png",
+            "camera.pth",
+            "point_uv.npy",
+            "qwen_edit_prompt.txt",
+            "img_sam.png",
+            f"{flag}_hunyuan2.1.ply",
+            f"{flag}_hunyuan2.0.ply",
+            f"{flag}_fused.ply",
+            "*_moge_object_only.ply",
+            "*_partial_to_moge_index.npy",
+            "*_moge_to_raw_partial_transform.npy",
+            "*_moge_to_raw_partial_info.json",
+            "*_object_mask.png",
+            "*_raw_partial_gray_moge_red_aligned.ply",
+            "*_objectmask_complete_registered_to_object_depthpro.ply",
+            "*_objectmask_gray_object_depthpro_blue_complete_fused.ply",
+            "*_objectmask_info.json",
+        ]
+        if stage == "stage1":
+            return [
+                "depth.png",
+                "img.png",
+                "camera.pth",
+                "point_uv.npy",
+                "qwen_edit_prompt.txt",
+            ]
+        return base
+    return [f"{flag}_fused.ply"]
 
+
+def _matches_any(name, patterns):
+    return any(fnmatch(name, pattern) for pattern in patterns)
+
+
+def _configured_keep_files(cfg, flag):
     outputs = cfg_section(cfg, "outputs")
     keep_files = _mapping_get(outputs, "keep_files")
     if keep_files is None:
         keep_files = getattr(cfg, "keep_files", None)
     if keep_files is None:
-        keep_files = [f"{flag}_fused.ply"]
-    keep = {str(name).format(flag=flag) for name in keep_files}
+        return []
+    return [str(name).format(flag=flag) for name in keep_files]
+
+
+def cleanup_intermediates(cfg, flag):
+    if save_intermediates(cfg):
+        return
+
+    keep_patterns = _profile_keep_patterns(flag, output_keep_profile(cfg), "all")
+    keep_patterns.extend(_configured_keep_files(cfg, flag))
     directory = sample_dir(cfg, flag)
     if not directory.exists():
         return
 
     for path in directory.iterdir():
-        if path.name in keep:
+        if _matches_any(path.name, keep_patterns):
             continue
         if path.is_file():
             path.unlink()
@@ -125,13 +180,14 @@ def cleanup_stage1_intermediates(cfg, flag):
     if save_intermediates(cfg):
         return
 
-    keep = {"depth.png", "img.png", "point_uv.npy"}
+    keep_patterns = _profile_keep_patterns(flag, output_keep_profile(cfg), "stage1")
+    keep_patterns.extend(_configured_keep_files(cfg, flag))
     directory = sample_dir(cfg, flag)
     if not directory.exists():
         return
 
     for path in directory.iterdir():
-        if path.name in keep:
+        if _matches_any(path.name, keep_patterns):
             continue
         if path.is_file():
             path.unlink()

@@ -56,9 +56,8 @@ def build_base_config(args, sample_ids_file):
     cfg["skip_existing"] = True
     cfg["normalize_input"] = bool(args.normalize)
     cfg["generate_res"] = 512
-    cfg["qwen_depth_input_res"] = 512
+    cfg["depth_image_input_res"] = 512
     cfg["qwen_cpu_offload"] = False
-    cfg["qwen_cpu_text_encoder"] = True
 
     cfg.setdefault("paths", {})
     cfg["paths"]["data_dir"] = str(args.output_dir / "partial")

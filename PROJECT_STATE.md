@@ -6,6 +6,101 @@ asks to preserve a pipeline state.
 
 ## Accepted Results
 
+### 2026-07-12 21:02 CST - car__132 Single-Stage Qwen-Image-Edit-2511 Plus Completion
+
+Status: accepted by user as "效果非常好"; this is the current main-flow Qwen
+completion baseline.
+
+Sample:
+- `car__132`
+
+Input:
+- `workspace/car__132_depth_qwen_edit_2511_run/depth.png`
+
+Outputs:
+- 1024 reference:
+  `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_single_stage_16steps_1024.png`
+- Main-flow size 512:
+  `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_single_stage_16steps_512.png`
+
+Parameter record:
+- `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_single_stage_16steps_prompt.txt`
+
+Model/checkpoint:
+- Pipeline class: `QwenImageEditPlusPipeline`
+- Pipeline path: `models/Qwen-Image-Edit-2511`
+- Nunchaku transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+
+Prompt:
+- `根据这张不完整的汽车深度图生成完整的真实汽车照片，保持已有部分的轮廓、姿态、朝向和相机视角不变，合理补全缺失部分。`
+
+Generation parameters:
+- Input argument: `image=[depth.convert("RGB")]`
+- Input size: `512x512`
+- Pipeline output size: `1024x1024`
+- Main-flow saved size: `512x512`
+- `num_inference_steps`: `16`
+- `true_cfg_scale`: `4.0`
+- `negative_prompt`: `" "`
+- `height`: not passed
+- `width`: not passed
+- Seed: `None`
+
+What was approved:
+- Single-stage Qwen depth-to-realistic-RGB completion quality.
+- Main flow should use this method only; no second or third Qwen stage.
+- Main flow only needs to keep the final 512x512 image.
+- The prompt must be parameterized by object category and must not hard-code
+  `car` except when the object parameter is `car`.
+
+Do not overwrite without asking:
+- `qwen_image_edit_plus_2511_single_stage_16steps_1024.png`
+- `qwen_image_edit_plus_2511_single_stage_16steps_512.png`
+
+### 2026-07-12 19:57 CST - car__132 Qwen-Image-Edit-2511 Plus Depth Completion
+
+Status: accepted by user as "深度补全效果非常好了"; keep this as the current
+depth-completion baseline for `car__132`.
+
+Sample:
+- `car__132`
+
+Input:
+- `workspace/car__132_depth_qwen_edit_2511_run/depth.png`
+
+Output:
+- `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_depth_completion.png`
+
+Parameter record:
+- `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_depth_completion_prompt.txt`
+
+Model/checkpoint:
+- Pipeline class: `QwenImageEditPlusPipeline`
+- Pipeline path: `models/Qwen-Image-Edit-2511`
+- Nunchaku transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+
+Prompt:
+- `这是一个车的深度图，补全它`
+
+Generation parameters:
+- Input argument: `image=[depth.convert("RGB")]`
+- Input size: `512x512`
+- Output size: `1024x1024`
+- `num_inference_steps`: `4`
+- `true_cfg_scale`: `4.0`
+- `negative_prompt`: `" "`
+- `height`: not passed
+- `width`: not passed
+- Seed: `None`
+
+What was approved:
+- The Qwen depth completion quality, not the downstream semantic/RGB stage.
+
+Do not overwrite without asking:
+- `qwen_image_edit_plus_2511_depth_completion.png`
+
 ### 2026-07-11 21:07 CST - car__132 Qwen-Image-Edit-2511 Completion
 
 Status: accepted by user as "效果很好"; keep as the current visual quality
@@ -104,17 +199,33 @@ Primary visualization:
 
 As of 2026-07-12:
 - Config file: `configs/config.yaml`
+- `depth_projection: "view_select"`; this is the original max-visible-points
+  projection path.
+- Semantic view candidate preview/selection is not part of the main flow.
 - Pipeline path: `models/Qwen-Image-Edit-2511`
 - Transformer path:
   `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
-- `qwen_edit_steps: 40`
-- `qwen_edit_true_cfg_scale: 4.0`
+- Pipeline class: `QwenImageEditPlusPipeline`
+- `qwen_edit_steps: 16`
 - `qwen_edit_generate_res: 1024`
+- `qwen_edit_true_cfg_scale: 4.0`
+- `qwen_edit_negative_prompt: " "`
 - Return/output size remains `generate_res: 512` unless changed.
+- Qwen generation is a single stage:
+  - Prompt:
+    `根据这张不完整的汽车深度图生成完整的真实汽车照片，保持已有部分的轮廓、姿态、朝向和相机视角不变，合理补全缺失部分。`
+  - Input is passed as `image=[depth.convert("RGB")]`.
+  - No `height` or `width` is passed.
+  - Pipeline output is 1024x1024, then resized to 512x512.
 
 Current prompt builder:
 - `tools/qwen_image_edit.py::build_completion_prompt`
 
 Important caveat:
-- The current main-flow prompt/settings have not reproduced the accepted
-  `qwen_edit_2511_car_completion_from_depth.png` quality yet.
+- Latest single-stage 16-step test outputs:
+  - 1024:
+    `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_single_stage_16steps_1024.png`
+  - 512:
+    `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_single_stage_16steps_512.png`
+  - Prompt/parameters:
+    `workspace/car__132_depth_qwen_edit_2511_run/qwen_image_edit_plus_2511_single_stage_16steps_prompt.txt`

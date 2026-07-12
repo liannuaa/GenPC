@@ -15,9 +15,15 @@
   `CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py`.
 - The default config already has `run_stage1`, `run_stage2`, and `run_metric` set to `true`.
 - Paths are configured through `paths` and `models` in `configs/config.yaml`.
-- Default output cleanup keeps only `workspace/<sample_id>/<sample_id>_fused.ply`.
-  Set `outputs.save_intermediates: true` to keep depth images, masks, generated
-  images, GLB/PLY intermediates, registered point clouds, and debug outputs.
+- Default output cleanup uses `outputs.keep_profile: lean`, which keeps only
+  useful pipeline artifacts: `depth.png`, `img.png`, `camera.pth`,
+  `point_uv.npy`, `qwen_edit_prompt.txt`, `img_sam.png`, final Hunyuan PLY,
+  MoGe object/index/transform metadata, masked FreeReg outputs, and final
+  fused PLYs.
+- Set `outputs.save_intermediates: true` or `outputs.keep_profile: debug` to
+  keep every depth image, mask, generated image, registered point cloud, and
+  debug output. Do this only for focused experiments, because it creates many
+  files.
 - Current Qwen ControlNet/Nunchaku test pins are `diffusers==0.36.0` and
   `transformers==4.57.6`.
 
@@ -41,7 +47,7 @@
   - model name/path and checkpoint/transformer path;
   - full prompt and negative prompt, copied verbatim;
   - generation parameters such as resolution, resize policy, seed, steps,
-    `true_cfg_scale`, guidance scale, and any scheduler/backend choices;
+    CFG/guidance scale if used, and any scheduler/backend choices;
   - postprocessing steps such as RMBG, resize, masks, MoGe, Hunyuan, FreeReg,
     ICP, or coordinate flips;
   - what the user approved and what should not be changed without asking.
@@ -56,19 +62,14 @@
   in code and add tests for prompt text when feasible.
 
 ## Model Download Notes
-- Nunchaku Qwen transformer weights should come from ModelScope repo
-  `nunchaku-tech/nunchaku-qwen-image`, not Hugging Face.
-- The current default transformer weight is
-  `models/nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors`.
-- Qwen pipeline files must exist at `models/Qwen-Image`; otherwise
-  diffusers will try to resolve `models/Qwen-Image` through Hugging Face
-  and fail.
-- Because Nunchaku provides the transformer, skip Qwen pipeline full transformer
-  shards (`transformer/*.safetensors`) when downloading `Qwen/Qwen-Image`.
-- Qwen ControlNet Union files must exist at `models/Qwen-Image-ControlNet-Union`.
-- Stage 1 uses a random seed by default. The prompt format is
-  `a {flag}`, with ControlNet conditioning scale
-  currently set in `tools/qwen_depth.py`.
+- The old Qwen ControlNet path is no longer part of the main pipeline.
+- Qwen edit pipeline files must exist at `models/Qwen-Image-Edit-2511`.
+- Nunchaku Qwen edit transformer weights should exist at
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`.
+- Stage 1 uses Qwen-Image-Edit-2511 in one edit stage: incomplete depth image
+  to completed realistic RGB/semantic image. The input image must be converted
+  to RGB before calling the pipeline, and the prompt must use the object
+  parameter instead of hard-coding a category.
 - The default Hunyuan3D path is shape-only and uses `Hunyuan3D-2.1`.
   Download `AI-ModelScope/Hunyuan3D-2.1` into `models/Hunyuan3D-2.1`,
   including the `hunyuan3d-dit-v2-1` subfolder. The loader uses the `fp16`

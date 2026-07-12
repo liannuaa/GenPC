@@ -82,6 +82,32 @@ class MogePixelIndexBridgeTest(unittest.TestCase):
         np.testing.assert_allclose(filtered.pixel_xy, pixel_xy[[1]])
         np.testing.assert_array_equal(filtered.original_indices, np.array([1]))
 
+    def test_filter_moge_points_by_object_mask_erodes_boundary_pixels(self):
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [2.0, 0.0, 0.0],
+            ],
+            dtype=np.float64,
+        )
+        colors = np.tile(np.array([[0.2, 0.2, 0.2]], dtype=np.float64), (3, 1))
+        pixel_xy = np.array([[1, 1], [2, 2], [3, 3]], dtype=np.float64)
+        object_mask = np.zeros((5, 5), dtype=np.uint8)
+        object_mask[1:4, 1:4] = 255
+
+        filtered = filter_moge_points_by_object_mask(
+            points=points,
+            colors=colors,
+            pixel_xy=pixel_xy,
+            object_mask=object_mask,
+            alpha_threshold=128,
+            erode_pixels=1,
+        )
+
+        np.testing.assert_allclose(filtered.points, points[[1]])
+        np.testing.assert_array_equal(filtered.original_indices, np.array([1]))
+
 
 if __name__ == "__main__":
     unittest.main()

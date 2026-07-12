@@ -8,7 +8,7 @@ import open3d as o3d
 import torch
 from PIL import Image
 
-from utils.dataUtils import glb2point
+from utils.dataUtils import mesh2point
 from utils.runtime import cfg_path, model_path, sample_file
 
 
@@ -125,8 +125,8 @@ def _prepare_input_image(cfg, img):
     return image.convert("RGBA")
 
 
-def _export_point_cloud(glb_path, ply_path, num_points):
-    pcd = glb2point(glb_path, down_sample=None, num_points=num_points)
+def _export_point_cloud(mesh, ply_path, num_points):
+    pcd = mesh2point(mesh, down_sample=None, num_points=num_points)
     o3d.io.write_point_cloud(ply_path, pcd)
 
 
@@ -158,15 +158,11 @@ def hunyuan3d_2(cfg, flag, img):
     mesh = shape_pipeline(**shape_kwargs)[0]
     shape_elapsed = time.time() - start_time
 
-    shape_glb_path = sample_file(cfg, flag, f"{flag}_{model_name}_shape.glb")
-    mesh.export(shape_glb_path)
     print(f"Shape generation finished in {int(shape_elapsed)}s")
 
-    final_glb_path = sample_file(cfg, flag, f"{flag}_{model_name}.glb")
-    mesh.export(final_glb_path)
     _export_point_cloud(
-        str(final_glb_path),
+        mesh,
         str(sample_file(cfg, flag, f"{flag}_{model_name}.ply")),
         point_sample_num,
     )
-    print(f"Saved Hunyuan3D output to {final_glb_path}")
+    print(f"Saved Hunyuan3D point cloud to {sample_file(cfg, flag, f'{flag}_{model_name}.ply')}")

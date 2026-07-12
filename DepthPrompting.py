@@ -9,11 +9,10 @@ import kaolin as kal
 import open3d as o3d
 from torchvision.utils import save_image
 from PIL import Image
-from PIL import ImageDraw
 import warnings
 from utils.dataUtils import getRandomColor, resolve_prompt_label, save_ply_xyzrgb
 from utils.camera_utils import calculate_up_vector, create_cameras
-from utils.runtime import model_path, sample_dir, sample_file
+from utils.runtime import model_path, sample_dir, sample_file, save_intermediates
 import fpsample
 from diffusers.utils import load_image
 warnings.filterwarnings("ignore")
@@ -48,10 +47,8 @@ class DepthPrompting:
             res=self.cfg.cam_res,
             device=self.device,
         )
-        # Load image-generation models only after depth/view selection. Semantic
-        # view ranking can then temporarily use the GPU without co-residency.
+        # Load image-generation models only after depth/view selection.
         self.depth2Image = None
-        self.semantic_selected_image = None
 
     def _load_depth2image(self):
         if self.depth2Image is not None or self.cfg.control_model == "depth_passthrough":
@@ -68,34 +65,6 @@ class DepthPrompting:
             from tools.flux_depth import Flux_depth
 
             self.depth2Image = Flux_depth(self.device)
-        elif self.cfg.control_model == "qwen":
-            from tools.qwen_depth import Qwen_depth
-            self.depth2Image = Qwen_depth(
-                device=self.device,
-                transformer_path=str(
-                    model_path(
-                        self.cfg,
-                        "qwen_transformer_path",
-                        "nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors",
-                    )
-                ),
-                pipeline_path=str(
-                    model_path(
-                        self.cfg,
-                        "qwen_pipeline_path",
-                        "Qwen-Image",
-                    )
-                ),
-                controlnet_path=str(
-                    model_path(
-                        self.cfg,
-                        "qwen_controlnet_path",
-                        "Qwen-Image-ControlNet-Union",
-                    )
-                ),
-                cpu_offload=bool(getattr(self.cfg, "qwen_cpu_offload", True)),
-                cpu_text_encoder=bool(getattr(self.cfg, "qwen_cpu_text_encoder", False)),
-            )
         elif self.cfg.control_model == "qwen_edit":
             from tools.qwen_image_edit import QwenImageEdit
 
@@ -111,9 +80,12 @@ class DepthPrompting:
                 pipeline_path=str(
                     model_path(self.cfg, "qwen_edit_pipeline_path", "Qwen-Image-Edit-2511")
                 ),
-                step=int(getattr(self.cfg, "qwen_edit_steps", 40)),
-                true_cfg_scale=float(getattr(self.cfg, "qwen_edit_true_cfg_scale", 4.0)),
-                generation_size=int(getattr(self.cfg, "qwen_edit_generate_res", 1024)),
+                step=int(self.cfg.qwen_edit_steps),
+                generation_size=int(self.cfg.qwen_edit_generate_res),
+                true_cfg_scale=float(self.cfg.qwen_edit_true_cfg_scale),
+                negative_prompt=str(self.cfg.qwen_edit_negative_prompt),
+                refine_stage=bool(getattr(self.cfg, "qwen_edit_refine_stage", False)),
+                refine_step=int(getattr(self.cfg, "qwen_edit_refine_steps", self.cfg.qwen_edit_steps)),
                 cpu_offload=bool(getattr(self.cfg, "qwen_cpu_offload", True)),
             )
         else:
@@ -164,7 +136,7 @@ class DepthPrompting:
             rgb = torch.tensor(getRandomColor(xyz.shape[0])).float().to(self.device)
         if depth_gen:
             self.getDepth(xyz, flag, rgb)
-        depth_input_res = int(getattr(self.cfg, "qwen_depth_input_res", 512))
+        depth_input_res = int(self.cfg.depth_image_input_res)
         self.depth = load_image(str(sample_file(self.cfg, flag, "depth.png"))).resize(
             (depth_input_res, depth_input_res)
         )
@@ -172,28 +144,82 @@ class DepthPrompting:
             print(" Image Generation.....")
             if self.cfg.control_model == "depth_passthrough":
                 self.image = self.depth_to_white_bg_image(self.depth, self.cfg.generate_res)
-            elif self.semantic_selected_image is not None:
-                # The semantic selector already generated this exact candidate at
-                # final resolution. Reuse it instead of running Qwen-Image twice.
-                self.image = self.semantic_selected_image
             else:
                 self._load_depth2image()
                 prompt_label = resolve_prompt_label(flag, self.cfg)
-                scale_overrides = getattr(self.cfg, "qwen_controlnet_conditioning_scale_overrides", {}) or {}
-                controlnet_conditioning_scale = float(
-                    scale_overrides.get(
-                        str(flag),
-                        getattr(self.cfg, "qwen_controlnet_conditioning_scale", 1.0),
+                if self.cfg.control_model == "qwen_edit":
+                    self.image = self.depth2Image.generate(
+                        self.depth,
+                        prompt_label,
+                        size=self.cfg.generate_res,
                     )
-                )
-                self.image = self.depth2Image.generate(
-                    self.depth,
-                    prompt_label,
-                    size=self.cfg.generate_res,
-                    input_size=depth_input_res,
-                    mode="depth",
-                    controlnet_conditioning_scale=controlnet_conditioning_scale,
-                )
+                else:
+                    self.image = self.depth2Image.generate(
+                        self.depth,
+                        prompt_label,
+                        size=self.cfg.generate_res,
+                    )
+                if save_intermediates(self.cfg):
+                    if self.cfg.control_model == "qwen_edit":
+                        stage1_image = getattr(self.depth2Image, "last_stage1_image", None)
+                        if stage1_image is not None:
+                            stage1_image.save(sample_file(self.cfg, flag, "qwen_edit_stage1.png"))
+                        stage1_prompt = getattr(self.depth2Image, "last_stage1_prompt", None)
+                        refinement_prompt = getattr(
+                            self.depth2Image, "last_refinement_prompt", None
+                        )
+                        with open(
+                            sample_file(self.cfg, flag, "qwen_edit_prompt.txt"),
+                            "w",
+                            encoding="utf-8",
+                        ) as handle:
+                            handle.write(f"prompt: {getattr(self.depth2Image, 'last_prompt', None)}\n")
+                            handle.write(
+                                f"negative_prompt: {self.depth2Image.negative_prompt!r}\n"
+                            )
+                            handle.write(
+                                f"true_cfg_scale: {self.depth2Image.true_cfg_scale}\n"
+                            )
+                            handle.write(f"num_inference_steps: {self.depth2Image.step}\n")
+                            handle.write(f"refine_stage: {self.depth2Image.refine_stage}\n")
+                            handle.write(f"refine_steps: {self.depth2Image.refine_step}\n")
+                        if stage1_prompt is not None:
+                            with open(
+                                sample_file(self.cfg, flag, "qwen_edit_stage1_prompt.txt"),
+                                "w",
+                                encoding="utf-8",
+                            ) as handle:
+                                handle.write(f"prompt: {stage1_prompt}\n")
+                                handle.write(
+                                    f"negative_prompt: {self.depth2Image.negative_prompt!r}\n"
+                                )
+                                handle.write(
+                                    f"true_cfg_scale: {self.depth2Image.true_cfg_scale}\n"
+                                )
+                                handle.write(f"num_inference_steps: {self.depth2Image.step}\n")
+                        if refinement_prompt is not None:
+                            with open(
+                                sample_file(self.cfg, flag, "qwen_edit_stage2_prompt.txt"),
+                                "w",
+                                encoding="utf-8",
+                            ) as handle:
+                                handle.write(f"prompt: {refinement_prompt}\n")
+                                handle.write(
+                                    f"negative_prompt: {self.depth2Image.negative_prompt!r}\n"
+                                )
+                                handle.write(
+                                    f"true_cfg_scale: {self.depth2Image.true_cfg_scale}\n"
+                                )
+                                handle.write(f"num_inference_steps: {self.depth2Image.refine_step}\n")
+                    else:
+                        prompt = getattr(self.depth2Image, "last_prompt", None)
+                        if prompt is not None:
+                            with open(
+                                sample_file(self.cfg, flag, "qwen_edit_prompt.txt"),
+                                "w",
+                                encoding="utf-8",
+                            ) as handle:
+                                handle.write(f"prompt: {prompt}\n")
             self.image.save(sample_file(self.cfg, flag, "img.png"))
         end = time.time()
         print(f" Take {int(end-start)} seconds")
@@ -409,167 +435,6 @@ class DepthPrompting:
             "aspect_score": float(aspect_score),
         }
 
-    def _candidate_depth_image(self, point_uv, point_depth, visible, size=224):
-        selected_uv = point_uv[visible]
-        selected_depth = point_depth[visible]
-        if selected_uv.shape[0] == 0:
-            return Image.new("RGB", (size, size), "black")
-        point_pixels = (selected_uv * int(self.cfg.res)).long()
-        point_pixels = torch.stack(
-            (point_pixels[:, 1], point_pixels[:, 0]), dim=-1
-        ).clip(0, int(self.cfg.res) - 1)
-        colors = torch.ones(
-            (point_pixels.shape[0], 3), device=point_pixels.device
-        )
-        _, raw_depth, hole_mask, _ = self.getRawDepth(
-            point_pixels,
-            selected_depth,
-            colors=colors,
-            dataset=self.cfg.dataset,
-            res=int(self.cfg.res),
-            point_size=int(self.cfg.point_size),
-            mask_pixel_rate=int(self.cfg.mask_pixel_rate),
-        )
-        depth_np = (
-            raw_depth.permute(1, 2, 0).detach().cpu().numpy() * 255
-        ).astype(np.uint8)
-        mask_np = (
-            hole_mask[0].detach().cpu().numpy() * 255
-        ).astype(np.uint8)
-        inpainted = cv2.inpaint(depth_np, mask_np, 2, cv2.INPAINT_NS)
-        image = Image.fromarray(inpainted).convert("RGB")
-        if image.size != (size, size):
-            image = image.resize((size, size), Image.Resampling.LANCZOS)
-        return image
-
-    def _semantic_rerank_candidates(
-        self, flag, candidates, point_uvs, point_depths, visibility
-    ):
-        sample_dir(self.cfg, flag).mkdir(parents=True, exist_ok=True)
-        top_k = min(int(getattr(self.cfg, "semantic_view_top_k", 6)), len(candidates))
-        geometry_order = sorted(
-            range(len(candidates)),
-            key=lambda index: candidates[index]["score"],
-            reverse=True,
-        )
-        # Repeated elevations of one azimuth provide little semantic diversity.
-        # Keep only the best geometry candidate per azimuth before VLM ranking.
-        ranked_indices = []
-        used_azimuths = set()
-        for index in geometry_order:
-            azimuth = float(candidates[index]["azimuth"])
-            if azimuth in used_azimuths:
-                continue
-            ranked_indices.append(index)
-            used_azimuths.add(azimuth)
-            if len(ranked_indices) == top_k:
-                break
-
-        use_generated = bool(
-            getattr(self.cfg, "semantic_view_use_generated_previews", True)
-        )
-        generated_images = {}
-        category = resolve_prompt_label(flag, self.cfg)
-        if use_generated:
-            if self.cfg.control_model not in {"qwen", "qwen_edit"}:
-                raise ValueError(
-                    "semantic generated-preview ranking requires qwen or qwen_edit"
-                )
-            self._load_depth2image()
-            preview_size = int(
-                getattr(self.cfg, "semantic_view_preview_size", self.cfg.generate_res)
-            )
-            input_size = int(getattr(self.cfg, "qwen_depth_input_res", 512))
-            scale = float(
-                getattr(self.cfg, "qwen_controlnet_conditioning_scale", 1.0)
-            )
-            seed = int(getattr(self.cfg, "semantic_view_preview_seed", 12345))
-            print(
-                f" Generating {len(ranked_indices)} Qwen view previews "
-                f"(ControlNet scale={scale:.2f})..."
-            )
-            for display_id, candidate_index in enumerate(ranked_indices):
-                depth_image = self._candidate_depth_image(
-                    point_uvs[candidate_index],
-                    point_depths[candidate_index],
-                    visibility[candidate_index],
-                    size=input_size,
-                )
-                depth_image.save(
-                    sample_file(
-                        self.cfg, flag, f"view_candidate_{display_id}_depth.png"
-                    )
-                )
-                generated = self.depth2Image.generate(
-                    depth_image,
-                    category,
-                    size=preview_size,
-                    input_size=input_size,
-                    mode="depth",
-                    controlnet_conditioning_scale=scale,
-                    seed=seed,
-                )
-                generated.save(
-                    sample_file(self.cfg, flag, f"view_candidate_{display_id}.png")
-                )
-                generated_images[display_id] = generated.copy()
-            # Qwen3-VL needs the GPU next. The selected preview is retained as PIL.
-            self.close()
-
-        tile_size = int(getattr(self.cfg, "semantic_view_tile_size", 224))
-        columns = 4
-        rows = math.ceil(top_k / columns)
-        label_height = 28
-        sheet = Image.new("RGB", (columns * tile_size, rows * (tile_size + label_height)), "white")
-        draw = ImageDraw.Draw(sheet)
-        metadata = []
-        for display_id, candidate_index in enumerate(ranked_indices):
-            if use_generated:
-                tile = generated_images[display_id].resize((tile_size, tile_size))
-            else:
-                tile = self._candidate_depth_image(
-                    point_uvs[candidate_index],
-                    point_depths[candidate_index],
-                    visibility[candidate_index],
-                    size=tile_size,
-                )
-            x = (display_id % columns) * tile_size
-            y = (display_id // columns) * (tile_size + label_height)
-            sheet.paste(tile, (x, y + label_height))
-            draw.rectangle((x, y, x + tile_size, y + label_height), fill="white")
-            draw.text((x + 8, y + 5), f"ID {display_id}", fill="black")
-            metadata.append(
-                {
-                    "id": display_id,
-                    "candidate_index": candidate_index,
-                    "azimuth": candidates[candidate_index]["azimuth"],
-                    "elevation": candidates[candidate_index]["elevation"],
-                }
-            )
-        sheet_path = sample_file(self.cfg, flag, "view_candidates.png")
-        sheet.save(sheet_path)
-
-        from tools.qwen3_vl_view_selector import select_canonical_view
-
-        selector_path = getattr(
-            self.cfg,
-            "semantic_view_model_path",
-            "/opt/data/private/cr/resources/Qwen3-VL-8B-Instruct",
-        )
-        selected_id, response = select_canonical_view(
-            sheet,
-            metadata,
-            selector_path,
-            category,
-            candidate_kind="generated reconstructions" if use_generated else "depth maps",
-        )
-        response_path = sample_file(self.cfg, flag, "view_semantic_selection.txt")
-        with open(response_path, "w") as handle:
-            handle.write(response)
-        if use_generated:
-            self.semantic_selected_image = generated_images[selected_id]
-        return metadata[selected_id]["candidate_index"], response
-
     def canonical_viewpoint_select(self, xyz, flag):
         cameras, candidates = self._canonical_candidate_cameras(xyz)
         print(f" Scoring {len(cameras)} upright canonical viewpoints...")
@@ -596,17 +461,6 @@ class DepthPrompting:
             range(len(candidates)), key=lambda idx: candidates[idx]["score"]
         )
         best_index = geometry_best_index
-        if bool(getattr(self.cfg, "semantic_view_selector", False)):
-            try:
-                best_index, semantic_response = self._semantic_rerank_candidates(
-                    flag, candidates, point_uvs, point_depths, visibility
-                )
-                print(f" Qwen3-VL semantic view selection: {semantic_response.strip()}")
-            except Exception as error:
-                print(
-                    " Qwen3-VL view selection failed; using geometry fallback: "
-                    f"{error}"
-                )
         selected = candidates[best_index]
         print(
             " Selected canonical view: "

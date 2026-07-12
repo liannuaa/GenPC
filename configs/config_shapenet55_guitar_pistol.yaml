@@ -5,9 +5,8 @@ paths:
   models_dir: models
   hunyuan_repo_root: ../Hunyuan3D-2.1
 models:
-  qwen_transformer_path: nunchaku-qwen-image/svdq-int4_r128-qwen-image-lightningv1.0-4steps.safetensors
-  qwen_pipeline_path: Qwen-Image
-  qwen_controlnet_path: Qwen-Image-ControlNet-Union
+  qwen_edit_transformer_path: nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors
+  qwen_edit_pipeline_path: Qwen-Image-Edit-2511
   rmbg_model_path: RMBG-2.0
   hunyuan_model_path: Hunyuan3D-2.1
 outputs:
@@ -39,15 +38,18 @@ camera_base: kaolin
 res: 256
 edge_point_size: 2
 generate_res: 512
-qwen_depth_input_res: 512
+depth_image_input_res: 512
+qwen_edit_steps: 16
+qwen_edit_generate_res: 1024
+qwen_edit_true_cfg_scale: 4.0
+qwen_edit_negative_prompt: " "
 qwen_cpu_offload: false
-qwen_cpu_text_encoder: true
 rescale: true
 padding: 0.15
 mask_ratio_thresh: 0.82
 inpainter: cv2
 rembg_model: RMBG
-control_model: qwen
+control_model: qwen_edit
 generative_model: hunyuan2.1
 hunyuan_shape_subfolder: hunyuan3d-dit-v2-1
 hunyuan_shape_steps: 50
