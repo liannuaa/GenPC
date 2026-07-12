@@ -161,8 +161,9 @@ Redwood `01184` experiment:
 
 ## Stage 3 - MoGe to Complete Registration
 
-Status: implemented experimentally with fixed-uv/Sim3 F-FreeReg; still unstable
-for some generated samples.
+Status: implemented experimentally with fixed-uv/Sim3 F-FreeReg and adaptive
+`ir_3d` fallback. The random-transform failure mode has been fixed for the
+current Redwood batch.
 
 Intended FreeReg input:
 - Image: the same completed image used by MoGe, with background.
@@ -180,15 +181,18 @@ Important clarification:
   this is explicitly a separate experiment.
 
 Current issue:
-- Original F-FreeReg with DepthPro produces too few matches and unstable
-  transforms on `car__132`.
-- A likely contributor is mismatched image keypoint uv handling in the original
-  demo code, plus weak geometric correspondence between DepthPro/MoGe image
-  point clouds and Hunyuan complete geometry.
+- Original F-FreeReg with DepthPro can produce too few Kabsch hypotheses even
+  when YOHO descriptor match count is nonzero. The upstream solver then returns
+  `random_se3()`, which caused hundreds-scale translations for several Redwood
+  samples.
+- `scripts/run_freereg_original_depthpro.py` now rejects candidates with fewer
+  than two hypotheses or unreasonable complete-to-image translation and retries
+  with `ir_3d = 0.10` and then `ir_3d = 0.20`. The selected candidate and
+  hypothesis counts are saved in `freereg_candidates`.
 
 Open work:
-- Decide whether to use original F-FreeReg as-is, a fixed-uv FreeReg variant, or
-  FreeReg only as one initialization candidate.
+- Integrate the adaptive fixed-uv/Sim3 FreeReg variant into the main pipeline
+  rather than keeping it only as an experiment script.
 - Add robust validation visualizations for image-point correspondences.
 - If needed, add fallback refinement such as similarity ICP or projection
   silhouette consistency, but keep that separate from the original FreeReg
@@ -254,6 +258,13 @@ Redwood `01184` original F-FreeReg experiment:
   vendored under `third_party/FreeReg`. The vendored code contains source only;
   checkpoints are intentionally excluded and can be provided through
   `FREEREG_DEPTHPRO_CKPT`, `FREEREG_FCGF_CKPT`, and `FREEREG_YOHO_CKPT`.
+- Adaptive `ir_3d` rerun on the Redwood batch:
+  - `01184`, `05117`, `05452`, `06127`, `07306`, and `09639` selected the
+    original auto threshold.
+  - `06145`, `06188`, `06830`, and `07136` selected `fallback_0.1`.
+  - Sampled CPU Chamfer x1e2 mean improved from about `19899.46` to `14.00`.
+  - Summary:
+    `workspace/redwood_stage1_qwen_refine_preview/freereg_adaptive_ir3d_cpu_cd_summary.csv`
 
 ## Stage 4 - Complete Back to Partial
 
@@ -308,6 +319,13 @@ Redwood batch run on 2026-07-13:
   `06127` has low DepthPro-to-MoGe inlier ratio and higher metric;
   `06145`, `06188`, `06830`, and `07136` have large complete-to-partial
   translations caused by unstable FreeReg results.
+- Adaptive FreeReg update:
+  `06145`, `06188`, `06830`, and `07136` no longer have random hundreds-scale
+  complete-to-partial translations. The adaptive outputs use prefix
+  `<sample>_complete_to_partial_adaptive_ir3d`. Sampled CPU Chamfer x1e2:
+  `06145=7.005`, `06188=10.698`, `06830=15.149`, `07136=18.590`.
+  The full comparison is:
+  `workspace/redwood_stage1_qwen_refine_preview/freereg_adaptive_ir3d_cpu_cd_summary.csv`.
 - Core method documentation:
   `docs/core_registration_pipeline.md`.
 

@@ -191,6 +191,9 @@ complete_to_partial =
 The FreeReg source used by this path is vendored under `third_party/FreeReg`;
 large checkpoints are not committed and can be configured with
 `FREEREG_DEPTHPRO_CKPT`, `FREEREG_FCGF_CKPT`, and `FREEREG_YOHO_CKPT`.
+The FreeReg wrapper rejects candidates with too few Kabsch hypotheses instead
+of accepting FreeReg's random fallback transform, then retries with adaptive
+`ir_3d = 0.10, 0.20` when the original auto threshold fails.
 
 Useful CLI overrides:
 

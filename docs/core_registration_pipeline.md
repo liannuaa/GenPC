@@ -91,12 +91,19 @@ Implementation:
 - `scripts/run_freereg_original_depthpro.py`
 - vendored FreeReg source: `third_party/FreeReg`
 
-The current FreeReg variant is fixed-uv + Sim3:
+The current FreeReg variant is fixed-uv + Sim3 with an adaptive 3D inlier
+threshold:
 
 - DepthPro backprojects only object-mask pixels, not the full image.
 - YOHO image keypoint uv coordinates are projected directly from image
   keypoints.
 - FreeReg's estimated scale is applied in the saved Sim3 transform.
+- The wrapper first tries the original auto `ir_3d = voxel_size * 5`. If that
+  produces too few Kabsch hypotheses, it rejects the run instead of accepting
+  FreeReg's `random_se3()` fallback, then retries with `ir_3d = 0.10` and
+  `ir_3d = 0.20`.
+- The selected threshold and per-candidate hypothesis counts are recorded in
+  `freereg_candidates` inside the FreeReg info JSON.
 
 Outputs:
 
@@ -146,14 +153,19 @@ complete point cloud blue.
 
 Do not trust a fused result only because files exist. Check the metadata:
 
-- `freereg_matches < 100` is weak.
+- `freereg_matches < 100` is weak, but match count alone is not enough:
+  `06188` had many matches while still failing before adaptive hypothesis
+  checks.
+- `freereg_candidates[*].hypotheses < 2` means the candidate is not usable.
+  Previous runs accepted FreeReg's random fallback in this case, producing
+  hundreds-scale translations.
 - `depthpro_to_moge_ransac.inlier_ratio < 0.8` is weak.
 - very large `complete_to_partial` translation norm is usually a failed FreeReg
   result.
 - huge metric values, especially `CD-L1 x1e2` in the thousands, indicate a
   transform-scale or translation failure.
 
-For the 2026-07-13 Redwood batch, normal-scale samples were:
+For the original 2026-07-13 Redwood batch, normal-scale samples were:
 
 - `01184`
 - `05117`
@@ -167,10 +179,20 @@ Problematic or suspicious samples were:
 - `06145`, `06188`, `06830`, `07136`: large complete-to-partial translation,
   caused by unstable FreeReg results.
 
+The adaptive FreeReg rerun fixed the random-transform failures:
+
+- `01184`, `05117`, `05452`, `06127`, `07306`, and `09639` selected `auto`.
+- `06145`, `06188`, `06830`, and `07136` selected `fallback_0.1`.
+- Sampled CPU Chamfer x1e2 mean improved from about `19899.46` to `14.00`.
+- `06188` improved from about `35297.93` to `10.70` sampled CPU Chamfer x1e2;
+  its DepthPro-to-MoGe inlier ratio is still low, so it remains a useful bridge
+  quality stress case even though the random FreeReg failure mode is fixed.
+
 Batch summaries:
 
 - `workspace/redwood_stage1_qwen_refine_preview/redwood_complete_to_partial_registration_summary.csv`
 - `workspace/redwood_stage1_qwen_refine_preview/redwood_complete_to_partial_metrics.csv`
+- `workspace/redwood_stage1_qwen_refine_preview/freereg_adaptive_ir3d_cpu_cd_summary.csv`
 
 ## Runtime Notes
 

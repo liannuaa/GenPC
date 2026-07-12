@@ -12,6 +12,8 @@ from PIL import Image
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FREEREG_ROOT = PROJECT_ROOT / "third_party" / "FreeReg"
 LEGACY_FREEREG_ROOT = PROJECT_ROOT.parent / "FreeReg"
+DEFAULT_FALLBACK_IR_3D = (0.10, 0.20)
+DEFAULT_MAX_COMPLETE_TO_IMAGE_TRANSLATION = 50.0
 
 
 def add_freereg_to_path(freereg_root):
@@ -80,9 +82,41 @@ def apply_matrix(points, transform):
     return (np.asarray(transform, dtype=np.float64) @ hom.T).T[:, :3]
 
 
-def estimate_freereg_sim3(pipe, image_kpt_uvs, image_kpts, complete_kpts, matches):
+def parse_float_list(value):
+    if value is None:
+        return []
+    return [float(item) for item in str(value).split(",") if item.strip()]
+
+
+def build_ir_3d_candidates(auto_ir_3d, explicit_ir_3d, fallback_ir_3d):
+    if explicit_ir_3d is not None:
+        return [{"label": "explicit", "ir_3d": float(explicit_ir_3d)}]
+
+    candidates = [{"label": "auto", "ir_3d": float(auto_ir_3d)}]
+    for value in fallback_ir_3d:
+        value = float(value)
+        if not any(np.isclose(value, item["ir_3d"]) for item in candidates):
+            candidates.append({"label": f"fallback_{value:g}", "ir_3d": value})
+    return candidates
+
+
+def transform_translation_norm(transform):
+    transform = np.asarray(transform, dtype=np.float64)
+    return float(np.linalg.norm(transform[:3, 3]))
+
+
+def estimate_freereg_sim3(
+    pipe,
+    image_kpt_uvs,
+    image_kpts,
+    complete_kpts,
+    matches,
+    ir_3d,
+    min_hypotheses,
+    max_complete_to_image_translation,
+):
     solver = pipe.solver
-    solver.ird_3d = pipe.vs * 5 if pipe.ir_3d is None else pipe.ir_3d
+    solver.ird_3d = float(ir_3d)
     solver.ird_2d = max(10, (pipe.H + pipe.W) / 200.0) if pipe.ir_2d is None else pipe.ir_2d
 
     matched_image_uvs = image_kpt_uvs[matches[:, 0]]
@@ -95,6 +129,17 @@ def estimate_freereg_sim3(pipe, image_kpt_uvs, image_kpts, complete_kpts, matche
         solver.ird_3d,
         np_per_hypo=solver.np_per_hypo,
     )
+    hypothesis_count = int(len(scales))
+    diagnostics = {
+        "ir_3d": float(solver.ird_3d),
+        "ir_2d": float(solver.ird_2d),
+        "hypotheses": hypothesis_count,
+        "valid": False,
+    }
+    if hypothesis_count < int(min_hypotheses):
+        diagnostics["reject_reason"] = "not_enough_hypotheses"
+        return diagnostics
+
     scale, image_to_complete_rigid = solver.ransac(
         matched_image_uvs,
         matched_image_kpts,
@@ -104,7 +149,34 @@ def estimate_freereg_sim3(pipe, image_kpt_uvs, image_kpts, complete_kpts, matche
         thres2d=solver.ird_2d,
         thres3d=solver.ird_3d,
     )
-    return float(scale), image_to_complete_rigid, sim3_matrix(scale, image_to_complete_rigid)
+    image_to_complete = sim3_matrix(scale, image_to_complete_rigid)
+    complete_to_image = np.linalg.inv(image_to_complete)
+    complete_to_image_translation = transform_translation_norm(complete_to_image)
+    diagnostics.update(
+        {
+            "valid": bool(np.isfinite(image_to_complete).all()),
+            "freereg_scale": float(scale),
+            "image_to_complete_translation_norm": transform_translation_norm(image_to_complete),
+            "complete_to_image_translation_norm": complete_to_image_translation,
+            "image_to_complete_rigid": image_to_complete_rigid,
+            "image_to_complete": image_to_complete,
+            "complete_to_image": complete_to_image,
+        }
+    )
+    if not diagnostics["valid"]:
+        diagnostics["reject_reason"] = "nonfinite_transform"
+    elif complete_to_image_translation > float(max_complete_to_image_translation):
+        diagnostics["valid"] = False
+        diagnostics["reject_reason"] = "complete_to_image_translation_too_large"
+    return diagnostics
+
+
+def json_ready_candidate(candidate):
+    return {
+        key: value
+        for key, value in candidate.items()
+        if key not in {"image_to_complete_rigid", "image_to_complete", "complete_to_image"}
+    }
 
 
 def run(args):
@@ -155,14 +227,42 @@ def run(args):
         raise RuntimeError("Not enough FreeReg descriptor matches.")
 
     pipe.solver.set_intrinsic(intrinsic)
-    freereg_scale, image_to_complete_rigid, image_to_complete = estimate_freereg_sim3(
-        pipe,
-        image_kpt_uvs,
-        image_kpts,
-        complete_kpts,
-        matches,
+    auto_ir_3d = pipe.vs * 5
+    candidates = build_ir_3d_candidates(
+        auto_ir_3d=auto_ir_3d,
+        explicit_ir_3d=args.ir_3d,
+        fallback_ir_3d=parse_float_list(args.fallback_ir_3d),
     )
-    complete_to_image = np.linalg.inv(image_to_complete)
+    candidate_rng_state = np.random.get_state()
+    candidate_results = []
+    selected = None
+    for candidate in candidates:
+        np.random.set_state(candidate_rng_state)
+        result = estimate_freereg_sim3(
+            pipe,
+            image_kpt_uvs,
+            image_kpts,
+            complete_kpts,
+            matches,
+            ir_3d=candidate["ir_3d"],
+            min_hypotheses=args.min_hypotheses,
+            max_complete_to_image_translation=args.max_complete_to_image_translation,
+        )
+        result["label"] = candidate["label"]
+        candidate_results.append(result)
+        if result["valid"]:
+            selected = result
+            break
+    if selected is None:
+        raise RuntimeError(
+            "FreeReg failed to produce a valid non-random transform. "
+            f"Candidates: {[json_ready_candidate(item) for item in candidate_results]}"
+        )
+
+    freereg_scale = selected["freereg_scale"]
+    image_to_complete_rigid = selected["image_to_complete_rigid"]
+    image_to_complete = selected["image_to_complete"]
+    complete_to_image = selected["complete_to_image"]
     registered_complete_points = apply_matrix(complete_for_reg, complete_to_image)
 
     image_points_path = Path(str(out_prefix) + "_object_depthpro_points.ply")
@@ -175,7 +275,7 @@ def run(args):
     o3d.io.write_point_cloud(str(fused_path), image_pcd + registered_pcd)
 
     info = {
-        "method": "original_F-FreeReg_DepthPro_YOHO_Kabsch_object_masked",
+        "method": "original_F-FreeReg_DepthPro_YOHO_Kabsch_object_masked_adaptive_ir3d",
         "freereg_root": str(freereg_root),
         "image": str(image_path),
         "complete_point_cloud": str(complete_path),
@@ -186,6 +286,12 @@ def run(args):
         "nkpts": int(pipe.nkpts),
         "w_2d": float(pipe.w_2d),
         "vs": float(pipe.vs),
+        "auto_ir_3d": float(auto_ir_3d),
+        "selected_ir_3d": float(selected["ir_3d"]),
+        "selected_ir_3d_label": selected["label"],
+        "min_hypotheses": int(args.min_hypotheses),
+        "max_complete_to_image_translation": float(args.max_complete_to_image_translation),
+        "freereg_candidates": [json_ready_candidate(item) for item in candidate_results],
         "depthpro": depthpro_info,
         "complete_points": int(len(complete_for_reg)),
         "image_keypoints": int(len(image_kpts)),
@@ -220,6 +326,17 @@ def parse_args():
     parser.add_argument("--w_2d", type=float, default=0.5)
     parser.add_argument("--ir_2d", type=int, default=None)
     parser.add_argument("--ir_3d", type=float, default=None)
+    parser.add_argument(
+        "--fallback-ir-3d",
+        default=",".join(str(value) for value in DEFAULT_FALLBACK_IR_3D),
+        help="Comma-separated fallback 3D inlier thresholds used when auto ir_3d has too few hypotheses.",
+    )
+    parser.add_argument("--min-hypotheses", type=int, default=2)
+    parser.add_argument(
+        "--max-complete-to-image-translation",
+        type=float,
+        default=DEFAULT_MAX_COMPLETE_TO_IMAGE_TRANSLATION,
+    )
     parser.add_argument("--mask-threshold", type=int, default=128)
     parser.add_argument("--extra-erode-pixels", type=int, default=0)
     parser.add_argument("--max-depthpro-points", type=int, default=50000)
@@ -229,7 +346,7 @@ def parse_args():
     if args.complete_name is None:
         args.complete_name = f"{sample_dir.name}_hunyuan2.1.ply"
     if args.output_prefix is None:
-        args.output_prefix = f"{sample_dir.name}_freereg_original_depthpro_objectmask"
+        args.output_prefix = f"{sample_dir.name}_freereg_original_depthpro_fixeduv_sim3"
     return args
 
 
