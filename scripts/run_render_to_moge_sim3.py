@@ -542,6 +542,52 @@ def choose_icp_refinement(
     )
 
 
+def choose_visible_3d_refinement(
+    baseline_transform,
+    baseline_score,
+    candidate_transform,
+    candidate_score,
+    optimization_info,
+    *,
+    max_score_drop,
+    min_distance_improvement,
+):
+    info = dict(optimization_info)
+    max_score_drop = float(max_score_drop)
+    min_distance_improvement = float(min_distance_improvement)
+    initial_distance = info.get("initial_distance") or {}
+    candidate_distance = info.get("candidate_distance") or {}
+    initial_mean = float(initial_distance.get("mean", float("inf")))
+    candidate_mean = float(candidate_distance.get("mean", float("inf")))
+    required_score = float(baseline_score["score"]) - max_score_drop
+    required_distance = initial_mean * (1.0 - min_distance_improvement)
+
+    score_preserved = float(candidate_score["score"]) >= required_score
+    distance_improved = candidate_mean <= required_distance
+    info.update(
+        {
+            "max_score_drop": max_score_drop,
+            "min_distance_improvement": min_distance_improvement,
+            "required_score": required_score,
+            "required_distance_mean": required_distance,
+            "baseline_score": baseline_score,
+            "candidate_score": candidate_score,
+        }
+    )
+    if score_preserved and distance_improved:
+        info.update({"accepted": True, "reason": "render_score_preserved_visible_distance_improved"})
+        return np.asarray(candidate_transform, dtype=np.float64), candidate_score, info
+
+    if not score_preserved:
+        reason = "render_score_drop"
+    elif not distance_improved:
+        reason = "visible_3d_distance_not_improved"
+    else:
+        reason = "rejected"
+    info.update({"accepted": False, "reason": reason})
+    return np.asarray(baseline_transform, dtype=np.float64), baseline_score, info
+
+
 def torch_rodrigues(rotvec):
     theta = torch.linalg.norm(rotvec) + 1e-8
     x, y, z = rotvec
@@ -740,6 +786,413 @@ def optimize_silhouette_delta_sim3(
     return optimized, info
 
 
+def visible_3d_correspondences(
+    transform,
+    source_points,
+    target_points,
+    intrinsic_px,
+    image_shape,
+    target_mask,
+    *,
+    max_depth_delta,
+    max_pairs,
+    trim_quantile,
+    seed,
+):
+    visible_indices, moved = visible_source_indices(
+        source_points,
+        transform,
+        intrinsic_px,
+        image_shape,
+        target_mask,
+        max_depth_delta=max_depth_delta,
+    )
+    if len(visible_indices) < 16:
+        return None
+    rng = np.random.default_rng(int(seed))
+    if len(visible_indices) > int(max_pairs):
+        visible_indices = rng.choice(visible_indices, size=int(max_pairs), replace=False)
+    distances, nearest = cKDTree(target_points).query(moved[visible_indices], k=1)
+    threshold = np.quantile(distances, float(trim_quantile))
+    keep = distances <= threshold
+    if int(keep.sum()) < 16:
+        return None
+    return {
+        "source_points": np.asarray(source_points, dtype=np.float64)[visible_indices][keep],
+        "base_points": moved[visible_indices][keep],
+        "target_points": np.asarray(target_points, dtype=np.float64)[nearest[keep]],
+        "initial_distances": distances[keep],
+        "visible_points": int(len(visible_indices)),
+        "kept_pairs": int(keep.sum()),
+        "trim_threshold": float(threshold),
+    }
+
+
+def visible_distance_stats(points, targets):
+    distances = np.linalg.norm(np.asarray(points, dtype=np.float64) - np.asarray(targets, dtype=np.float64), axis=1)
+    return {
+        "mean": float(distances.mean()),
+        "median": float(np.median(distances)),
+        "p95": float(np.percentile(distances, 95)),
+        "max": float(distances.max()),
+        "count": int(len(distances)),
+    }
+
+
+def nearest_trimmed_correspondences(
+    transform,
+    source_points,
+    target_points,
+    *,
+    max_pairs,
+    trim_quantile,
+    seed,
+):
+    rng = np.random.default_rng(int(seed))
+    source_points = np.asarray(source_points, dtype=np.float64)
+    target_points = np.asarray(target_points, dtype=np.float64)
+    source_indices = np.arange(len(source_points))
+    if len(source_indices) > int(max_pairs):
+        source_indices = rng.choice(source_indices, size=int(max_pairs), replace=False)
+    moved = apply_sim3(source_points[source_indices], transform)
+    distances, nearest = cKDTree(target_points).query(moved, k=1)
+    threshold = np.quantile(distances, float(trim_quantile))
+    keep = distances <= threshold
+    if int(keep.sum()) < 16:
+        return None
+    return {
+        "source_points": source_points[source_indices][keep],
+        "base_points": moved[keep],
+        "target_points": target_points[nearest[keep]],
+        "initial_distances": distances[keep],
+        "sampled_points": int(len(source_indices)),
+        "kept_pairs": int(keep.sum()),
+        "trim_threshold": float(threshold),
+    }
+
+
+def optimize_partial_delta_sim3(
+    initial_transform,
+    source_points,
+    target_points,
+    *,
+    max_pairs,
+    trim_quantile,
+    iterations,
+    lr,
+    distance_loss,
+    distance_weight,
+    transform_reg_weight,
+    seed,
+    device,
+):
+    if int(iterations) <= 0:
+        return np.asarray(initial_transform, dtype=np.float64), {"enabled": False}
+
+    correspondences = nearest_trimmed_correspondences(
+        initial_transform,
+        source_points,
+        target_points,
+        max_pairs=max_pairs,
+        trim_quantile=trim_quantile,
+        seed=seed,
+    )
+    if correspondences is None:
+        return np.asarray(initial_transform, dtype=np.float64), {
+            "enabled": True,
+            "accepted": False,
+            "reason": "not_enough_partial_correspondences",
+        }
+
+    torch_device = torch.device(device if str(device).startswith("cuda") and torch.cuda.is_available() else "cpu")
+    dtype = torch.float32
+    base = torch.as_tensor(correspondences["base_points"], dtype=dtype, device=torch_device)
+    target = torch.as_tensor(correspondences["target_points"], dtype=dtype, device=torch_device)
+    log_scale = torch.nn.Parameter(torch.zeros((), dtype=dtype, device=torch_device))
+    rotvec = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    translation = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    optimizer = torch.optim.Adam([log_scale, rotvec, translation], lr=float(lr))
+    best = {
+        "loss": float("inf"),
+        "log_scale": 0.0,
+        "rotvec": [0.0, 0.0, 0.0],
+        "translation": [0.0, 0.0, 0.0],
+    }
+    for iteration in range(int(iterations)):
+        optimizer.zero_grad(set_to_none=True)
+        scale = torch.exp(log_scale)
+        rotation = torch_rodrigues(rotvec)
+        moved = scale * (base @ rotation.T) + translation
+        residual = moved - target
+        distances = torch.linalg.norm(residual, dim=1)
+        if distance_loss == "l2":
+            dist_loss = torch.mean(torch.sum(residual * residual, dim=1))
+        else:
+            dist_loss = torch.nn.functional.smooth_l1_loss(moved, target, beta=0.03)
+        transform_reg = log_scale.square() + 0.25 * rotvec.square().sum() + 0.25 * translation.square().sum()
+        loss = float(distance_weight) * dist_loss + float(transform_reg_weight) * transform_reg
+        loss.backward()
+        optimizer.step()
+        loss_value = float(loss.detach().cpu())
+        if loss_value < best["loss"]:
+            best = {
+                "loss": loss_value,
+                "iteration": int(iteration),
+                "log_scale": float(log_scale.detach().cpu()),
+                "rotvec": rotvec.detach().cpu().numpy().astype(float).tolist(),
+                "translation": translation.detach().cpu().numpy().astype(float).tolist(),
+                "distance_loss": float(dist_loss.detach().cpu()),
+                "distance_mean": float(distances.detach().mean().cpu()),
+                "distance_p95": float(torch.quantile(distances.detach(), 0.95).cpu()),
+            }
+
+    with torch.no_grad():
+        best_rotvec = torch.as_tensor(best["rotvec"], dtype=dtype, device=torch_device)
+        best_rotation = torch_rodrigues(best_rotvec).detach().cpu().numpy()
+    delta = make_sim3(
+        scale=float(math.exp(best["log_scale"])),
+        rotation=best_rotation,
+        translation=best["translation"],
+    )
+    optimized = delta @ np.asarray(initial_transform, dtype=np.float64)
+    moved_optimized = apply_sim3(correspondences["source_points"], optimized)
+    initial_stats = visible_distance_stats(correspondences["base_points"], correspondences["target_points"])
+    optimized_stats = visible_distance_stats(moved_optimized, correspondences["target_points"])
+    info = {
+        "enabled": True,
+        "accepted": None,
+        "sampled_points": correspondences["sampled_points"],
+        "kept_pairs": correspondences["kept_pairs"],
+        "trim_threshold": correspondences["trim_threshold"],
+        "iterations": int(iterations),
+        "lr": float(lr),
+        "distance_loss": distance_loss,
+        "initial_distance": initial_stats,
+        "candidate_distance": optimized_stats,
+        "best": best,
+        "delta": delta.tolist(),
+    }
+    return optimized, info
+
+
+def choose_partial_refinement(
+    baseline_transform,
+    candidate_transform,
+    optimization_info,
+    *,
+    min_distance_improvement,
+    max_delta_rotation_deg,
+    max_delta_translation,
+    min_delta_scale,
+    max_delta_scale,
+):
+    info = dict(optimization_info)
+    initial_distance = info.get("initial_distance") or {}
+    candidate_distance = info.get("candidate_distance") or {}
+    initial_mean = float(initial_distance.get("mean", float("inf")))
+    candidate_mean = float(candidate_distance.get("mean", float("inf")))
+    min_distance_improvement = float(min_distance_improvement)
+    required_distance = initial_mean * (1.0 - min_distance_improvement)
+    delta = np.asarray(info.get("delta", np.eye(4)), dtype=np.float64)
+    delta_scale, delta_rotation, delta_translation = decompose_sim3(delta)
+    delta_rotation_deg = float(np.degrees(Rotation.from_matrix(delta_rotation).magnitude()))
+    delta_translation_norm = float(np.linalg.norm(delta_translation))
+    distance_improved = candidate_mean <= required_distance
+    scale_ok = float(min_delta_scale) <= float(delta_scale) <= float(max_delta_scale)
+    rotation_ok = delta_rotation_deg <= float(max_delta_rotation_deg)
+    translation_ok = delta_translation_norm <= float(max_delta_translation)
+    info.update(
+        {
+            "min_distance_improvement": min_distance_improvement,
+            "required_distance_mean": required_distance,
+            "delta_decomposed": {
+                "scale": float(delta_scale),
+                "rotation_degrees": delta_rotation_deg,
+                "translation_norm": delta_translation_norm,
+                "translation": delta_translation.tolist(),
+            },
+            "limits": {
+                "max_delta_rotation_deg": float(max_delta_rotation_deg),
+                "max_delta_translation": float(max_delta_translation),
+                "min_delta_scale": float(min_delta_scale),
+                "max_delta_scale": float(max_delta_scale),
+            },
+        }
+    )
+    if distance_improved and scale_ok and rotation_ok and translation_ok:
+        info.update({"accepted": True, "reason": "partial_distance_improved_with_small_delta"})
+        return np.asarray(candidate_transform, dtype=np.float64), info
+    if not distance_improved:
+        reason = "partial_distance_not_improved"
+    elif not scale_ok:
+        reason = "delta_scale_out_of_bounds"
+    elif not rotation_ok:
+        reason = "delta_rotation_out_of_bounds"
+    else:
+        reason = "delta_translation_out_of_bounds"
+    info.update({"accepted": False, "reason": reason})
+    return np.asarray(baseline_transform, dtype=np.float64), info
+
+
+def optimize_visible_3d_delta_sim3(
+    initial_transform,
+    source_points,
+    target_points,
+    intrinsic_px,
+    image_shape,
+    target_mask,
+    *,
+    max_depth_delta,
+    max_pairs,
+    trim_quantile,
+    iterations,
+    lr,
+    distance_loss,
+    distance_weight,
+    silhouette_weight,
+    silhouette_render_size,
+    silhouette_points,
+    silhouette_splat_radius,
+    silhouette_sigma,
+    silhouette_opacity,
+    leakage_weight,
+    miss_weight,
+    transform_reg_weight,
+    seed,
+    device,
+):
+    if int(iterations) <= 0:
+        return np.asarray(initial_transform, dtype=np.float64), {"enabled": False}
+
+    correspondences = visible_3d_correspondences(
+        initial_transform,
+        source_points,
+        target_points,
+        intrinsic_px,
+        image_shape,
+        target_mask,
+        max_depth_delta=max_depth_delta,
+        max_pairs=max_pairs,
+        trim_quantile=trim_quantile,
+        seed=seed,
+    )
+    if correspondences is None:
+        return np.asarray(initial_transform, dtype=np.float64), {
+            "enabled": True,
+            "accepted": False,
+            "reason": "not_enough_visible_correspondences",
+        }
+
+    rng = np.random.default_rng(int(seed) + 17)
+    silhouette_source = np.asarray(source_points, dtype=np.float64)
+    if len(silhouette_source) > int(silhouette_points):
+        silhouette_source = silhouette_source[
+            rng.choice(len(silhouette_source), size=int(silhouette_points), replace=False)
+        ]
+    silhouette_base = apply_sim3(silhouette_source, initial_transform)
+    target_np = resize_target_mask(target_mask, silhouette_render_size)
+    torch_device = torch.device(device if str(device).startswith("cuda") and torch.cuda.is_available() else "cpu")
+    dtype = torch.float32
+    base = torch.as_tensor(correspondences["base_points"], dtype=dtype, device=torch_device)
+    target = torch.as_tensor(correspondences["target_points"], dtype=dtype, device=torch_device)
+    silhouette_base_t = torch.as_tensor(silhouette_base, dtype=dtype, device=torch_device)
+    intrinsic = torch.as_tensor(np.asarray(intrinsic_px, dtype=np.float32), dtype=dtype, device=torch_device)
+    target_mask_t = torch.as_tensor(target_np, dtype=dtype, device=torch_device)
+    target_sum = torch.clamp(target_mask_t.sum(), min=1.0)
+
+    log_scale = torch.nn.Parameter(torch.zeros((), dtype=dtype, device=torch_device))
+    rotvec = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    translation = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    optimizer = torch.optim.Adam([log_scale, rotvec, translation], lr=float(lr))
+    best = {
+        "loss": float("inf"),
+        "log_scale": 0.0,
+        "rotvec": [0.0, 0.0, 0.0],
+        "translation": [0.0, 0.0, 0.0],
+    }
+    eps = 1e-6
+    for iteration in range(int(iterations)):
+        optimizer.zero_grad(set_to_none=True)
+        scale = torch.exp(log_scale)
+        rotation = torch_rodrigues(rotvec)
+        moved = scale * (base @ rotation.T) + translation
+        residual = moved - target
+        distances = torch.linalg.norm(residual, dim=1)
+        if distance_loss == "l2":
+            dist_loss = torch.mean(torch.sum(residual * residual, dim=1))
+        else:
+            dist_loss = torch.nn.functional.smooth_l1_loss(moved, target, beta=0.03)
+
+        silhouette_points_moved = scale * (silhouette_base_t @ rotation.T) + translation
+        silhouette = render_soft_silhouette_torch(
+            silhouette_points_moved,
+            intrinsic,
+            image_shape,
+            render_size=silhouette_render_size,
+            splat_radius=silhouette_splat_radius,
+            sigma=silhouette_sigma,
+            opacity=silhouette_opacity,
+        )
+        pred_sum = torch.clamp(silhouette.sum(), min=eps)
+        intersection = (silhouette * target_mask_t).sum()
+        dice_loss = 1.0 - (2.0 * intersection + eps) / (pred_sum + target_sum + eps)
+        leakage = (silhouette * (1.0 - target_mask_t)).sum() / pred_sum
+        miss = (target_mask_t * (1.0 - silhouette)).sum() / target_sum
+        transform_reg = log_scale.square() + 0.25 * rotvec.square().sum() + 0.25 * translation.square().sum()
+        loss = (
+            float(distance_weight) * dist_loss
+            + float(silhouette_weight) * dice_loss
+            + float(leakage_weight) * leakage
+            + float(miss_weight) * miss
+            + float(transform_reg_weight) * transform_reg
+        )
+        loss.backward()
+        optimizer.step()
+        loss_value = float(loss.detach().cpu())
+        if loss_value < best["loss"]:
+            best = {
+                "loss": loss_value,
+                "iteration": int(iteration),
+                "log_scale": float(log_scale.detach().cpu()),
+                "rotvec": rotvec.detach().cpu().numpy().astype(float).tolist(),
+                "translation": translation.detach().cpu().numpy().astype(float).tolist(),
+                "distance_loss": float(dist_loss.detach().cpu()),
+                "distance_mean": float(distances.detach().mean().cpu()),
+                "distance_p95": float(torch.quantile(distances.detach(), 0.95).cpu()),
+                "dice_loss": float(dice_loss.detach().cpu()),
+                "leakage": float(leakage.detach().cpu()),
+                "miss": float(miss.detach().cpu()),
+            }
+
+    with torch.no_grad():
+        best_rotvec = torch.as_tensor(best["rotvec"], dtype=dtype, device=torch_device)
+        best_rotation = torch_rodrigues(best_rotvec).detach().cpu().numpy()
+    delta = make_sim3(
+        scale=float(math.exp(best["log_scale"])),
+        rotation=best_rotation,
+        translation=best["translation"],
+    )
+    optimized = delta @ np.asarray(initial_transform, dtype=np.float64)
+    moved_optimized = apply_sim3(correspondences["source_points"], optimized)
+    initial_stats = visible_distance_stats(correspondences["base_points"], correspondences["target_points"])
+    optimized_stats = visible_distance_stats(moved_optimized, correspondences["target_points"])
+    info = {
+        "enabled": True,
+        "accepted": None,
+        "visible_points": correspondences["visible_points"],
+        "kept_pairs": correspondences["kept_pairs"],
+        "trim_threshold": correspondences["trim_threshold"],
+        "iterations": int(iterations),
+        "lr": float(lr),
+        "distance_loss": distance_loss,
+        "initial_distance": initial_stats,
+        "candidate_distance": optimized_stats,
+        "best": best,
+        "delta": delta.tolist(),
+    }
+    return optimized, info
+
+
 def draw_overlay(path, image_path, target_mask, rendered_mask):
     image = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
     overlay = image.copy()
@@ -788,7 +1241,7 @@ def run(args):
     partial_path = Path(args.partial_path) if getattr(args, "partial_path", None) else PROJECT_ROOT / "data" / f"{args.flag}.ply"
 
     complete_pcd, complete_points = load_point_cloud(complete_path)
-    partial_pcd, _ = load_point_cloud(partial_path)
+    partial_pcd, partial_points = load_point_cloud(partial_path)
     full_moge_points, full_moge_colors, full_moge_pixels, moge_info = run_moge_with_pixels(
         image_path=image_path,
         pretrained=args.moge_model,
@@ -898,6 +1351,50 @@ def run(args):
                     "candidate_score": silhouette_score,
                 }
             )
+    visible_3d_optimized, visible_3d_optimization = optimize_visible_3d_delta_sim3(
+        refined,
+        complete_points,
+        object_moge.points,
+        intrinsic_px,
+        image_shape,
+        target_mask,
+        max_depth_delta=args.visible_3d_opt_max_depth_delta,
+        max_pairs=args.visible_3d_opt_max_pairs,
+        trim_quantile=args.visible_3d_opt_trim_quantile,
+        iterations=args.visible_3d_opt_iterations,
+        lr=args.visible_3d_opt_lr,
+        distance_loss=args.visible_3d_opt_distance_loss,
+        distance_weight=args.visible_3d_opt_distance_weight,
+        silhouette_weight=args.visible_3d_opt_silhouette_weight,
+        silhouette_render_size=args.visible_3d_opt_silhouette_render_size,
+        silhouette_points=args.visible_3d_opt_silhouette_points,
+        silhouette_splat_radius=args.visible_3d_opt_silhouette_splat_radius,
+        silhouette_sigma=args.visible_3d_opt_silhouette_sigma,
+        silhouette_opacity=args.visible_3d_opt_silhouette_opacity,
+        leakage_weight=args.visible_3d_opt_leakage_weight,
+        miss_weight=args.visible_3d_opt_miss_weight,
+        transform_reg_weight=args.visible_3d_opt_transform_reg_weight,
+        seed=args.seed,
+        device=args.device,
+    )
+    if visible_3d_optimization.get("enabled") and visible_3d_optimization.get("candidate_distance"):
+        visible_3d_score = evaluate_transform(
+            eval_points,
+            visible_3d_optimized,
+            intrinsic_px,
+            target_depth,
+            target_mask,
+            splat_radius=args.splat_radius,
+        )
+        refined, refined_score, visible_3d_optimization = choose_visible_3d_refinement(
+            refined,
+            refined_score,
+            visible_3d_optimized,
+            visible_3d_score,
+            visible_3d_optimization,
+            max_score_drop=args.visible_3d_opt_max_score_drop,
+            min_distance_improvement=args.visible_3d_opt_min_distance_improvement,
+        )
     coordinate_refined = np.asarray(refined, dtype=np.float64).copy()
     if args.visible_icp_iterations > 0:
         icp_refined, icp_history = refine_visible_icp(
@@ -942,6 +1439,31 @@ def run(args):
     complete_to_moge = refined
     moge_to_partial = np.load(moge_to_partial_path)
     complete_to_partial = compose_complete_to_partial(moge_to_partial, complete_to_moge)
+    partial_optimized, partial_refinement = optimize_partial_delta_sim3(
+        complete_to_partial,
+        complete_points,
+        partial_points,
+        max_pairs=args.partial_refine_max_pairs,
+        trim_quantile=args.partial_refine_trim_quantile,
+        iterations=args.partial_refine_iterations,
+        lr=args.partial_refine_lr,
+        distance_loss=args.partial_refine_distance_loss,
+        distance_weight=args.partial_refine_distance_weight,
+        transform_reg_weight=args.partial_refine_transform_reg_weight,
+        seed=args.seed,
+        device=args.device,
+    )
+    if partial_refinement.get("enabled") and partial_refinement.get("candidate_distance"):
+        complete_to_partial, partial_refinement = choose_partial_refinement(
+            complete_to_partial,
+            partial_optimized,
+            partial_refinement,
+            min_distance_improvement=args.partial_refine_min_distance_improvement,
+            max_delta_rotation_deg=args.partial_refine_max_delta_rotation_deg,
+            max_delta_translation=args.partial_refine_max_delta_translation,
+            min_delta_scale=args.partial_refine_min_delta_scale,
+            max_delta_scale=args.partial_refine_max_delta_scale,
+        )
     complete_in_moge = deepcopy(complete_pcd)
     complete_in_moge.points = o3d.utility.Vector3dVector(apply_sim3(complete_points, complete_to_moge))
     complete_in_partial = deepcopy(complete_pcd)
@@ -1023,6 +1545,7 @@ def run(args):
         "final_score": final_score,
         "refine_history": refine_history,
         "silhouette_optimization": silhouette_optimization,
+        "visible_3d_optimization": visible_3d_optimization,
         "visible_icp_history": icp_history,
         "visible_icp_acceptance": icp_acceptance,
         "complete_to_moge": complete_to_moge.tolist(),
@@ -1032,6 +1555,7 @@ def run(args):
             "translation": translation.tolist(),
         },
         "moge_to_partial": moge_to_partial.tolist(),
+        "partial_refinement": partial_refinement,
         "complete_to_partial": complete_to_partial.tolist(),
         "outputs": paths,
     }
@@ -1079,11 +1603,41 @@ def parse_args():
     parser.add_argument("--silhouette_opt_center_weight", type=float, default=2.0)
     parser.add_argument("--silhouette_opt_transform_reg_weight", type=float, default=0.02)
     parser.add_argument("--silhouette_opt_min_score_gain", type=float, default=0.0)
+    parser.add_argument("--visible_3d_opt_iterations", type=int, default=80)
+    parser.add_argument("--visible_3d_opt_max_pairs", type=int, default=12000)
+    parser.add_argument("--visible_3d_opt_trim_quantile", type=float, default=0.7)
+    parser.add_argument("--visible_3d_opt_max_depth_delta", type=float, default=0.015)
+    parser.add_argument("--visible_3d_opt_lr", type=float, default=0.01)
+    parser.add_argument("--visible_3d_opt_distance_loss", choices=("smooth_l1", "l2"), default="smooth_l1")
+    parser.add_argument("--visible_3d_opt_distance_weight", type=float, default=1.0)
+    parser.add_argument("--visible_3d_opt_silhouette_weight", type=float, default=0.35)
+    parser.add_argument("--visible_3d_opt_silhouette_render_size", type=int, default=128)
+    parser.add_argument("--visible_3d_opt_silhouette_points", type=int, default=12000)
+    parser.add_argument("--visible_3d_opt_silhouette_splat_radius", type=int, default=1)
+    parser.add_argument("--visible_3d_opt_silhouette_sigma", type=float, default=0.75)
+    parser.add_argument("--visible_3d_opt_silhouette_opacity", type=float, default=0.08)
+    parser.add_argument("--visible_3d_opt_leakage_weight", type=float, default=0.5)
+    parser.add_argument("--visible_3d_opt_miss_weight", type=float, default=0.25)
+    parser.add_argument("--visible_3d_opt_transform_reg_weight", type=float, default=0.02)
+    parser.add_argument("--visible_3d_opt_max_score_drop", type=float, default=0.10)
+    parser.add_argument("--visible_3d_opt_min_distance_improvement", type=float, default=0.02)
     parser.add_argument("--visible_icp_iterations", type=int, default=3)
     parser.add_argument("--icp_trim_quantile", type=float, default=0.7)
     parser.add_argument("--icp_max_pairs", type=int, default=20000)
     parser.add_argument("--icp_rollback_on_score_drop", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--icp_min_score_gain", type=float, default=0.0)
+    parser.add_argument("--partial_refine_iterations", type=int, default=80)
+    parser.add_argument("--partial_refine_max_pairs", type=int, default=12000)
+    parser.add_argument("--partial_refine_trim_quantile", type=float, default=0.35)
+    parser.add_argument("--partial_refine_lr", type=float, default=0.01)
+    parser.add_argument("--partial_refine_distance_loss", choices=("smooth_l1", "l2"), default="smooth_l1")
+    parser.add_argument("--partial_refine_distance_weight", type=float, default=1.0)
+    parser.add_argument("--partial_refine_transform_reg_weight", type=float, default=0.02)
+    parser.add_argument("--partial_refine_min_distance_improvement", type=float, default=0.01)
+    parser.add_argument("--partial_refine_max_delta_rotation_deg", type=float, default=12.0)
+    parser.add_argument("--partial_refine_max_delta_translation", type=float, default=0.12)
+    parser.add_argument("--partial_refine_min_delta_scale", type=float, default=0.9)
+    parser.add_argument("--partial_refine_max_delta_scale", type=float, default=1.1)
     parser.add_argument("--final_name", default=None)
     return parser.parse_args()
 

@@ -5,6 +5,7 @@ from munch import Munch
 import yaml
 
 from utils.dataUtils import resolve_prompt_label
+from tools.qwen_image_edit import build_refinement_prompt
 
 
 class DefaultConfigQwenEditTest(unittest.TestCase):
@@ -48,6 +49,13 @@ class DefaultConfigQwenEditTest(unittest.TestCase):
             resolve_prompt_label("06127", config),
             "a vase with leafy plant",
         )
+
+    def test_qwen_refinement_prompt_discourages_environment_foreground(self):
+        prompt = build_refinement_prompt("a vase with leafy plant")
+
+        self.assertIn("干净", prompt)
+        self.assertIn("不要生成桌面", prompt)
+        self.assertNotIn("背景为真实场景", prompt)
 
 
 if __name__ == "__main__":

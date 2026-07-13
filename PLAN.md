@@ -195,6 +195,23 @@ Current default implementation:
   coordinate-search refinement. It optimizes a small delta-Sim3 with soft point
   splatting against the object mask and accepts the result only if the
   full-resolution hard render score improves.
+- Update after off-view inspection of `01184`: pure 2D silhouette alignment can
+  look correct from the MoGe camera while still leaving a 3D rotation/depth
+  residual from another viewpoint. The render-to-MoGe path now adds a
+  differentiable visible-3D delta-Sim3 refinement after 2D silhouette
+  optimization. It matches the visible complete surface to MoGe object points,
+  keeps a soft 2D silhouette term, and accepts only when visible 3D distance
+  improves without exceeding the hard 2D render-score drop tolerance.
+- Final complete-to-partial composition now has an optional conservative
+  partial-space delta-Sim3 refinement. This handles small residual offsets in
+  the MoGe-to-partial bridge by fitting complete points to the raw partial
+  point cloud with trimmed nearest-neighbor 3D distances. It updates only the
+  final `complete_to_partial`/`fused` outputs and is accepted only when partial
+  distance improves and the delta stays within small scale/rotation/translation
+  bounds.
+- `06127` needs a focused Stage 1/regeneration pass because the current
+  completed image/background mask includes surrounding environment, which
+  contaminates `img_sam.png`, Hunyuan geometry, and downstream registration.
 
 Open work:
 - Inspect the no-FreeReg fused visualizations and overlays for high-metric
@@ -203,6 +220,11 @@ Open work:
   overlays plus CD/EMD against the previous no-FreeReg run.
 - Rerun the Redwood batch with differentiable silhouette optimization enabled
   and inspect which samples accept the optimized delta-Sim3.
+- Rerun at least `01184` with visible-3D and partial-space refinement enabled,
+  inspect `visible_3d_optimization` and `partial_refinement` metadata, then run
+  the full Redwood batch and metric if the smoke result is stable.
+- Regenerate `06127` Stage 1 image/mask before trusting its Stage 2/metric
+  result.
 - Tune per-category candidate parameters if visual inspection still shows
   systematic orientation or scale failures.
 - Keep the FreeReg adaptive path as a comparison baseline, not the default.

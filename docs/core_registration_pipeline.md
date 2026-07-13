@@ -108,6 +108,12 @@ The current default variant does not use FreeReg or DepthPro:
   the object mask, using silhouette Dice, leakage, missing-mask, distance,
   area, center, and transform-regularization terms. The candidate is accepted
   only if the full-resolution hard render score improves.
+- Run a differentiable visible-3D refinement from the current transform. It
+  builds nearest-neighbor correspondences between the complete cloud's visible
+  rendered surface and MoGe object points, optimizes a small delta-Sim3 with a
+  3D distance term plus a soft 2D silhouette guard, and accepts the result only
+  if the visible 3D distance improves while the full-resolution 2D render score
+  stays within the configured drop tolerance.
 - Optionally run visible trimmed ICP from rendered complete points to MoGe
   object points. The ICP result is accepted only if it preserves or improves
   the render-to-MoGe 2D score; otherwise the pipeline rolls back to the
@@ -133,6 +139,15 @@ complete_to_partial =
     @ complete_to_moge
 ```
 
+Because the MoGe-to-raw-partial bridge can still have a small residual offset,
+the final `complete_to_partial` transform may receive one more conservative
+partial-space refinement. This step optimizes a small delta-Sim3 from complete
+points to the raw partial point cloud using trimmed nearest-neighbor 3D
+distances. It updates only `complete_to_partial` and final fused/metric outputs;
+it does not change `complete_to_moge` or the MoGe-frame inspection outputs. The
+candidate is accepted only when the partial-space distance improves and the
+delta scale, rotation, and translation stay inside configured bounds.
+
 Final outputs:
 
 - `<sample>_complete_aligned_to_raw_partial.ply`
@@ -154,6 +169,12 @@ Do not trust a fused result only because files exist. Check the metadata:
   2D silhouette boundary is misaligned even if coarse mask overlap is nonzero.
 - `silhouette_optimization.accepted = false` means the soft differentiable
   optimization ran but did not improve the full-resolution hard render score.
+- `visible_3d_optimization.accepted = false` means the visible 3D refinement
+  either could not find stable correspondences, did not reduce visible 3D
+  distance enough, or would have hurt the 2D render score too much.
+- `partial_refinement.accepted = false` means the final complete-to-partial
+  correction either did not improve trimmed partial distance enough or proposed
+  a delta that exceeded the configured small-motion limits.
 - Large visible ICP mean/p95 distances are suspicious even if final files
   exist.
 - Very large `complete_to_partial` translation norm is usually a failed

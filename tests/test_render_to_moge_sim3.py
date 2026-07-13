@@ -5,11 +5,16 @@ import numpy as np
 from scripts.run_render_to_moge_sim3 import (
     apply_sim3,
     choose_icp_refinement,
+    choose_partial_refinement,
+    choose_visible_3d_refinement,
     compose_complete_to_partial,
     infer_paths,
     make_sim3,
+    optimize_partial_delta_sim3,
     optimize_silhouette_delta_sim3,
+    optimize_visible_3d_delta_sim3,
     score_depth_render,
+    visible_distance_stats,
     zbuffer_depth,
 )
 
@@ -152,6 +157,161 @@ class RenderToMogeSim3Test(unittest.TestCase):
 
         np.testing.assert_allclose(optimized, transform)
         self.assertFalse(info["enabled"])
+
+    def test_visible_distance_stats_reports_basic_distance_summary(self):
+        points = np.array([[0.0, 0.0, 0.0], [3.0, 4.0, 0.0]], dtype=np.float64)
+        targets = np.zeros((2, 3), dtype=np.float64)
+
+        stats = visible_distance_stats(points, targets)
+
+        self.assertEqual(stats["count"], 2)
+        self.assertEqual(stats["mean"], 2.5)
+        self.assertEqual(stats["max"], 5.0)
+
+    def test_visible_3d_optimizer_disabled_returns_initial_transform(self):
+        transform = np.eye(4, dtype=np.float64)
+        points = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [0.1, 0.0, 1.0],
+                [0.0, 0.1, 1.0],
+                [0.1, 0.1, 1.0],
+            ],
+            dtype=np.float64,
+        )
+
+        optimized, info = optimize_visible_3d_delta_sim3(
+            transform,
+            points,
+            points,
+            np.eye(3, dtype=np.float64),
+            image_shape=(8, 8),
+            target_mask=np.ones((8, 8), dtype=bool),
+            max_depth_delta=0.015,
+            max_pairs=4,
+            trim_quantile=0.7,
+            iterations=0,
+            lr=0.01,
+            distance_loss="smooth_l1",
+            distance_weight=1.0,
+            silhouette_weight=0.35,
+            silhouette_render_size=8,
+            silhouette_points=4,
+            silhouette_splat_radius=1,
+            silhouette_sigma=0.75,
+            silhouette_opacity=0.1,
+            leakage_weight=0.5,
+            miss_weight=0.25,
+            transform_reg_weight=0.01,
+            seed=1,
+            device="cpu",
+        )
+
+        np.testing.assert_allclose(optimized, transform)
+        self.assertFalse(info["enabled"])
+
+    def test_choose_visible_3d_refinement_accepts_distance_gain_with_score_guard(self):
+        baseline = np.eye(4, dtype=np.float64)
+        candidate = np.eye(4, dtype=np.float64)
+        candidate[:3, 3] = [0.01, 0.0, 0.0]
+        optimization = {
+            "initial_distance": {"mean": 1.0},
+            "candidate_distance": {"mean": 0.95},
+        }
+
+        chosen, score, info = choose_visible_3d_refinement(
+            baseline,
+            {"score": 1.0},
+            candidate,
+            {"score": 0.99},
+            optimization,
+            max_score_drop=0.02,
+            min_distance_improvement=0.02,
+        )
+
+        np.testing.assert_allclose(chosen, candidate)
+        self.assertEqual(score["score"], 0.99)
+        self.assertTrue(info["accepted"])
+
+    def test_choose_visible_3d_refinement_rejects_render_score_drop(self):
+        baseline = np.eye(4, dtype=np.float64)
+        candidate = np.eye(4, dtype=np.float64)
+        candidate[:3, 3] = [0.01, 0.0, 0.0]
+        optimization = {
+            "initial_distance": {"mean": 1.0},
+            "candidate_distance": {"mean": 0.9},
+        }
+
+        chosen, score, info = choose_visible_3d_refinement(
+            baseline,
+            {"score": 1.0},
+            candidate,
+            {"score": 0.9},
+            optimization,
+            max_score_drop=0.02,
+            min_distance_improvement=0.02,
+        )
+
+        np.testing.assert_allclose(chosen, baseline)
+        self.assertEqual(score["score"], 1.0)
+        self.assertFalse(info["accepted"])
+        self.assertEqual(info["reason"], "render_score_drop")
+
+    def test_partial_optimizer_disabled_returns_initial_transform(self):
+        transform = np.eye(4, dtype=np.float64)
+        points = np.array(
+            [
+                [0.0, 0.0, 0.0],
+                [0.1, 0.0, 0.0],
+                [0.0, 0.1, 0.0],
+                [0.1, 0.1, 0.0],
+            ],
+            dtype=np.float64,
+        )
+
+        optimized, info = optimize_partial_delta_sim3(
+            transform,
+            points,
+            points,
+            max_pairs=4,
+            trim_quantile=0.5,
+            iterations=0,
+            lr=0.01,
+            distance_loss="smooth_l1",
+            distance_weight=1.0,
+            transform_reg_weight=0.01,
+            seed=1,
+            device="cpu",
+        )
+
+        np.testing.assert_allclose(optimized, transform)
+        self.assertFalse(info["enabled"])
+
+    def test_choose_partial_refinement_rejects_large_delta(self):
+        baseline = np.eye(4, dtype=np.float64)
+        candidate = np.eye(4, dtype=np.float64)
+        delta = np.eye(4, dtype=np.float64)
+        delta[:3, 3] = [1.0, 0.0, 0.0]
+        optimization = {
+            "initial_distance": {"mean": 1.0},
+            "candidate_distance": {"mean": 0.8},
+            "delta": delta.tolist(),
+        }
+
+        chosen, info = choose_partial_refinement(
+            baseline,
+            candidate,
+            optimization,
+            min_distance_improvement=0.02,
+            max_delta_rotation_deg=12.0,
+            max_delta_translation=0.12,
+            min_delta_scale=0.9,
+            max_delta_scale=1.1,
+        )
+
+        np.testing.assert_allclose(chosen, baseline)
+        self.assertFalse(info["accepted"])
+        self.assertEqual(info["reason"], "delta_translation_out_of_bounds")
 
     def test_compose_complete_to_partial_left_multiplies_moge_to_partial(self):
         complete_to_moge = np.eye(4, dtype=np.float64)
