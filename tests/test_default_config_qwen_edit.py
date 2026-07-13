@@ -42,19 +42,19 @@ class DefaultConfigQwenEditTest(unittest.TestCase):
 
         self.assertEqual(resolve_prompt_label("05117", config), "red chair")
 
-    def test_redwood_06127_prompt_label_uses_dataset_category(self):
+    def test_redwood_06127_prompt_label_uses_terracotta_pot_override(self):
         config = Munch.fromDict(yaml.safe_load(Path("configs/config.yaml").read_text()))
 
         self.assertEqual(
             resolve_prompt_label("06127", config),
-            "a vase with leafy plant",
+            "terracotta flower pot with leafy plant",
         )
 
     def test_qwen_refinement_prompt_discourages_environment_foreground(self):
         prompt = build_refinement_prompt("a vase with leafy plant")
 
         self.assertIn("干净", prompt)
-        self.assertIn("普通摄影棚背景", prompt)
+        self.assertIn("纯白背景", prompt)
         self.assertIn("不要生成桌面", prompt)
         self.assertNotIn("背景为真实场景", prompt)
 

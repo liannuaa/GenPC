@@ -34,6 +34,7 @@ sample_ids:
 max_samples: null # set an integer to truncate auto-discovered samples
 prompt_overrides:
   "05117": "red chair"
+  "06127": "terracotta flower pot with leafy plant"
   "06188": "red motorcyle"
   "07136": "leather sofa"
   "07306": "Office Trash Can"
