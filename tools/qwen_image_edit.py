@@ -23,18 +23,24 @@ def _zh_object_labels(flag):
 def build_completion_prompt(flag):
     _, photo_label = _zh_object_labels(flag)
     return (
-        f"根据这张不完整的{photo_label}深度图生成完整的真实{photo_label}照片，"
-        "保持已有部分的轮廓、姿态、朝向和相机视角不变，合理补全缺失部分。"
+        f"根据这张不完整的{photo_label}深度图生成完整的{photo_label}深度图，"
+        "输出仍然是灰度深度图风格，"
+        "保持已有部分的轮廓、姿态、朝向和相机视角不变，"
+        "严格保持深度图中的2D投影轮廓、物体位置和大小，"
+        "不要旋转、平移、缩放、换视角或重新构图，合理补全缺失部分，"
+        "不要生成真实照片、颜色、材质、纹理或摄影背景。"
     )
 
 
 def build_refinement_prompt(flag):
     _, photo_label = _zh_object_labels(flag)
     return (
-        f"根据这张{photo_label}图生成更贴近真实{photo_label}的照片。"
+        f"根据这张完整的{photo_label}深度图生成真实{photo_label}照片。"
         "只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，"
+        "严格保持输入图中的2D投影轮廓、物体位置和大小，"
+        "不要旋转、平移、缩放、换视角或重新构图，"
         "不需要保留原图的颜色、材质、光照和背景细节；"
-        "让物体结构、材质和外观更真实自然，背景保持干净简单，"
+        "让物体结构、材质和外观更真实自然，背景使用干净的普通摄影棚背景，"
         "不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。"
     )
 

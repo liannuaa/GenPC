@@ -1,5 +1,12 @@
 # Workspace Notes
 
+## Research Engineering Scope
+- This repository supports an academic paper/research project. Prefer methods
+  that are simple, explainable, reproducible, and easy to ablate.
+- Avoid over-engineering, model stacking, broad framework rewrites, or
+  sample-specific hacks unless the user explicitly asks for a focused
+  diagnostic experiment.
+
 ## Default Python Environment
 - This project defaults to the conda environment `genpc`.
 - Do not assume `python` or `pip` from `PATH` points to that environment.

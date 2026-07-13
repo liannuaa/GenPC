@@ -6,6 +6,81 @@ asks to preserve a pipeline state.
 
 ## Accepted Results
 
+### 2026-07-13 17:08 CST - 01184 Symmetric Partial ICP Comparison Baseline
+
+Status: comparison baseline, not final accepted. User said it is "确实好了一些"
+when inspecting `result.png`, but also said it still has a visible gap. Keep it
+as the current improved registration reference while searching for lower
+CD/EMD.
+
+Sample:
+- `01184`
+
+Inputs:
+- Raw partial point cloud: `data/01184.ply`
+- Stage 1 image: `workspace/redwood_stage1_qwen_refine_preview/01184/img.png`
+- Complete point cloud:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_hunyuan2.1.ply`
+- Previous render-to-MoGe registration info:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_render_to_moge_sim3_info.json`
+
+Outputs:
+- Complete-only candidate:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_sym_partial_icp_complete_aligned_to_raw_partial.ply`
+- Gray raw partial plus blue complete visualization:
+  `workspace/redwood_stage1_qwen_refine_preview/01184/01184_sym_partial_icp_raw_partial_gray_complete_blue_aligned.ply`
+- Transform copy:
+  `/tmp/genpc_reg_ablation/01184_sym_best_f0.2_i1.0_w4.npy`
+
+Metric:
+- `CD-L1 x1e2`: `2.755563`
+- `EMD x1e2`: `3.242779`
+- User target for next search: lower than `CD-L1 x1e2 = 2.31` and
+  `EMD x1e2 = 3.17`.
+
+Model/checkpoint:
+- Qwen pipeline: `models/Qwen-Image-Edit-2511`
+- Nunchaku Qwen transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+- Hunyuan3D: `models/Hunyuan3D-2.1`
+- MoGe: `models/moge-2-vitl`
+
+Prompt:
+- `根据这张rubbish bin图生成更贴近真实rubbish bin的照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景为真实场景。`
+
+Negative prompt:
+- `" "`
+
+Generation parameters:
+- Input depth/image size: `512x512`
+- Qwen pipeline output size before resize: `1024x1024`
+- Saved image size: `512x512`
+- Qwen `num_inference_steps`: `16`
+- Qwen refine stage: `True`
+- Qwen refine steps: `16`
+- `true_cfg_scale`: `4.0`
+- Seed: `UNKNOWN`
+- Hunyuan shape steps: `50`
+- Hunyuan seed: `UNKNOWN`
+
+Postprocessing and registration:
+- RMBG: `models/RMBG-2.0`
+- MoGe-to-raw-partial bridge from existing 01184 pipeline outputs.
+- Initial complete-to-partial came from `moge_to_partial @ complete_to_moge`.
+- Final comparison candidate used symmetric partial ICP from that transform with:
+  `complete_trim_quantile=0.2`, `partial_trim_quantile=1.0`,
+  `partial_weight=4`, `iterations=5`, sampled `6000` complete points and
+  `6000` partial points.
+- Quick proxy improved partial-to-complete mean distance from `0.0361409` to
+  `0.0226324`, and p95 from `0.0853774` to `0.0591858`.
+
+What was approved:
+- Only that this candidate is visibly better than the previous result.
+
+Do not treat as final:
+- User explicitly said there is still a gap. Continue searching for a lower
+  CD/EMD and better visual alignment before replacing `01184_fused.ply`.
+
 ### 2026-07-12 21:02 CST - car__132 Single-Stage Qwen-Image-Edit-2511 Plus Completion
 
 Status: accepted by user as "效果非常好"; this is the current main-flow Qwen
@@ -313,3 +388,151 @@ Do not change without asking:
 - Do not remove fixed-uv or Sim3 handling from `scripts/run_freereg_original_depthpro.py`.
 - Do not switch this accepted baseline back to unmasked DepthPro or rigid-only
   FreeReg output.
+# 2026-07-13 Redwood studio-background rerun partial visual approval
+
+- Timestamp: 2026-07-13 21:23 Asia/Shanghai
+- Sample ids: `01184`, `05117`, `05452`, `06127`, `06145` completed so far
+- Output root: `workspace/redwood_qwen_studio_bg_full_rerun_20260713`
+- Input point clouds:
+  - `data/01184.ply`
+  - `data/05117.ply`
+  - `data/05452.ply`
+  - `data/06127.ply`
+  - `data/06145.ply`
+- Current output file paths:
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/01184/img.png`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/01184/01184_hunyuan2.1.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/01184/01184_complete_aligned_to_raw_partial.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/01184/01184_fused.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05117/img.png`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05117/05117_hunyuan2.1.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05117/05117_complete_aligned_to_raw_partial.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05117/05117_fused.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05452/img.png`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05452/05452_hunyuan2.1.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05452/05452_complete_aligned_to_raw_partial.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05452/05452_fused.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06127/img.png`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06127/06127_hunyuan2.1.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06127/06127_complete_aligned_to_raw_partial.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06127/06127_fused.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06145/img.png`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06145/06145_hunyuan2.1.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06145/06145_complete_aligned_to_raw_partial.ply`
+  - `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06145/06145_fused.ply`
+- Model name/path and checkpoint/transformer path:
+  - Qwen pipeline: `models/Qwen-Image-Edit-2511`
+  - Qwen transformer: `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+  - Hunyuan3D: `models/Hunyuan3D-2.1`, shape subfolder `hunyuan3d-dit-v2-1`, checkpoint variant `fp16`
+  - RMBG: `models/RMBG-2.0`
+  - MoGe: `models/moge-2-vitl`
+- Full prompts:
+  - Stage 1 prompt template: `根据这张不完整的{object}深度图生成完整的真实{object}照片，保持已有部分的轮廓、姿态、朝向和相机视角不变，合理补全缺失部分，背景使用干净的普通摄影棚背景。`
+  - Stage 2 refinement prompt template: `根据这张{object}图生成更贴近真实{object}的照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的普通摄影棚背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+  - Object labels from config/dataset: `01184=rubbish bin`, `05117=red chair`, `05452=armchair`, `06127=a vase with leafy plant`, `06145=table`
+  - Negative prompt: `" "`
+- Generation parameters:
+  - Qwen input/output: `depth_image_input_res=512`, `qwen_edit_generate_res=1024`, final `generate_res=512`
+  - Qwen steps: `qwen_edit_steps=16`, `qwen_edit_refine_steps=16`
+  - Qwen CFG: `qwen_edit_true_cfg_scale=4.0`
+  - Qwen seed: UNKNOWN, not explicitly set by current main pipeline
+  - Hunyuan steps: `50`
+  - Hunyuan seed: `null` in config, random unless Hunyuan internals override it
+  - Hunyuan octree resolution: `384`
+  - Hunyuan point sample count: `100000`
+- Postprocessing:
+  - RMBG background removal to `img_sam.png`
+  - MoGeV2 on `img.png`
+  - RMBG object mask, object mask erosion `object_mask_erode_pixels=2`
+  - pixel bridge `partial point index -> MoGe point index`
+  - render-to-MoGe Sim3 registration with 2D gate, retry search, bridge-anchor optimization, and anisotropic partial refinement
+- Metrics completed so far:
+  - `01184`: `CD-L1 x1e2=0.920551`, `EMD x1e2=1.440672`
+  - `05117`: `CD-L1 x1e2=1.239928`, `EMD x1e2=1.676881`
+  - `05452`: `CD-L1 x1e2=2.557462`, `EMD x1e2=3.513691`
+  - `06127`: `CD-L1 x1e2=2.846162`, `EMD x1e2=4.402206`
+  - `06145`: `CD-L1 x1e2=1.335033`, `EMD x1e2=2.102884`
+- User approval:
+  - User said the slight regression is acceptable and the first few samples already look very good: `这点退化我能接受，前几个看上去已经很不错了`.
+  - Treat the studio-background prompt direction and this output root as a promising baseline for the first completed samples.
+  - Do not overwrite the listed accepted sample directories without asking.
+  - The full batch was later interrupted to rerun `06188` by explicit user request.
+  - `06188` is not part of this accepted visual baseline.
+- Reproducibility note: Qwen and Hunyuan seeds are not fixed, so this is not exactly reproducible.
+
+### 2026-07-13 22:05 CST - 06188 red motorcyle rerun diagnostic
+
+Status: diagnostic only, not accepted. User requested changing `06188` to
+`red motorcyle` and rerunning the sample. The resulting metric worsened
+slightly and the current 2D/MoGe overlay still shows systematic offset.
+
+Sample:
+- `06188`
+
+Input:
+- Raw partial point cloud: `data/06188.ply`
+
+Outputs:
+- Stage 1 image:
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06188/img.png`
+- Hunyuan complete point cloud:
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06188/06188_hunyuan2.1.ply`
+- Final complete aligned to raw partial:
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06188/06188_complete_aligned_to_raw_partial.ply`
+- Metric output:
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06188/06188_fused.ply`
+- Gray raw partial plus blue complete visualization:
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06188/06188_raw_partial_gray_complete_blue_aligned.ply`
+- Gray raw partial plus red MoGe bridge visualization:
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06188/06188_moge_to_raw_partial_raw_partial_gray_moge_red_aligned.ply`
+- 2D render-to-MoGe overlay:
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/06188/06188_render_to_moge_overlay.png`
+
+Metric:
+- `CD-L1 x1e2`: `5.186385`
+- `EMD x1e2`: `6.571867`
+
+Model/checkpoint:
+- Qwen pipeline: `models/Qwen-Image-Edit-2511`
+- Qwen transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+- Hunyuan3D: `models/Hunyuan3D-2.1`, shape subfolder `hunyuan3d-dit-v2-1`,
+  checkpoint variant `fp16`
+- RMBG: `models/RMBG-2.0`
+- MoGe: `models/moge-2-vitl`
+
+Prompt:
+- Stage 1 prompt:
+  `根据这张不完整的red motorcyle深度图生成完整的真实red motorcyle照片，保持已有部分的轮廓、姿态、朝向和相机视角不变，合理补全缺失部分，背景使用干净的普通摄影棚背景。`
+- Stage 2 refinement prompt:
+  `根据这张red motorcyle图生成更贴近真实red motorcyle的照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的普通摄影棚背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- Negative prompt: `" "`
+
+Generation parameters:
+- Qwen input/output: `depth_image_input_res=512`, `qwen_edit_generate_res=1024`,
+  final `generate_res=512`
+- Qwen steps: `qwen_edit_steps=16`, `qwen_edit_refine_steps=16`
+- Qwen CFG: `qwen_edit_true_cfg_scale=4.0`
+- Qwen seed: UNKNOWN, not explicitly set by current main pipeline
+- Hunyuan steps: `50`
+- Hunyuan seed: `null` in config, random unless Hunyuan internals override it
+- Hunyuan octree resolution: `384`
+- Hunyuan point sample count: `100000`
+
+Postprocessing and registration:
+- RMBG background removal to `img_sam.png`
+- MoGeV2 on `img.png`
+- RMBG object mask with `object_mask_erode_pixels=2`
+- Pixel bridge `partial point index -> MoGe point index`
+- Render-to-MoGe Sim3 registration with retry search, visible 3D optimization,
+  bridge-anchor optimization, and 2D acceptance gate
+- MoGe bridge stats: `match_ratio = 0.987339`, `ransac_inlier_ratio = 0.9885`,
+  `ransac_median_error = 0.025176`
+- 2D gate failed: `iou = 0.749277`, `coverage = 0.866660`,
+  `leakage = 0.153091`; failed checks are `iou` and `leakage`
+- Partial-space refinement was skipped because `registration_2d_threshold_not_met`
+
+Do not treat as accepted:
+- The old same-root `06188` metric before the prompt override was
+  `CD-L1 x1e2 = 5.018309`, `EMD x1e2 = 6.483270`.
+- The `red motorcyle` prompt label did not improve this sample.

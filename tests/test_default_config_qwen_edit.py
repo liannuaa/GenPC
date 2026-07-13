@@ -54,6 +54,7 @@ class DefaultConfigQwenEditTest(unittest.TestCase):
         prompt = build_refinement_prompt("a vase with leafy plant")
 
         self.assertIn("干净", prompt)
+        self.assertIn("普通摄影棚背景", prompt)
         self.assertIn("不要生成桌面", prompt)
         self.assertNotIn("背景为真实场景", prompt)
 

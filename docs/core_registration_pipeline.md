@@ -3,6 +3,11 @@
 This document records the current core GenPC method for registering a generated
 complete point cloud back to the original partial point cloud.
 
+This is an academic-paper implementation. The core method should stay simple,
+explainable, reproducible, and easy to ablate. Prefer concise geometric or
+continuous-optimization changes over extra model stacks, broad engineering
+frameworks, or sample-specific rules.
+
 ## Goal
 
 Given a partial point cloud, reconstruct a complete 3D point cloud and express
@@ -34,6 +39,13 @@ the projection state:
 - `point_uv.npy`
 - `depth.png`
 - `img.png` after Qwen completion
+
+The Qwen completion/refinement prompts should keep the object pose and camera
+view fixed while using a clean ordinary photography-studio background. For
+hard pose cases, use a depth-first two-stage prompt: first complete the input
+as a depth-like image while preserving 2D projection, then translate that
+completed depth-like image into a realistic object photo. This keeps the
+geometry constraint explicit before appearance generation.
 
 Important coordinate detail:
 
@@ -131,6 +143,33 @@ The resulting transform is `complete_to_moge`.
 
 ## Stage 5: Compose Complete To Partial
 
+Before any final partial-space refinement runs, the MoGe-frame 2D render
+alignment must pass a hard acceptance gate. By default
+`registration_2d_acceptance` requires:
+
+- `final_score.iou >= 0.82`
+- `final_score.coverage >= 0.84`
+- `final_score.leakage <= 0.10`
+- `final_score.edge_iou >= 0.025`
+- `final_score.edge_chamfer_px <= 18.0`
+
+The edge terms are hard gates. A high coarse mask overlap is not enough if the
+rendered boundary is visibly off. If the 2D gate fails, the pipeline retries a
+top-K set of candidates ranked by a 2D-focused objective with wider scale
+multipliers. When the
+`partial_to_moge_index` bridge exists, retry candidates also record a
+MoGe-frame anchor distance to raw partial points and use a joint 2D+anchor
+objective for candidate selection.
+
+After retry, the pipeline can run a continuous bridge-anchor delta-Sim3
+optimization in the MoGe frame. This uses raw partial points mapped back
+through `moge_to_partial^-1` as bridge anchors, optimizes a trimmed anchor
+distance plus a soft 2D silhouette guard, and accepts the delta only when
+anchor distance improves without dropping the 2D objective beyond the
+configured tolerance. If the best result still fails the 2D gate, partial-space
+refinement is skipped so a poor image-frame alignment cannot be hidden by a
+later partial-distance improvement.
+
 The final transform is now:
 
 ```text
@@ -165,6 +204,9 @@ Do not trust a fused result only because files exist. Check the metadata:
 - Low `final_score.iou`, low `final_score.coverage`, or high
   `final_score.leakage` in `<sample>_render_to_moge_sim3_info.json` means the
   complete-to-MoGe render alignment is weak.
+- `registration_2d_acceptance.accepted = false` means the render alignment did
+  not pass the configured hard 2D gate, so the output should not be treated as a
+  good registration even if fused PLY files exist.
 - Low `final_score.edge_iou` or high `final_score.edge_chamfer_norm` means the
   2D silhouette boundary is misaligned even if coarse mask overlap is nonzero.
 - `silhouette_optimization.accepted = false` means the soft differentiable
@@ -172,6 +214,9 @@ Do not trust a fused result only because files exist. Check the metadata:
 - `visible_3d_optimization.accepted = false` means the visible 3D refinement
   either could not find stable correspondences, did not reduce visible 3D
   distance enough, or would have hurt the 2D render score too much.
+- `bridge_anchor_optimization.accepted = false` means the continuous
+  partial-to-MoGe anchor refinement either did not improve anchor distance or
+  would have hurt the 2D render objective too much.
 - `partial_refinement.accepted = false` means the final complete-to-partial
   correction either did not improve trimmed partial distance enough or proposed
   a delta that exceeded the configured small-motion limits.

@@ -273,6 +273,19 @@ def parse_float_list(value):
     return [float(item) for item in str(value).split(",") if item.strip()]
 
 
+def parse_scale_triplets(value):
+    triplets = []
+    for item in str(value).split(";"):
+        item = item.strip()
+        if not item:
+            continue
+        parts = [float(part) for part in item.split(",") if part.strip()]
+        if len(parts) != 3:
+            raise ValueError(f"Expected scale triplet 'sx,sy,sz', got: {item}")
+        triplets.append(tuple(parts))
+    return triplets
+
+
 def maybe_subsample(points, max_points, seed):
     points = np.asarray(points, dtype=np.float64)
     if max_points is None or len(points) <= int(max_points):
@@ -350,7 +363,13 @@ def refine_transform_coordinate_search(
     rotation_steps_deg,
     scale_steps,
     rounds,
+    selection_objective="score",
 ):
+    def objective_value(score):
+        if selection_objective == "2d_gate":
+            return score_2d_gate_objective(score)
+        return float(score.get("score", float("-inf")))
+
     transform = np.asarray(initial_transform, dtype=np.float64).copy()
     best_score = evaluate_transform(
         source_points,
@@ -386,6 +405,7 @@ def refine_transform_coordinate_search(
 
             local_best_transform = transform
             local_best_score = best_score
+            local_best_value = objective_value(best_score)
             for proposal in proposals:
                 score = evaluate_transform(
                     source_points,
@@ -395,10 +415,12 @@ def refine_transform_coordinate_search(
                     target_mask,
                     splat_radius=splat_radius,
                 )
-                if score["score"] > local_best_score["score"]:
+                value = objective_value(score)
+                if value > local_best_value:
                     local_best_score = score
+                    local_best_value = value
                     local_best_transform = proposal
-            if local_best_score["score"] > best_score["score"] + 1e-8:
+            if local_best_value > objective_value(best_score) + 1e-8:
                 transform = local_best_transform
                 best_score = local_best_score
                 improved = True
@@ -542,6 +564,86 @@ def choose_icp_refinement(
     )
 
 
+def evaluate_2d_acceptance(
+    score,
+    *,
+    enabled,
+    min_iou,
+    min_coverage,
+    max_leakage,
+    min_edge_iou,
+    max_edge_chamfer_px,
+):
+    score = dict(score or {})
+    thresholds = {
+        "min_iou": float(min_iou),
+        "min_coverage": float(min_coverage),
+        "max_leakage": float(max_leakage),
+        "min_edge_iou": float(min_edge_iou),
+        "max_edge_chamfer_px": float(max_edge_chamfer_px),
+    }
+    values = {
+        "iou": float(score.get("iou", float("-inf"))),
+        "coverage": float(score.get("coverage", float("-inf"))),
+        "leakage": float(score.get("leakage", float("inf"))),
+        "edge_iou": float(score.get("edge_iou", float("-inf"))),
+        "edge_chamfer_px": float(score.get("edge_chamfer_px", float("inf"))),
+    }
+    if not bool(enabled):
+        return {
+            "enabled": False,
+            "accepted": True,
+            "reason": "disabled",
+            "thresholds": thresholds,
+            "values": values,
+            "failed": [],
+            "warnings": [],
+        }
+
+    failed = []
+    if values["iou"] < thresholds["min_iou"]:
+        failed.append("iou")
+    if values["coverage"] < thresholds["min_coverage"]:
+        failed.append("coverage")
+    if values["leakage"] > thresholds["max_leakage"]:
+        failed.append("leakage")
+    if values["edge_iou"] < thresholds["min_edge_iou"]:
+        failed.append("edge_iou")
+    if values["edge_chamfer_px"] > thresholds["max_edge_chamfer_px"]:
+        failed.append("edge_chamfer_px")
+
+    return {
+        "enabled": True,
+        "accepted": not failed,
+        "reason": "2d_threshold_met" if not failed else "2d_threshold_not_met",
+        "thresholds": thresholds,
+        "values": values,
+        "failed": failed,
+        "warnings": [],
+    }
+
+
+def score_2d_gate_objective(score):
+    score = dict(score or {})
+    return float(
+        2.0 * float(score.get("iou", 0.0))
+        + float(score.get("coverage", 0.0))
+        - 2.0 * float(score.get("leakage", 1.0))
+        + 3.0 * float(score.get("edge_iou", 0.0))
+        - 0.025 * float(score.get("edge_chamfer_px", 100.0))
+    )
+
+
+def score_2d_anchor_objective(score, anchor_stats, *, anchor_scale, anchor_weight):
+    anchor_stats = dict(anchor_stats or {})
+    anchor_to_complete = dict(anchor_stats.get("anchor_to_complete") or {})
+    anchor_mean = float(anchor_to_complete.get("mean", float("inf")))
+    if not np.isfinite(anchor_mean):
+        return score_2d_gate_objective(score)
+    anchor_scale = max(float(anchor_scale), 1e-6)
+    return float(score_2d_gate_objective(score) - float(anchor_weight) * (anchor_mean / anchor_scale))
+
+
 def choose_visible_3d_refinement(
     baseline_transform,
     baseline_score,
@@ -609,7 +711,15 @@ def resize_target_mask(mask, render_size):
     return np.clip(resized, 0.0, 1.0).astype(np.float32)
 
 
-def render_soft_silhouette_torch(points, intrinsic_px, image_shape, render_size, splat_radius, sigma, opacity):
+def render_soft_silhouette_and_depth_torch(
+    points,
+    intrinsic_px,
+    image_shape,
+    render_size,
+    splat_radius,
+    sigma,
+    opacity,
+):
     height, width = int(image_shape[0]), int(image_shape[1])
     render_size = int(render_size)
     z = points[:, 2]
@@ -623,12 +733,15 @@ def render_soft_silhouette_torch(points, intrinsic_px, image_shape, render_size,
     )
     valid = valid & (uv[:, 0] >= 0) & (uv[:, 0] <= render_size - 1) & (uv[:, 1] >= 0) & (uv[:, 1] <= render_size - 1)
     uv = uv[valid]
+    z = z[valid]
     if uv.numel() == 0:
-        return torch.zeros((render_size, render_size), dtype=points.dtype, device=points.device)
+        empty = torch.zeros((render_size, render_size), dtype=points.dtype, device=points.device)
+        return empty, empty
 
     base = torch.floor(uv).long()
     flat_size = render_size * render_size
     density = torch.zeros(flat_size, dtype=points.dtype, device=points.device)
+    weighted_depth = torch.zeros(flat_size, dtype=points.dtype, device=points.device)
     radius = max(1, int(splat_radius))
     sigma_sq = max(float(sigma) ** 2, 1e-6)
     for dy in range(-radius, radius + 1):
@@ -642,8 +755,25 @@ def render_soft_silhouette_torch(points, intrinsic_px, image_shape, render_size,
             weights = torch.exp(-0.5 * dist2 / sigma_sq)
             indices = xy[keep, 1] * render_size + xy[keep, 0]
             density.index_add_(0, indices, weights)
+            weighted_depth.index_add_(0, indices, weights * z[keep])
     density = density.reshape(render_size, render_size)
-    return 1.0 - torch.exp(-float(opacity) * density)
+    weighted_depth = weighted_depth.reshape(render_size, render_size)
+    silhouette = 1.0 - torch.exp(-float(opacity) * density)
+    depth = weighted_depth / torch.clamp(density, min=1e-6)
+    return silhouette, depth
+
+
+def render_soft_silhouette_torch(points, intrinsic_px, image_shape, render_size, splat_radius, sigma, opacity):
+    silhouette, _ = render_soft_silhouette_and_depth_torch(
+        points,
+        intrinsic_px,
+        image_shape,
+        render_size,
+        splat_radius,
+        sigma,
+        opacity,
+    )
+    return silhouette
 
 
 def optimize_silhouette_delta_sim3(
@@ -652,6 +782,7 @@ def optimize_silhouette_delta_sim3(
     intrinsic_px,
     image_shape,
     target_mask,
+    target_depth=None,
     *,
     render_size,
     max_points,
@@ -663,6 +794,8 @@ def optimize_silhouette_delta_sim3(
     leakage_weight,
     miss_weight,
     outside_distance_weight,
+    depth_weight=0.0,
+    boundary_weight=0.0,
     area_weight,
     center_weight,
     transform_reg_weight,
@@ -681,6 +814,19 @@ def optimize_silhouette_delta_sim3(
     target_np = resize_target_mask(target_mask, render_size)
     outside_distance = cv2.distanceTransform((target_np <= 0.5).astype(np.uint8), cv2.DIST_L2, 3)
     outside_distance = outside_distance / max(float(np.linalg.norm(target_np.shape)), 1.0)
+    target_edge_np = mask_boundary(target_np > 0.5).astype(np.float32)
+    target_edge_distance = cv2.distanceTransform((target_edge_np <= 0.5).astype(np.uint8), cv2.DIST_L2, 3)
+    target_edge_distance = target_edge_distance / max(float(np.linalg.norm(target_np.shape)), 1.0)
+    if target_depth is not None and float(depth_weight) > 0.0:
+        target_depth_np = cv2.resize(
+            np.asarray(target_depth, dtype=np.float32),
+            (int(render_size), int(render_size)),
+            interpolation=cv2.INTER_AREA,
+        )
+        valid_depth_np = (target_np > 0.5) & np.isfinite(target_depth_np) & (target_depth_np > 0.0)
+    else:
+        target_depth_np = np.zeros_like(target_np, dtype=np.float32)
+        valid_depth_np = np.zeros_like(target_np, dtype=bool)
 
     torch_device = torch.device(device if str(device).startswith("cuda") and torch.cuda.is_available() else "cpu")
     dtype = torch.float32
@@ -688,7 +834,13 @@ def optimize_silhouette_delta_sim3(
     intrinsic = torch.as_tensor(np.asarray(intrinsic_px, dtype=np.float32), dtype=dtype, device=torch_device)
     target = torch.as_tensor(target_np, dtype=dtype, device=torch_device)
     outside = torch.as_tensor(outside_distance.astype(np.float32), dtype=dtype, device=torch_device)
+    target_edge = torch.as_tensor(target_edge_np.astype(np.float32), dtype=dtype, device=torch_device)
+    target_edge_dist = torch.as_tensor(target_edge_distance.astype(np.float32), dtype=dtype, device=torch_device)
+    target_depth_t = torch.as_tensor(target_depth_np.astype(np.float32), dtype=dtype, device=torch_device)
+    valid_depth = torch.as_tensor(valid_depth_np.astype(np.float32), dtype=dtype, device=torch_device)
     target_sum = torch.clamp(target.sum(), min=1.0)
+    target_edge_sum = torch.clamp(target_edge.sum(), min=1.0)
+    valid_depth_sum = torch.clamp(valid_depth.sum(), min=1.0)
     yy, xx = torch.meshgrid(
         torch.linspace(0.0, 1.0, int(render_size), dtype=dtype, device=torch_device),
         torch.linspace(0.0, 1.0, int(render_size), dtype=dtype, device=torch_device),
@@ -714,7 +866,7 @@ def optimize_silhouette_delta_sim3(
         scale = torch.exp(log_scale)
         rotation = torch_rodrigues(rotvec)
         moved = scale * (base @ rotation.T) + translation
-        silhouette = render_soft_silhouette_torch(
+        silhouette, rendered_depth = render_soft_silhouette_and_depth_torch(
             moved,
             intrinsic,
             image_shape,
@@ -729,6 +881,33 @@ def optimize_silhouette_delta_sim3(
         leakage = (silhouette * (1.0 - target)).sum() / pred_sum
         miss = (target * (1.0 - silhouette)).sum() / target_sum
         outside_loss = (silhouette * outside).sum() / pred_sum
+        if float(boundary_weight) > 0.0 and bool(target_edge_np.any()):
+            dx = torch.nn.functional.pad(torch.abs(silhouette[:, 1:] - silhouette[:, :-1]), (0, 1, 0, 0))
+            dy = torch.nn.functional.pad(torch.abs(silhouette[1:, :] - silhouette[:-1, :]), (0, 0, 0, 1))
+            pred_edge = torch.clamp(dx + dy, min=0.0)
+            pred_edge_sum = torch.clamp(pred_edge.sum(), min=eps)
+            pred_to_target_edge = (pred_edge * target_edge_dist).sum() / pred_edge_sum
+            local_silhouette = torch.nn.functional.max_pool2d(
+                silhouette[None, None],
+                kernel_size=3,
+                stride=1,
+                padding=1,
+            )[0, 0]
+            target_edge_covered = (target_edge * (1.0 - local_silhouette)).sum() / target_edge_sum
+            boundary_loss = pred_to_target_edge + target_edge_covered
+        else:
+            boundary_loss = torch.zeros((), dtype=dtype, device=torch_device)
+        if float(depth_weight) > 0.0 and bool(valid_depth_np.any()):
+            depth_weight_map = valid_depth * silhouette.detach().clamp(min=0.05)
+            depth_residual = torch.nn.functional.smooth_l1_loss(
+                rendered_depth * depth_weight_map,
+                target_depth_t * depth_weight_map,
+                beta=0.03,
+                reduction="sum",
+            )
+            depth_loss = depth_residual / valid_depth_sum
+        else:
+            depth_loss = torch.zeros((), dtype=dtype, device=torch_device)
         area_loss = ((pred_sum - target_sum) / target_sum) ** 2
         pred_cx = (silhouette * xx).sum() / pred_sum
         pred_cy = (silhouette * yy).sum() / pred_sum
@@ -739,6 +918,8 @@ def optimize_silhouette_delta_sim3(
             + float(leakage_weight) * leakage
             + float(miss_weight) * miss
             + float(outside_distance_weight) * outside_loss
+            + float(depth_weight) * depth_loss
+            + float(boundary_weight) * boundary_loss
             + float(area_weight) * area_loss
             + float(center_weight) * center_loss
             + float(transform_reg_weight) * transform_reg
@@ -757,6 +938,8 @@ def optimize_silhouette_delta_sim3(
                 "leakage": float(leakage.detach().cpu()),
                 "miss": float(miss.detach().cpu()),
                 "outside_loss": float(outside_loss.detach().cpu()),
+                "depth_loss": float(depth_loss.detach().cpu()),
+                "boundary_loss": float(boundary_loss.detach().cpu()),
                 "area_loss": float(area_loss.detach().cpu()),
                 "center_loss": float(center_loss.detach().cpu()),
             }
@@ -780,10 +963,87 @@ def optimize_silhouette_delta_sim3(
         "splat_radius": int(splat_radius),
         "sigma": float(sigma),
         "opacity": float(opacity),
+        "depth_weight": float(depth_weight),
+        "boundary_weight": float(boundary_weight),
         "best": best,
         "delta": delta.tolist(),
     }
     return optimized, info
+
+
+def apply_silhouette_refinement(
+    transform,
+    baseline_score,
+    complete_points,
+    eval_points,
+    intrinsic_px,
+    image_shape,
+    target_mask,
+    target_depth,
+    *,
+    args,
+    reason_prefix="",
+):
+    optimized, info = optimize_silhouette_delta_sim3(
+        transform,
+        complete_points,
+        intrinsic_px,
+        image_shape,
+        target_mask,
+        target_depth=target_depth,
+        render_size=args.silhouette_opt_render_size,
+        max_points=args.silhouette_opt_max_points,
+        iterations=args.silhouette_opt_iterations,
+        lr=args.silhouette_opt_lr,
+        splat_radius=args.silhouette_opt_splat_radius,
+        sigma=args.silhouette_opt_sigma,
+        opacity=args.silhouette_opt_opacity,
+        leakage_weight=args.silhouette_opt_leakage_weight,
+        miss_weight=args.silhouette_opt_miss_weight,
+        outside_distance_weight=args.silhouette_opt_outside_distance_weight,
+        depth_weight=args.silhouette_opt_depth_weight,
+        boundary_weight=args.silhouette_opt_boundary_weight,
+        area_weight=args.silhouette_opt_area_weight,
+        center_weight=args.silhouette_opt_center_weight,
+        transform_reg_weight=args.silhouette_opt_transform_reg_weight,
+        seed=args.seed,
+        device=args.device,
+    )
+    if not info.get("enabled"):
+        return np.asarray(transform, dtype=np.float64), baseline_score, info
+
+    candidate_score = evaluate_transform(
+        eval_points,
+        optimized,
+        intrinsic_px,
+        target_depth,
+        target_mask,
+        splat_radius=args.splat_radius,
+    )
+    min_gain = float(args.silhouette_opt_min_score_gain)
+    prefix = f"{reason_prefix}_" if reason_prefix else ""
+    if candidate_score["score"] > baseline_score["score"] + min_gain:
+        info.update(
+            {
+                "accepted": True,
+                "reason": f"{prefix}render_score_improved",
+                "min_score_gain": min_gain,
+                "baseline_score": baseline_score,
+                "candidate_score": candidate_score,
+            }
+        )
+        return np.asarray(optimized, dtype=np.float64), candidate_score, info
+
+    info.update(
+        {
+            "accepted": False,
+            "reason": f"{prefix}render_score_not_improved",
+            "min_score_gain": min_gain,
+            "baseline_score": baseline_score,
+            "candidate_score": candidate_score,
+        }
+    )
+    return np.asarray(transform, dtype=np.float64), baseline_score, info
 
 
 def visible_3d_correspondences(
@@ -837,6 +1097,640 @@ def visible_distance_stats(points, targets):
         "max": float(distances.max()),
         "count": int(len(distances)),
     }
+
+
+def load_bridge_anchor_points(
+    partial_points,
+    *,
+    sample_dir,
+    flag,
+    moge_to_partial,
+    max_points,
+    seed,
+    index_name=None,
+):
+    sample_dir = Path(sample_dir)
+    index_path = sample_dir / (
+        index_name or f"{flag}_moge_to_raw_partial_partial_to_moge_index.npy"
+    )
+    if not index_path.exists():
+        return np.empty((0, 3), dtype=np.float64), {
+            "enabled": False,
+            "reason": "missing_partial_to_moge_index",
+            "index_path": str(index_path),
+        }
+
+    partial_points = np.asarray(partial_points, dtype=np.float64)
+    partial_to_moge = np.load(index_path)
+    if len(partial_to_moge) != len(partial_points):
+        return np.empty((0, 3), dtype=np.float64), {
+            "enabled": False,
+            "reason": "index_length_mismatch",
+            "index_path": str(index_path),
+            "partial_points": int(len(partial_points)),
+            "index_length": int(len(partial_to_moge)),
+        }
+
+    valid = np.asarray(partial_to_moge, dtype=np.int64) >= 0
+    valid_count = int(valid.sum())
+    if valid_count == 0:
+        return np.empty((0, 3), dtype=np.float64), {
+            "enabled": False,
+            "reason": "not_enough_bridge_matches",
+            "index_path": str(index_path),
+            "valid_matches": valid_count,
+            "match_ratio": float(valid_count / max(len(partial_points), 1)),
+        }
+
+    inverse_moge_to_partial = np.linalg.inv(np.asarray(moge_to_partial, dtype=np.float64))
+    anchors = apply_sim3(partial_points[valid], inverse_moge_to_partial)
+    rng = np.random.default_rng(int(seed))
+    if max_points is not None and len(anchors) > int(max_points):
+        chosen = rng.choice(len(anchors), size=int(max_points), replace=False)
+        anchors = anchors[chosen]
+
+    return anchors, {
+        "enabled": True,
+        "index_path": str(index_path),
+        "partial_points": int(len(partial_points)),
+        "valid_matches": valid_count,
+        "match_ratio": float(valid_count / max(len(partial_points), 1)),
+        "anchors": int(len(anchors)),
+    }
+
+
+def anchor_alignment_stats(source_points, anchor_points, transform, *, max_points, seed):
+    rng = np.random.default_rng(int(seed))
+    source_points = np.asarray(source_points, dtype=np.float64)
+    anchor_points = np.asarray(anchor_points, dtype=np.float64)
+    if len(source_points) > int(max_points):
+        source_points = source_points[rng.choice(len(source_points), size=int(max_points), replace=False)]
+    if len(anchor_points) > int(max_points):
+        anchor_points = anchor_points[rng.choice(len(anchor_points), size=int(max_points), replace=False)]
+    moved = apply_sim3(source_points, transform)
+    complete_tree = cKDTree(moved)
+    anchor_tree = cKDTree(anchor_points)
+    anchor_to_complete, _ = complete_tree.query(anchor_points, k=1)
+    complete_to_anchor, _ = anchor_tree.query(moved, k=1)
+    complete_trim35 = complete_to_anchor[complete_to_anchor <= np.quantile(complete_to_anchor, 0.35)]
+    complete_trim70 = complete_to_anchor[complete_to_anchor <= np.quantile(complete_to_anchor, 0.70)]
+    return {
+        "anchor_to_complete": {
+            "mean": float(anchor_to_complete.mean()),
+            "median": float(np.median(anchor_to_complete)),
+            "p95": float(np.percentile(anchor_to_complete, 95)),
+            "max": float(anchor_to_complete.max()),
+            "count": int(len(anchor_to_complete)),
+        },
+        "complete_to_anchor_trim35": {
+            "mean": float(complete_trim35.mean()),
+            "count": int(len(complete_trim35)),
+        },
+        "complete_to_anchor_trim70": {
+            "mean": float(complete_trim70.mean()),
+            "count": int(len(complete_trim70)),
+        },
+    }
+
+
+def partial_alignment_stats(source_points, target_points, transform, *, max_points, seed):
+    rng = np.random.default_rng(int(seed))
+    source_points = np.asarray(source_points, dtype=np.float64)
+    target_points = np.asarray(target_points, dtype=np.float64)
+    if len(source_points) > int(max_points):
+        source_points = source_points[rng.choice(len(source_points), size=int(max_points), replace=False)]
+    if len(target_points) > int(max_points):
+        target_points = target_points[rng.choice(len(target_points), size=int(max_points), replace=False)]
+    moved = apply_sim3(source_points, transform)
+    source_tree = cKDTree(moved)
+    target_tree = cKDTree(target_points)
+    partial_to_complete, _ = source_tree.query(target_points, k=1)
+    complete_to_partial, _ = target_tree.query(moved, k=1)
+    complete_trim35 = complete_to_partial[complete_to_partial <= np.quantile(complete_to_partial, 0.35)]
+    complete_trim70 = complete_to_partial[complete_to_partial <= np.quantile(complete_to_partial, 0.70)]
+    return {
+        "partial_to_complete": {
+            "mean": float(partial_to_complete.mean()),
+            "median": float(np.median(partial_to_complete)),
+            "p95": float(np.percentile(partial_to_complete, 95)),
+            "max": float(partial_to_complete.max()),
+            "count": int(len(partial_to_complete)),
+        },
+        "complete_to_partial_trim35": {
+            "mean": float(complete_trim35.mean()),
+            "count": int(len(complete_trim35)),
+        },
+        "complete_to_partial_trim70": {
+            "mean": float(complete_trim70.mean()),
+            "count": int(len(complete_trim70)),
+        },
+    }
+
+
+def refine_symmetric_partial_icp(
+    initial_transform,
+    source_points,
+    target_points,
+    *,
+    iterations,
+    max_pairs,
+    complete_trim_quantile,
+    partial_trim_quantile,
+    partial_weight,
+    max_step_translation,
+    min_step_scale,
+    max_step_scale,
+    seed,
+):
+    if int(iterations) <= 0:
+        return np.asarray(initial_transform, dtype=np.float64), {"enabled": False}
+
+    rng = np.random.default_rng(int(seed))
+    source_points = np.asarray(source_points, dtype=np.float64)
+    target_points = np.asarray(target_points, dtype=np.float64)
+    if len(source_points) > int(max_pairs):
+        source_points = source_points[rng.choice(len(source_points), size=int(max_pairs), replace=False)]
+    if len(target_points) > int(max_pairs):
+        target_points = target_points[rng.choice(len(target_points), size=int(max_pairs), replace=False)]
+
+    current = np.asarray(initial_transform, dtype=np.float64).copy()
+    initial_stats = partial_alignment_stats(
+        source_points,
+        target_points,
+        current,
+        max_points=max_pairs,
+        seed=seed,
+    )
+    history = []
+    weight_repeats = max(1, int(round(float(partial_weight))))
+    for iteration in range(int(iterations)):
+        moved = apply_sim3(source_points, current)
+        target_tree = cKDTree(target_points)
+        source_tree = cKDTree(moved)
+        source_corr = []
+        target_corr = []
+
+        complete_distances, complete_nearest = target_tree.query(moved, k=1)
+        complete_threshold = np.quantile(complete_distances, float(complete_trim_quantile))
+        complete_keep = complete_distances <= complete_threshold
+        if int(complete_keep.sum()) >= 16:
+            source_corr.append(moved[complete_keep])
+            target_corr.append(target_points[complete_nearest[complete_keep]])
+
+        partial_distances, partial_nearest = source_tree.query(target_points, k=1)
+        partial_threshold = np.quantile(partial_distances, float(partial_trim_quantile))
+        partial_keep = partial_distances <= partial_threshold
+        if int(partial_keep.sum()) >= 16:
+            for _ in range(weight_repeats):
+                source_corr.append(moved[partial_nearest[partial_keep]])
+                target_corr.append(target_points[partial_keep])
+
+        if not source_corr:
+            break
+
+        source_corr = np.concatenate(source_corr, axis=0)
+        target_corr = np.concatenate(target_corr, axis=0)
+        delta = umeyama_similarity(source_corr, target_corr)
+        step_scale, _, step_translation = decompose_sim3(delta)
+        step_translation_norm = float(np.linalg.norm(step_translation))
+        if (
+            step_translation_norm > float(max_step_translation)
+            or step_scale < float(min_step_scale)
+            or step_scale > float(max_step_scale)
+        ):
+            history.append(
+                {
+                    "iteration": int(iteration),
+                    "accepted_step": False,
+                    "reason": "step_out_of_bounds",
+                    "step_scale": float(step_scale),
+                    "step_translation_norm": step_translation_norm,
+                    "complete_pairs": int(complete_keep.sum()),
+                    "partial_pairs": int(partial_keep.sum()),
+                }
+            )
+            break
+
+        current = delta @ current
+        stats = partial_alignment_stats(
+            source_points,
+            target_points,
+            current,
+            max_points=max_pairs,
+            seed=seed,
+        )
+        history.append(
+            {
+                "iteration": int(iteration),
+                "accepted_step": True,
+                "step_scale": float(step_scale),
+                "step_translation_norm": step_translation_norm,
+                "complete_pairs": int(complete_keep.sum()),
+                "partial_pairs": int(partial_keep.sum()),
+                "stats": stats,
+            }
+        )
+
+    candidate_stats = partial_alignment_stats(
+        source_points,
+        target_points,
+        current,
+        max_points=max_pairs,
+        seed=seed,
+    )
+    delta_total = current @ np.linalg.inv(np.asarray(initial_transform, dtype=np.float64))
+    info = {
+        "enabled": True,
+        "accepted": None,
+        "method": "symmetric_partial_icp",
+        "iterations": int(iterations),
+        "max_pairs": int(max_pairs),
+        "complete_trim_quantile": float(complete_trim_quantile),
+        "partial_trim_quantile": float(partial_trim_quantile),
+        "partial_weight": float(partial_weight),
+        "initial_alignment": initial_stats,
+        "candidate_alignment": candidate_stats,
+        "initial_distance": initial_stats["partial_to_complete"],
+        "candidate_distance": candidate_stats["partial_to_complete"],
+        "history": history,
+        "delta": delta_total.tolist(),
+    }
+    return current, info
+
+
+def pca_axes_for_transform(source_points, transform):
+    source_points = np.asarray(source_points, dtype=np.float64)
+    centered = source_points - source_points.mean(axis=0)
+    _, axes = np.linalg.eigh(np.cov(centered.T))
+    projected = centered @ axes
+    order = np.argsort(np.ptp(projected, axis=0))[::-1]
+    axes = axes[:, order]
+    _, rotation, _ = decompose_sim3(transform)
+    return rotation @ axes
+
+
+def apply_axis_scale_delta(transform, center, axes, factors):
+    axes = np.asarray(axes, dtype=np.float64)
+    factors = np.asarray(factors, dtype=np.float64)
+    linear = axes @ np.diag(factors) @ axes.T
+    delta = np.eye(4, dtype=np.float64)
+    delta[:3, :3] = linear
+    delta[:3, 3] = np.asarray(center, dtype=np.float64) - linear @ np.asarray(center, dtype=np.float64)
+    return delta @ np.asarray(transform, dtype=np.float64)
+
+
+def refine_pca_anisotropic_partial(
+    initial_transform,
+    source_points,
+    target_points,
+    *,
+    scale_triplets,
+    pre_icp_iterations,
+    icp_iterations,
+    max_pairs,
+    complete_trim_quantile,
+    partial_trim_quantile,
+    partial_weight,
+    max_step_translation,
+    min_step_scale,
+    max_step_scale,
+    objective_pc_p95_weight,
+    objective_cp70_weight,
+    objective_scale_reg_weight,
+    seed,
+):
+    if not scale_triplets:
+        return np.asarray(initial_transform, dtype=np.float64), {"enabled": False}
+
+    source_points = np.asarray(source_points, dtype=np.float64)
+    target_points = np.asarray(target_points, dtype=np.float64)
+    initial_transform = np.asarray(initial_transform, dtype=np.float64)
+    initial_stats = partial_alignment_stats(
+        source_points,
+        target_points,
+        initial_transform,
+        max_points=max_pairs,
+        seed=seed,
+    )
+    if int(pre_icp_iterations) > 0:
+        warmup_transform, warmup_info = refine_symmetric_partial_icp(
+            initial_transform,
+            source_points,
+            target_points,
+            iterations=pre_icp_iterations,
+            max_pairs=max_pairs,
+            complete_trim_quantile=complete_trim_quantile,
+            partial_trim_quantile=partial_trim_quantile,
+            partial_weight=partial_weight,
+            max_step_translation=max_step_translation,
+            min_step_scale=min_step_scale,
+            max_step_scale=max_step_scale,
+            seed=seed,
+        )
+    else:
+        warmup_transform = initial_transform
+        warmup_info = {"enabled": False}
+    center = apply_sim3(source_points, warmup_transform).mean(axis=0)
+    axes = pca_axes_for_transform(source_points, warmup_transform)
+    best = None
+    candidates = []
+    for index, factors in enumerate(scale_triplets):
+        factors = tuple(float(v) for v in factors)
+        scaled = apply_axis_scale_delta(warmup_transform, center, axes, factors)
+        refined, icp_info = refine_symmetric_partial_icp(
+            scaled,
+            source_points,
+            target_points,
+            iterations=icp_iterations,
+            max_pairs=max_pairs,
+            complete_trim_quantile=complete_trim_quantile,
+            partial_trim_quantile=partial_trim_quantile,
+            partial_weight=partial_weight,
+            max_step_translation=max_step_translation,
+            min_step_scale=min_step_scale,
+            max_step_scale=max_step_scale,
+            seed=seed,
+        )
+        stats = icp_info.get("candidate_alignment") or partial_alignment_stats(
+            source_points,
+            target_points,
+            refined,
+            max_points=max_pairs,
+            seed=seed,
+        )
+        scale_reg = float(np.sum(np.square(np.log(np.asarray(factors, dtype=np.float64)))))
+        objective = float(
+            stats["partial_to_complete"]["mean"]
+            + float(objective_pc_p95_weight) * stats["partial_to_complete"]["p95"]
+            + float(objective_cp70_weight) * stats["complete_to_partial_trim70"]["mean"]
+            + float(objective_scale_reg_weight) * scale_reg
+        )
+        item = {
+            "index": int(index),
+            "factors": list(factors),
+            "objective": objective,
+            "scale_reg": scale_reg,
+            "alignment": stats,
+            "icp": icp_info,
+        }
+        candidates.append(item)
+        if best is None or objective < best["info"]["objective"]:
+            best = {"transform": refined, "info": item}
+
+    if best is None:
+        return initial_transform.copy(), {
+            "enabled": True,
+            "accepted": False,
+            "reason": "no_anisotropic_candidates",
+        }
+
+    info = {
+        "enabled": True,
+        "accepted": None,
+        "method": "pca_anisotropic_scale_then_symmetric_partial_icp",
+        "pre_icp": warmup_info,
+        "scale_triplets": [list(item) for item in scale_triplets],
+        "initial_alignment": initial_stats,
+        "candidate_alignment": best["info"]["alignment"],
+        "initial_distance": initial_stats["partial_to_complete"],
+        "candidate_distance": best["info"]["alignment"]["partial_to_complete"],
+        "best": best["info"],
+        "candidates": sorted(candidates, key=lambda item: item["objective"])[:12],
+        "delta": (best["transform"] @ np.linalg.inv(initial_transform)).tolist(),
+    }
+    return best["transform"], info
+
+
+def symmetric_partial_correspondence_pairs(
+    transform,
+    source_points,
+    target_points,
+    *,
+    max_pairs,
+    complete_trim_quantile,
+    partial_trim_quantile,
+    partial_weight,
+    seed,
+):
+    rng = np.random.default_rng(int(seed))
+    source_points = np.asarray(source_points, dtype=np.float64)
+    target_points = np.asarray(target_points, dtype=np.float64)
+    source_indices = np.arange(len(source_points))
+    target_indices = np.arange(len(target_points))
+    if len(source_indices) > int(max_pairs):
+        source_indices = rng.choice(source_indices, size=int(max_pairs), replace=False)
+    if len(target_indices) > int(max_pairs):
+        target_indices = rng.choice(target_indices, size=int(max_pairs), replace=False)
+
+    source_sample = source_points[source_indices]
+    target_sample = target_points[target_indices]
+    moved = apply_sim3(source_sample, transform)
+    source_tree = cKDTree(moved)
+    target_tree = cKDTree(target_sample)
+    bases = []
+    targets = []
+    weights = []
+
+    complete_distances, complete_nearest = target_tree.query(moved, k=1)
+    complete_threshold = np.quantile(complete_distances, float(complete_trim_quantile))
+    complete_keep = complete_distances <= complete_threshold
+    if int(complete_keep.sum()) >= 16:
+        bases.append(moved[complete_keep])
+        targets.append(target_sample[complete_nearest[complete_keep]])
+        weights.append(np.ones(int(complete_keep.sum()), dtype=np.float64))
+
+    partial_distances, partial_nearest = source_tree.query(target_sample, k=1)
+    partial_threshold = np.quantile(partial_distances, float(partial_trim_quantile))
+    partial_keep = partial_distances <= partial_threshold
+    if int(partial_keep.sum()) >= 16:
+        bases.append(moved[partial_nearest[partial_keep]])
+        targets.append(target_sample[partial_keep])
+        weights.append(np.full(int(partial_keep.sum()), float(partial_weight), dtype=np.float64))
+
+    if not bases:
+        return None
+    base = np.concatenate(bases, axis=0)
+    target = np.concatenate(targets, axis=0)
+    weight = np.concatenate(weights, axis=0)
+    if len(base) < 16:
+        return None
+    return {
+        "base_points": base,
+        "target_points": target,
+        "weights": weight,
+        "source_sampled": int(len(source_indices)),
+        "target_sampled": int(len(target_indices)),
+        "complete_pairs": int(complete_keep.sum()),
+        "partial_pairs": int(partial_keep.sum()),
+        "complete_threshold": float(complete_threshold),
+        "partial_threshold": float(partial_threshold),
+    }
+
+
+def optimize_partial_affine_delta(
+    initial_transform,
+    source_points,
+    target_points,
+    *,
+    pre_icp_iterations,
+    max_pairs,
+    complete_trim_quantile,
+    partial_trim_quantile,
+    partial_weight,
+    max_step_translation,
+    min_step_scale,
+    max_step_scale,
+    iterations,
+    lr,
+    distance_weight,
+    transform_reg_weight,
+    axis_scale_reg_weight,
+    seed,
+    device,
+):
+    if int(iterations) <= 0:
+        return np.asarray(initial_transform, dtype=np.float64), {"enabled": False}
+
+    source_points = np.asarray(source_points, dtype=np.float64)
+    target_points = np.asarray(target_points, dtype=np.float64)
+    initial_transform = np.asarray(initial_transform, dtype=np.float64)
+    initial_stats = partial_alignment_stats(
+        source_points,
+        target_points,
+        initial_transform,
+        max_points=max_pairs,
+        seed=seed,
+    )
+    if int(pre_icp_iterations) > 0:
+        warmup_transform, warmup_info = refine_symmetric_partial_icp(
+            initial_transform,
+            source_points,
+            target_points,
+            iterations=pre_icp_iterations,
+            max_pairs=max_pairs,
+            complete_trim_quantile=complete_trim_quantile,
+            partial_trim_quantile=partial_trim_quantile,
+            partial_weight=partial_weight,
+            max_step_translation=max_step_translation,
+            min_step_scale=min_step_scale,
+            max_step_scale=max_step_scale,
+            seed=seed,
+        )
+    else:
+        warmup_transform = initial_transform
+        warmup_info = {"enabled": False}
+
+    pairs = symmetric_partial_correspondence_pairs(
+        warmup_transform,
+        source_points,
+        target_points,
+        max_pairs=max_pairs,
+        complete_trim_quantile=complete_trim_quantile,
+        partial_trim_quantile=partial_trim_quantile,
+        partial_weight=partial_weight,
+        seed=seed,
+    )
+    if pairs is None:
+        return initial_transform.copy(), {
+            "enabled": True,
+            "accepted": False,
+            "reason": "not_enough_continuous_affine_pairs",
+        }
+
+    center = apply_sim3(source_points, warmup_transform).mean(axis=0)
+    axes = pca_axes_for_transform(source_points, warmup_transform)
+    torch_device = torch.device(device if str(device).startswith("cuda") and torch.cuda.is_available() else "cpu")
+    dtype = torch.float32
+    base = torch.as_tensor(pairs["base_points"], dtype=dtype, device=torch_device)
+    target = torch.as_tensor(pairs["target_points"], dtype=dtype, device=torch_device)
+    weights = torch.as_tensor(pairs["weights"], dtype=dtype, device=torch_device)
+    weights = weights / torch.clamp(weights.mean(), min=1e-6)
+    center_t = torch.as_tensor(center.astype(np.float32), dtype=dtype, device=torch_device)
+    axes_t = torch.as_tensor(axes.astype(np.float32), dtype=dtype, device=torch_device)
+
+    log_axis_scale = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    rotvec = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    translation = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    optimizer = torch.optim.Adam([log_axis_scale, rotvec, translation], lr=float(lr))
+    best = {
+        "loss": float("inf"),
+        "log_axis_scale": [0.0, 0.0, 0.0],
+        "rotvec": [0.0, 0.0, 0.0],
+        "translation": [0.0, 0.0, 0.0],
+    }
+    for iteration in range(int(iterations)):
+        optimizer.zero_grad(set_to_none=True)
+        axis_scale = torch.exp(log_axis_scale)
+        rotation = torch_rodrigues(rotvec)
+        local = (base - center_t) @ axes_t
+        scaled = (local * axis_scale) @ axes_t.T
+        moved = scaled @ rotation.T + center_t + translation
+        residual = moved - target
+        per_point = torch.nn.functional.smooth_l1_loss(moved, target, beta=0.03, reduction="none").sum(dim=1)
+        distance_loss = torch.mean(per_point * weights)
+        transform_reg = 0.25 * rotvec.square().sum() + 0.25 * translation.square().sum()
+        axis_reg = log_axis_scale.square().sum()
+        loss = (
+            float(distance_weight) * distance_loss
+            + float(transform_reg_weight) * transform_reg
+            + float(axis_scale_reg_weight) * axis_reg
+        )
+        loss.backward()
+        optimizer.step()
+        loss_value = float(loss.detach().cpu())
+        if loss_value < best["loss"]:
+            distances = torch.linalg.norm(residual.detach(), dim=1)
+            best = {
+                "loss": loss_value,
+                "iteration": int(iteration),
+                "log_axis_scale": log_axis_scale.detach().cpu().numpy().astype(float).tolist(),
+                "rotvec": rotvec.detach().cpu().numpy().astype(float).tolist(),
+                "translation": translation.detach().cpu().numpy().astype(float).tolist(),
+                "distance_loss": float(distance_loss.detach().cpu()),
+                "distance_mean": float(distances.mean().cpu()),
+                "distance_p95": float(torch.quantile(distances, 0.95).cpu()),
+                "axis_scale_reg": float(axis_reg.detach().cpu()),
+            }
+
+    with torch.no_grad():
+        best_scales = np.exp(np.asarray(best["log_axis_scale"], dtype=np.float64))
+        best_rotation = torch_rodrigues(torch.as_tensor(best["rotvec"], dtype=dtype, device=torch_device)).detach().cpu().numpy()
+    axis_linear = axes @ np.diag(best_scales) @ axes.T
+    linear = best_rotation @ axis_linear
+    delta = np.eye(4, dtype=np.float64)
+    delta[:3, :3] = linear
+    delta[:3, 3] = np.asarray(center, dtype=np.float64) + np.asarray(best["translation"], dtype=np.float64) - linear @ np.asarray(center, dtype=np.float64)
+    optimized = delta @ warmup_transform
+    candidate_stats = partial_alignment_stats(
+        source_points,
+        target_points,
+        optimized,
+        max_points=max_pairs,
+        seed=seed,
+    )
+    info = {
+        "enabled": True,
+        "accepted": None,
+        "method": "continuous_pca_affine_partial",
+        "pre_icp": warmup_info,
+        "pairs": {key: pairs[key] for key in (
+            "source_sampled",
+            "target_sampled",
+            "complete_pairs",
+            "partial_pairs",
+            "complete_threshold",
+            "partial_threshold",
+        )},
+        "iterations": int(iterations),
+        "lr": float(lr),
+        "initial_alignment": initial_stats,
+        "candidate_alignment": candidate_stats,
+        "initial_distance": initial_stats["partial_to_complete"],
+        "candidate_distance": candidate_stats["partial_to_complete"],
+        "best": best,
+        "delta": (optimized @ np.linalg.inv(initial_transform)).tolist(),
+    }
+    return optimized, info
 
 
 def nearest_trimmed_correspondences(
@@ -975,6 +1869,292 @@ def optimize_partial_delta_sim3(
     return optimized, info
 
 
+def optimize_bridge_anchor_delta_sim3(
+    initial_transform,
+    source_points,
+    anchor_points,
+    intrinsic_px,
+    image_shape,
+    target_mask,
+    *,
+    max_pairs,
+    trim_quantile,
+    iterations,
+    lr,
+    distance_loss,
+    distance_weight,
+    silhouette_weight,
+    silhouette_render_size,
+    silhouette_points,
+    silhouette_splat_radius,
+    silhouette_sigma,
+    silhouette_opacity,
+    leakage_weight,
+    miss_weight,
+    transform_reg_weight,
+    seed,
+    device,
+):
+    if int(iterations) <= 0:
+        return np.asarray(initial_transform, dtype=np.float64), {"enabled": False}
+
+    correspondences = nearest_trimmed_correspondences(
+        initial_transform,
+        source_points,
+        anchor_points,
+        max_pairs=max_pairs,
+        trim_quantile=trim_quantile,
+        seed=seed,
+    )
+    if correspondences is None:
+        return np.asarray(initial_transform, dtype=np.float64), {
+            "enabled": True,
+            "accepted": False,
+            "reason": "not_enough_bridge_anchor_correspondences",
+        }
+
+    rng = np.random.default_rng(int(seed) + 29)
+    silhouette_source = np.asarray(source_points, dtype=np.float64)
+    if len(silhouette_source) > int(silhouette_points):
+        silhouette_source = silhouette_source[
+            rng.choice(len(silhouette_source), size=int(silhouette_points), replace=False)
+        ]
+    silhouette_base = apply_sim3(silhouette_source, initial_transform)
+    target_np = resize_target_mask(target_mask, silhouette_render_size)
+    torch_device = torch.device(device if str(device).startswith("cuda") and torch.cuda.is_available() else "cpu")
+    dtype = torch.float32
+    base = torch.as_tensor(correspondences["base_points"], dtype=dtype, device=torch_device)
+    target = torch.as_tensor(correspondences["target_points"], dtype=dtype, device=torch_device)
+    silhouette_base_t = torch.as_tensor(silhouette_base, dtype=dtype, device=torch_device)
+    intrinsic = torch.as_tensor(np.asarray(intrinsic_px, dtype=np.float32), dtype=dtype, device=torch_device)
+    target_mask_t = torch.as_tensor(target_np, dtype=dtype, device=torch_device)
+    target_sum = torch.clamp(target_mask_t.sum(), min=1.0)
+
+    log_scale = torch.nn.Parameter(torch.zeros((), dtype=dtype, device=torch_device))
+    rotvec = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    translation = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    optimizer = torch.optim.Adam([log_scale, rotvec, translation], lr=float(lr))
+    best = {
+        "loss": float("inf"),
+        "log_scale": 0.0,
+        "rotvec": [0.0, 0.0, 0.0],
+        "translation": [0.0, 0.0, 0.0],
+    }
+    eps = 1e-6
+    for iteration in range(int(iterations)):
+        optimizer.zero_grad(set_to_none=True)
+        scale = torch.exp(log_scale)
+        rotation = torch_rodrigues(rotvec)
+        moved = scale * (base @ rotation.T) + translation
+        residual = moved - target
+        distances = torch.linalg.norm(residual, dim=1)
+        if distance_loss == "l2":
+            dist_loss = torch.mean(torch.sum(residual * residual, dim=1))
+        else:
+            dist_loss = torch.nn.functional.smooth_l1_loss(moved, target, beta=0.03)
+
+        silhouette_points_moved = scale * (silhouette_base_t @ rotation.T) + translation
+        silhouette = render_soft_silhouette_torch(
+            silhouette_points_moved,
+            intrinsic,
+            image_shape,
+            render_size=silhouette_render_size,
+            splat_radius=silhouette_splat_radius,
+            sigma=silhouette_sigma,
+            opacity=silhouette_opacity,
+        )
+        pred_sum = torch.clamp(silhouette.sum(), min=eps)
+        intersection = (silhouette * target_mask_t).sum()
+        dice_loss = 1.0 - (2.0 * intersection + eps) / (pred_sum + target_sum + eps)
+        leakage = (silhouette * (1.0 - target_mask_t)).sum() / pred_sum
+        miss = (target_mask_t * (1.0 - silhouette)).sum() / target_sum
+        transform_reg = log_scale.square() + 0.25 * rotvec.square().sum() + 0.25 * translation.square().sum()
+        loss = (
+            float(distance_weight) * dist_loss
+            + float(silhouette_weight) * dice_loss
+            + float(leakage_weight) * leakage
+            + float(miss_weight) * miss
+            + float(transform_reg_weight) * transform_reg
+        )
+        loss.backward()
+        optimizer.step()
+        loss_value = float(loss.detach().cpu())
+        if loss_value < best["loss"]:
+            best = {
+                "loss": loss_value,
+                "iteration": int(iteration),
+                "log_scale": float(log_scale.detach().cpu()),
+                "rotvec": rotvec.detach().cpu().numpy().astype(float).tolist(),
+                "translation": translation.detach().cpu().numpy().astype(float).tolist(),
+                "distance_loss": float(dist_loss.detach().cpu()),
+                "distance_mean": float(distances.detach().mean().cpu()),
+                "distance_p95": float(torch.quantile(distances.detach(), 0.95).cpu()),
+                "dice_loss": float(dice_loss.detach().cpu()),
+                "leakage": float(leakage.detach().cpu()),
+                "miss": float(miss.detach().cpu()),
+            }
+
+    with torch.no_grad():
+        best_rotvec = torch.as_tensor(best["rotvec"], dtype=dtype, device=torch_device)
+        best_rotation = torch_rodrigues(best_rotvec).detach().cpu().numpy()
+    delta = make_sim3(
+        scale=float(math.exp(best["log_scale"])),
+        rotation=best_rotation,
+        translation=best["translation"],
+    )
+    optimized = delta @ np.asarray(initial_transform, dtype=np.float64)
+    initial_anchor = anchor_alignment_stats(
+        source_points,
+        anchor_points,
+        initial_transform,
+        max_points=max_pairs,
+        seed=seed,
+    )
+    candidate_anchor = anchor_alignment_stats(
+        source_points,
+        anchor_points,
+        optimized,
+        max_points=max_pairs,
+        seed=seed,
+    )
+    info = {
+        "enabled": True,
+        "accepted": None,
+        "sampled_points": correspondences["sampled_points"],
+        "kept_pairs": correspondences["kept_pairs"],
+        "trim_threshold": correspondences["trim_threshold"],
+        "iterations": int(iterations),
+        "lr": float(lr),
+        "distance_loss": distance_loss,
+        "initial_distance": initial_anchor["anchor_to_complete"],
+        "candidate_distance": candidate_anchor["anchor_to_complete"],
+        "initial_anchor": initial_anchor,
+        "candidate_anchor": candidate_anchor,
+        "best": best,
+        "delta": delta.tolist(),
+    }
+    return optimized, info
+
+
+def choose_bridge_anchor_refinement(
+    baseline_transform,
+    baseline_score,
+    candidate_transform,
+    candidate_score,
+    optimization_info,
+    *,
+    min_2d_objective_gain,
+    max_2d_objective_drop,
+    min_anchor_improvement,
+):
+    info = dict(optimization_info)
+    initial_anchor = info.get("initial_anchor") or {}
+    candidate_anchor = info.get("candidate_anchor") or {}
+    initial_mean = float((initial_anchor.get("anchor_to_complete") or {}).get("mean", float("inf")))
+    candidate_mean = float((candidate_anchor.get("anchor_to_complete") or {}).get("mean", float("inf")))
+    min_anchor_improvement = float(min_anchor_improvement)
+    required_anchor = initial_mean * (1.0 - min_anchor_improvement)
+    baseline_objective = score_2d_gate_objective(baseline_score)
+    candidate_objective = score_2d_gate_objective(candidate_score)
+    min_2d_objective_gain = float(min_2d_objective_gain)
+    max_2d_objective_drop = float(max_2d_objective_drop)
+    objective_gain = candidate_objective - baseline_objective
+    two_d_ok = (
+        objective_gain >= min_2d_objective_gain
+        or candidate_objective >= baseline_objective - max_2d_objective_drop
+    )
+    anchor_improved = candidate_mean <= required_anchor
+    info.update(
+        {
+            "baseline_2d_objective": float(baseline_objective),
+            "candidate_2d_objective": float(candidate_objective),
+            "2d_objective_gain": float(objective_gain),
+            "min_2d_objective_gain": min_2d_objective_gain,
+            "max_2d_objective_drop": max_2d_objective_drop,
+            "min_anchor_improvement": min_anchor_improvement,
+            "required_anchor_mean": float(required_anchor),
+            "baseline_score": baseline_score,
+            "candidate_score": candidate_score,
+        }
+    )
+    if two_d_ok and anchor_improved:
+        info.update({"accepted": True, "reason": "bridge_anchor_improved_with_2d_guard"})
+        return np.asarray(candidate_transform, dtype=np.float64), candidate_score, info
+    reason = "2d_objective_drop" if not two_d_ok else "bridge_anchor_distance_not_improved"
+    info.update({"accepted": False, "reason": reason})
+    return np.asarray(baseline_transform, dtype=np.float64), baseline_score, info
+
+
+def choose_retry_continuous_variant(
+    coordinate_transform,
+    coordinate_score,
+    coordinate_anchor,
+    continuous_transform,
+    continuous_score,
+    continuous_info,
+    *,
+    anchor_scale,
+    anchor_weight,
+    max_2d_objective_drop,
+    min_anchor_improvement,
+):
+    info = dict(continuous_info or {})
+    coordinate_anchor = coordinate_anchor or {}
+    candidate_anchor = info.get("candidate_anchor") or {}
+    coordinate_mean = float((coordinate_anchor.get("anchor_to_complete") or {}).get("mean", float("inf")))
+    candidate_mean = float((candidate_anchor.get("anchor_to_complete") or {}).get("mean", float("inf")))
+    required_anchor = coordinate_mean * (1.0 - float(min_anchor_improvement))
+    coordinate_2d = score_2d_gate_objective(coordinate_score)
+    candidate_2d = score_2d_gate_objective(continuous_score)
+    coordinate_joint = score_2d_anchor_objective(
+        coordinate_score,
+        coordinate_anchor,
+        anchor_scale=anchor_scale,
+        anchor_weight=anchor_weight,
+    )
+    candidate_joint = score_2d_anchor_objective(
+        continuous_score,
+        candidate_anchor,
+        anchor_scale=anchor_scale,
+        anchor_weight=anchor_weight,
+    )
+    two_d_ok = candidate_2d >= coordinate_2d - float(max_2d_objective_drop)
+    anchor_improved = candidate_mean <= required_anchor
+    joint_improved = candidate_joint > coordinate_joint + 1e-8
+    info.update(
+        {
+            "coordinate_2d_objective": float(coordinate_2d),
+            "candidate_2d_objective": float(candidate_2d),
+            "coordinate_joint_objective": float(coordinate_joint),
+            "candidate_joint_objective": float(candidate_joint),
+            "max_2d_objective_drop": float(max_2d_objective_drop),
+            "min_anchor_improvement": float(min_anchor_improvement),
+            "required_anchor_mean": float(required_anchor),
+        }
+    )
+    if two_d_ok and anchor_improved and joint_improved:
+        info.update({"accepted": True, "reason": "retry_continuous_joint_objective_improved"})
+        return (
+            np.asarray(continuous_transform, dtype=np.float64),
+            continuous_score,
+            candidate_anchor,
+            info,
+        )
+    if not two_d_ok:
+        reason = "2d_objective_drop"
+    elif not anchor_improved:
+        reason = "bridge_anchor_distance_not_improved"
+    else:
+        reason = "joint_objective_not_improved"
+    info.update({"accepted": False, "reason": reason})
+    return (
+        np.asarray(coordinate_transform, dtype=np.float64),
+        coordinate_score,
+        coordinate_anchor,
+        info,
+    )
+
+
 def choose_partial_refinement(
     baseline_transform,
     candidate_transform,
@@ -1028,6 +2208,60 @@ def choose_partial_refinement(
         reason = "delta_scale_out_of_bounds"
     elif not rotation_ok:
         reason = "delta_rotation_out_of_bounds"
+    else:
+        reason = "delta_translation_out_of_bounds"
+    info.update({"accepted": False, "reason": reason})
+    return np.asarray(baseline_transform, dtype=np.float64), info
+
+
+def choose_anisotropic_partial_refinement(
+    baseline_transform,
+    candidate_transform,
+    optimization_info,
+    *,
+    min_distance_improvement,
+    min_delta_axis_scale,
+    max_delta_axis_scale,
+    max_delta_translation,
+):
+    info = dict(optimization_info)
+    initial_distance = info.get("initial_distance") or {}
+    candidate_distance = info.get("candidate_distance") or {}
+    initial_mean = float(initial_distance.get("mean", float("inf")))
+    candidate_mean = float(candidate_distance.get("mean", float("inf")))
+    required_distance = initial_mean * (1.0 - float(min_distance_improvement))
+    delta = np.asarray(info.get("delta", np.eye(4)), dtype=np.float64)
+    singular_values = np.linalg.svd(delta[:3, :3], compute_uv=False)
+    translation_norm = float(np.linalg.norm(delta[:3, 3]))
+    distance_improved = candidate_mean <= required_distance
+    axis_scale_ok = (
+        float(singular_values.min()) >= float(min_delta_axis_scale)
+        and float(singular_values.max()) <= float(max_delta_axis_scale)
+    )
+    translation_ok = translation_norm <= float(max_delta_translation)
+    info.update(
+        {
+            "min_distance_improvement": float(min_distance_improvement),
+            "required_distance_mean": float(required_distance),
+            "delta_decomposed": {
+                "axis_scales": singular_values.astype(float).tolist(),
+                "translation_norm": translation_norm,
+                "translation": delta[:3, 3].astype(float).tolist(),
+            },
+            "limits": {
+                "min_delta_axis_scale": float(min_delta_axis_scale),
+                "max_delta_axis_scale": float(max_delta_axis_scale),
+                "max_delta_translation": float(max_delta_translation),
+            },
+        }
+    )
+    if distance_improved and axis_scale_ok and translation_ok:
+        info.update({"accepted": True, "reason": "anisotropic_partial_distance_improved"})
+        return np.asarray(candidate_transform, dtype=np.float64), info
+    if not distance_improved:
+        reason = "partial_distance_not_improved"
+    elif not axis_scale_ok:
+        reason = "delta_axis_scale_out_of_bounds"
     else:
         reason = "delta_translation_out_of_bounds"
     info.update({"accepted": False, "reason": reason})
@@ -1297,60 +2531,32 @@ def run(args):
         scale_steps=parse_float_list(args.scale_steps),
         rounds=args.refine_rounds,
     )
-    silhouette_optimized, silhouette_optimization = optimize_silhouette_delta_sim3(
+    retry_2d_search = {
+        "enabled": False,
+        "accepted": False,
+        "reason": "not_run",
+    }
+    bridge_anchor_optimization = {
+        "enabled": False,
+        "accepted": False,
+        "reason": "not_run",
+    }
+    post_retry_silhouette_optimization = {
+        "enabled": False,
+        "accepted": False,
+        "reason": "not_run",
+    }
+    refined, refined_score, silhouette_optimization = apply_silhouette_refinement(
         refined,
+        refined_score,
         complete_points,
+        eval_points,
         intrinsic_px,
         image_shape,
         target_mask,
-        render_size=args.silhouette_opt_render_size,
-        max_points=args.silhouette_opt_max_points,
-        iterations=args.silhouette_opt_iterations,
-        lr=args.silhouette_opt_lr,
-        splat_radius=args.silhouette_opt_splat_radius,
-        sigma=args.silhouette_opt_sigma,
-        opacity=args.silhouette_opt_opacity,
-        leakage_weight=args.silhouette_opt_leakage_weight,
-        miss_weight=args.silhouette_opt_miss_weight,
-        outside_distance_weight=args.silhouette_opt_outside_distance_weight,
-        area_weight=args.silhouette_opt_area_weight,
-        center_weight=args.silhouette_opt_center_weight,
-        transform_reg_weight=args.silhouette_opt_transform_reg_weight,
-        seed=args.seed,
-        device=args.device,
+        target_depth,
+        args=args,
     )
-    if silhouette_optimization.get("enabled"):
-        silhouette_score = evaluate_transform(
-            eval_points,
-            silhouette_optimized,
-            intrinsic_px,
-            target_depth,
-            target_mask,
-            splat_radius=args.splat_radius,
-        )
-        min_gain = float(args.silhouette_opt_min_score_gain)
-        if silhouette_score["score"] > refined_score["score"] + min_gain:
-            refined = silhouette_optimized
-            silhouette_optimization.update(
-                {
-                    "accepted": True,
-                    "reason": "render_score_improved",
-                    "min_score_gain": min_gain,
-                    "baseline_score": refined_score,
-                    "candidate_score": silhouette_score,
-                }
-            )
-            refined_score = silhouette_score
-        else:
-            silhouette_optimization.update(
-                {
-                    "accepted": False,
-                    "reason": "render_score_not_improved",
-                    "min_score_gain": min_gain,
-                    "baseline_score": refined_score,
-                    "candidate_score": silhouette_score,
-                }
-            )
     visible_3d_optimized, visible_3d_optimization = optimize_visible_3d_delta_sim3(
         refined,
         complete_points,
@@ -1439,31 +2645,464 @@ def run(args):
     complete_to_moge = refined
     moge_to_partial = np.load(moge_to_partial_path)
     complete_to_partial = compose_complete_to_partial(moge_to_partial, complete_to_moge)
-    partial_optimized, partial_refinement = optimize_partial_delta_sim3(
-        complete_to_partial,
-        complete_points,
-        partial_points,
-        max_pairs=args.partial_refine_max_pairs,
-        trim_quantile=args.partial_refine_trim_quantile,
-        iterations=args.partial_refine_iterations,
-        lr=args.partial_refine_lr,
-        distance_loss=args.partial_refine_distance_loss,
-        distance_weight=args.partial_refine_distance_weight,
-        transform_reg_weight=args.partial_refine_transform_reg_weight,
-        seed=args.seed,
-        device=args.device,
-    )
-    if partial_refinement.get("enabled") and partial_refinement.get("candidate_distance"):
-        complete_to_partial, partial_refinement = choose_partial_refinement(
-            complete_to_partial,
-            partial_optimized,
-            partial_refinement,
-            min_distance_improvement=args.partial_refine_min_distance_improvement,
-            max_delta_rotation_deg=args.partial_refine_max_delta_rotation_deg,
-            max_delta_translation=args.partial_refine_max_delta_translation,
-            min_delta_scale=args.partial_refine_min_delta_scale,
-            max_delta_scale=args.partial_refine_max_delta_scale,
+    bridge_anchor_points = np.empty((0, 3), dtype=np.float64)
+    bridge_anchor_info = {
+        "enabled": False,
+        "reason": "disabled",
+    }
+    bridge_anchor_scale = 1.0
+    if bool(getattr(args, "bridge_anchor_opt_enabled", True)):
+        bridge_anchor_points, bridge_anchor_info = load_bridge_anchor_points(
+            partial_points,
+            sample_dir=sample_dir,
+            flag=args.flag,
+            moge_to_partial=moge_to_partial,
+            max_points=getattr(args, "bridge_anchor_opt_max_anchors", 20000),
+            seed=args.seed,
+            index_name=getattr(args, "partial_to_moge_index_name", None),
         )
+        if len(bridge_anchor_points) > 0:
+            bridge_anchor_scale = max(float(np.linalg.norm(bbox_extent(bridge_anchor_points))), 1e-6)
+    registration_2d_acceptance = evaluate_2d_acceptance(
+        final_score,
+        enabled=getattr(args, "require_2d_acceptance", True),
+        min_iou=getattr(args, "min_2d_iou", 0.78),
+        min_coverage=getattr(args, "min_2d_coverage", 0.80),
+        max_leakage=getattr(args, "max_2d_leakage", 0.12),
+        min_edge_iou=getattr(args, "min_2d_edge_iou", 0.02),
+        max_edge_chamfer_px=getattr(args, "max_2d_edge_chamfer_px", 18.0),
+    )
+    if (
+        bool(getattr(args, "retry_2d_on_gate_failure", True))
+        and not registration_2d_acceptance["accepted"]
+        and int(getattr(args, "retry_2d_top_k", 0)) > 0
+    ):
+        retry_candidates = initial_candidates(
+            source_points=eval_points,
+            target_points=object_moge.points,
+            rotations=rotations,
+            scale_multipliers=parse_float_list(args.retry_2d_scale_multipliers),
+        )
+        ranked = []
+        for index, transform in enumerate(retry_candidates):
+            score = evaluate_transform(
+                eval_points,
+                transform,
+                intrinsic_px,
+                target_depth,
+                target_mask,
+                splat_radius=args.splat_radius,
+            )
+            ranked.append(
+                {
+                    "index": int(index),
+                    "transform": transform,
+                    "initial_score": score,
+                    "initial_2d_objective": score_2d_gate_objective(score),
+                }
+            )
+        ranked.sort(key=lambda item: item["initial_2d_objective"], reverse=True)
+        top_k = ranked[: int(args.retry_2d_top_k)]
+        retry_items = []
+        best_retry = {
+            "transform": complete_to_moge,
+            "score": final_score,
+            "objective": score_2d_gate_objective(final_score),
+            "joint_objective": score_2d_gate_objective(final_score),
+            "acceptance": registration_2d_acceptance,
+            "source": "baseline",
+        }
+        if bridge_anchor_info.get("enabled") and len(bridge_anchor_points) >= 16:
+            baseline_anchor = anchor_alignment_stats(
+                complete_points,
+                bridge_anchor_points,
+                complete_to_moge,
+                max_points=args.bridge_anchor_opt_max_pairs,
+                seed=args.seed,
+            )
+            best_retry["anchor_alignment"] = baseline_anchor
+            best_retry["joint_objective"] = score_2d_anchor_objective(
+                final_score,
+                baseline_anchor,
+                anchor_scale=bridge_anchor_scale,
+                anchor_weight=args.bridge_anchor_opt_retry_anchor_weight,
+            )
+        for item in top_k:
+            candidate_transform, candidate_score, candidate_history = refine_transform_coordinate_search(
+                item["transform"],
+                eval_points,
+                intrinsic_px,
+                target_depth,
+                target_mask,
+                splat_radius=args.splat_radius,
+                translation_steps=parse_float_list(args.retry_2d_translation_steps),
+                rotation_steps_deg=parse_float_list(args.retry_2d_rotation_steps_deg),
+                scale_steps=parse_float_list(args.retry_2d_scale_steps),
+                rounds=args.retry_2d_refine_rounds,
+                selection_objective="2d_gate",
+            )
+            candidate_acceptance = evaluate_2d_acceptance(
+                candidate_score,
+                enabled=getattr(args, "require_2d_acceptance", True),
+                min_iou=getattr(args, "min_2d_iou", 0.78),
+                min_coverage=getattr(args, "min_2d_coverage", 0.80),
+                max_leakage=getattr(args, "max_2d_leakage", 0.12),
+                min_edge_iou=getattr(args, "min_2d_edge_iou", 0.02),
+                max_edge_chamfer_px=getattr(args, "max_2d_edge_chamfer_px", 18.0),
+            )
+            objective = score_2d_gate_objective(candidate_score)
+            candidate_anchor = None
+            joint_objective = objective
+            if bridge_anchor_info.get("enabled") and len(bridge_anchor_points) >= 16:
+                candidate_anchor = anchor_alignment_stats(
+                    complete_points,
+                    bridge_anchor_points,
+                    candidate_transform,
+                    max_points=args.bridge_anchor_opt_max_pairs,
+                    seed=args.seed,
+                )
+                joint_objective = score_2d_anchor_objective(
+                    candidate_score,
+                    candidate_anchor,
+                    anchor_scale=bridge_anchor_scale,
+                    anchor_weight=args.bridge_anchor_opt_retry_anchor_weight,
+                )
+            selected_transform = candidate_transform
+            selected_score = candidate_score
+            selected_anchor = candidate_anchor
+            selected_acceptance = candidate_acceptance
+            selected_variant = "coordinate"
+            retry_continuous_optimization = {
+                "enabled": False,
+                "accepted": False,
+                "reason": "disabled",
+            }
+            if (
+                bool(getattr(args, "retry_continuous_opt_enabled", True))
+                and bridge_anchor_info.get("enabled")
+                and len(bridge_anchor_points) >= 16
+                and candidate_anchor is not None
+                and int(getattr(args, "retry_continuous_opt_iterations", 0)) > 0
+            ):
+                continuous_transform, retry_continuous_optimization = optimize_bridge_anchor_delta_sim3(
+                    candidate_transform,
+                    complete_points,
+                    bridge_anchor_points,
+                    intrinsic_px,
+                    image_shape,
+                    target_mask,
+                    max_pairs=args.retry_continuous_opt_max_pairs,
+                    trim_quantile=args.retry_continuous_opt_trim_quantile,
+                    iterations=args.retry_continuous_opt_iterations,
+                    lr=args.retry_continuous_opt_lr,
+                    distance_loss=args.retry_continuous_opt_distance_loss,
+                    distance_weight=args.retry_continuous_opt_distance_weight,
+                    silhouette_weight=args.retry_continuous_opt_silhouette_weight,
+                    silhouette_render_size=args.retry_continuous_opt_silhouette_render_size,
+                    silhouette_points=args.retry_continuous_opt_silhouette_points,
+                    silhouette_splat_radius=args.retry_continuous_opt_silhouette_splat_radius,
+                    silhouette_sigma=args.retry_continuous_opt_silhouette_sigma,
+                    silhouette_opacity=args.retry_continuous_opt_silhouette_opacity,
+                    leakage_weight=args.retry_continuous_opt_leakage_weight,
+                    miss_weight=args.retry_continuous_opt_miss_weight,
+                    transform_reg_weight=args.retry_continuous_opt_transform_reg_weight,
+                    seed=args.seed + int(item["index"]),
+                    device=args.device,
+                )
+                if (
+                    retry_continuous_optimization.get("enabled")
+                    and retry_continuous_optimization.get("candidate_anchor")
+                ):
+                    continuous_score = evaluate_transform(
+                        eval_points,
+                        continuous_transform,
+                        intrinsic_px,
+                        target_depth,
+                        target_mask,
+                        splat_radius=args.splat_radius,
+                    )
+                    (
+                        selected_transform,
+                        selected_score,
+                        selected_anchor,
+                        retry_continuous_optimization,
+                    ) = choose_retry_continuous_variant(
+                        candidate_transform,
+                        candidate_score,
+                        candidate_anchor,
+                        continuous_transform,
+                        continuous_score,
+                        retry_continuous_optimization,
+                        anchor_scale=bridge_anchor_scale,
+                        anchor_weight=args.bridge_anchor_opt_retry_anchor_weight,
+                        max_2d_objective_drop=args.retry_continuous_opt_max_2d_objective_drop,
+                        min_anchor_improvement=args.retry_continuous_opt_min_anchor_improvement,
+                    )
+                    retry_continuous_optimization.update(
+                        {
+                            "coordinate_score": candidate_score,
+                            "continuous_score": continuous_score,
+                        }
+                    )
+                    if retry_continuous_optimization.get("accepted"):
+                        selected_variant = "continuous"
+                    selected_acceptance = evaluate_2d_acceptance(
+                        selected_score,
+                        enabled=getattr(args, "require_2d_acceptance", True),
+                        min_iou=getattr(args, "min_2d_iou", 0.78),
+                        min_coverage=getattr(args, "min_2d_coverage", 0.80),
+                        max_leakage=getattr(args, "max_2d_leakage", 0.12),
+                        min_edge_iou=getattr(args, "min_2d_edge_iou", 0.02),
+                        max_edge_chamfer_px=getattr(args, "max_2d_edge_chamfer_px", 18.0),
+                    )
+            objective = score_2d_gate_objective(selected_score)
+            joint_objective = objective
+            if selected_anchor is not None:
+                joint_objective = score_2d_anchor_objective(
+                    selected_score,
+                    selected_anchor,
+                    anchor_scale=bridge_anchor_scale,
+                    anchor_weight=args.bridge_anchor_opt_retry_anchor_weight,
+                )
+            retry_item = {
+                "index": item["index"],
+                "initial_score": item["initial_score"],
+                "initial_2d_objective": item["initial_2d_objective"],
+                "selected_variant": selected_variant,
+                "coordinate_refined_score": candidate_score,
+                "coordinate_2d_objective": score_2d_gate_objective(candidate_score),
+                "coordinate_anchor_alignment": candidate_anchor,
+                "retry_continuous_optimization": retry_continuous_optimization,
+                "refined_score": selected_score,
+                "refined_2d_objective": objective,
+                "refined_joint_objective": joint_objective,
+                "anchor_alignment": selected_anchor,
+                "registration_2d_acceptance": selected_acceptance,
+                "refine_history": candidate_history,
+            }
+            retry_items.append(retry_item)
+            candidate_better = joint_objective > best_retry["joint_objective"] + 1e-8
+            candidate_passes = selected_acceptance["accepted"] and not best_retry["acceptance"]["accepted"]
+            if candidate_passes or candidate_better:
+                source = f"retry_candidate_{item['index']}"
+                if selected_variant == "continuous":
+                    source = f"{source}_continuous"
+                best_retry = {
+                    "transform": selected_transform,
+                    "score": selected_score,
+                    "objective": objective,
+                    "joint_objective": joint_objective,
+                    "acceptance": selected_acceptance,
+                    "anchor_alignment": selected_anchor,
+                    "source": source,
+                }
+        retry_2d_search = {
+            "enabled": True,
+            "accepted": best_retry["source"] != "baseline",
+            "reason": "replaced_with_retry_candidate" if best_retry["source"] != "baseline" else "no_retry_candidate_improved",
+            "top_k": int(args.retry_2d_top_k),
+            "source": best_retry["source"],
+            "baseline_2d_objective": score_2d_gate_objective(final_score),
+            "best_2d_objective": best_retry["objective"],
+            "best_joint_objective": best_retry["joint_objective"],
+            "anchor_load": bridge_anchor_info,
+            "anchor_scale": float(bridge_anchor_scale),
+            "retry_anchor_weight": float(args.bridge_anchor_opt_retry_anchor_weight),
+            "candidates": retry_items,
+        }
+        if best_retry["source"] != "baseline":
+            complete_to_moge = best_retry["transform"]
+            final_score = best_retry["score"]
+            registration_2d_acceptance = best_retry["acceptance"]
+            complete_to_moge, final_score, post_retry_silhouette_optimization = apply_silhouette_refinement(
+                complete_to_moge,
+                final_score,
+                complete_points,
+                eval_points,
+                intrinsic_px,
+                image_shape,
+                target_mask,
+                target_depth,
+                args=args,
+                reason_prefix="post_retry",
+            )
+            registration_2d_acceptance = evaluate_2d_acceptance(
+                final_score,
+                enabled=getattr(args, "require_2d_acceptance", True),
+                min_iou=getattr(args, "min_2d_iou", 0.78),
+                min_coverage=getattr(args, "min_2d_coverage", 0.80),
+                max_leakage=getattr(args, "max_2d_leakage", 0.12),
+                min_edge_iou=getattr(args, "min_2d_edge_iou", 0.02),
+                max_edge_chamfer_px=getattr(args, "max_2d_edge_chamfer_px", 18.0),
+            )
+            complete_to_partial = compose_complete_to_partial(moge_to_partial, complete_to_moge)
+    if bool(getattr(args, "bridge_anchor_opt_enabled", True)):
+        bridge_anchor_optimization = {"anchor_load": bridge_anchor_info}
+        if bridge_anchor_info.get("enabled") and len(bridge_anchor_points) >= 16:
+            anchor_optimized, bridge_anchor_optimization = optimize_bridge_anchor_delta_sim3(
+                complete_to_moge,
+                complete_points,
+                bridge_anchor_points,
+                intrinsic_px,
+                image_shape,
+                target_mask,
+                max_pairs=args.bridge_anchor_opt_max_pairs,
+                trim_quantile=args.bridge_anchor_opt_trim_quantile,
+                iterations=args.bridge_anchor_opt_iterations,
+                lr=args.bridge_anchor_opt_lr,
+                distance_loss=args.bridge_anchor_opt_distance_loss,
+                distance_weight=args.bridge_anchor_opt_distance_weight,
+                silhouette_weight=args.bridge_anchor_opt_silhouette_weight,
+                silhouette_render_size=args.bridge_anchor_opt_silhouette_render_size,
+                silhouette_points=args.bridge_anchor_opt_silhouette_points,
+                silhouette_splat_radius=args.bridge_anchor_opt_silhouette_splat_radius,
+                silhouette_sigma=args.bridge_anchor_opt_silhouette_sigma,
+                silhouette_opacity=args.bridge_anchor_opt_silhouette_opacity,
+                leakage_weight=args.bridge_anchor_opt_leakage_weight,
+                miss_weight=args.bridge_anchor_opt_miss_weight,
+                transform_reg_weight=args.bridge_anchor_opt_transform_reg_weight,
+                seed=args.seed,
+                device=args.device,
+            )
+            bridge_anchor_optimization["anchor_load"] = bridge_anchor_info
+            if bridge_anchor_optimization.get("enabled") and bridge_anchor_optimization.get("candidate_anchor"):
+                anchor_score = evaluate_transform(
+                    eval_points,
+                    anchor_optimized,
+                    intrinsic_px,
+                    target_depth,
+                    target_mask,
+                    splat_radius=args.splat_radius,
+                )
+                complete_to_moge, final_score, bridge_anchor_optimization = choose_bridge_anchor_refinement(
+                    complete_to_moge,
+                    final_score,
+                    anchor_optimized,
+                    anchor_score,
+                    bridge_anchor_optimization,
+                    min_2d_objective_gain=args.bridge_anchor_opt_min_2d_objective_gain,
+                    max_2d_objective_drop=args.bridge_anchor_opt_max_2d_objective_drop,
+                    min_anchor_improvement=args.bridge_anchor_opt_min_anchor_improvement,
+                )
+                bridge_anchor_optimization["anchor_load"] = bridge_anchor_info
+                complete_to_partial = compose_complete_to_partial(moge_to_partial, complete_to_moge)
+                registration_2d_acceptance = evaluate_2d_acceptance(
+                    final_score,
+                    enabled=getattr(args, "require_2d_acceptance", True),
+                    min_iou=getattr(args, "min_2d_iou", 0.78),
+                    min_coverage=getattr(args, "min_2d_coverage", 0.80),
+                    max_leakage=getattr(args, "max_2d_leakage", 0.12),
+                    min_edge_iou=getattr(args, "min_2d_edge_iou", 0.02),
+                    max_edge_chamfer_px=getattr(args, "max_2d_edge_chamfer_px", 18.0),
+                )
+        elif bridge_anchor_info.get("enabled"):
+            bridge_anchor_optimization.update(
+                {
+                    "enabled": True,
+                    "accepted": False,
+                    "reason": "not_enough_bridge_anchors_for_optimization",
+                }
+            )
+    else:
+        bridge_anchor_optimization = {
+            "enabled": False,
+            "accepted": False,
+            "reason": "disabled",
+        }
+    if not registration_2d_acceptance["accepted"]:
+        partial_refinement = {
+            "enabled": False,
+            "accepted": False,
+            "reason": "registration_2d_threshold_not_met",
+            "registration_2d_acceptance": registration_2d_acceptance,
+        }
+    elif args.partial_refine_mode == "pca_anisotropic":
+        partial_optimized, partial_refinement = refine_pca_anisotropic_partial(
+            complete_to_partial,
+            complete_points,
+            partial_points,
+            scale_triplets=parse_scale_triplets(args.partial_refine_anisotropic_scale_triplets),
+            pre_icp_iterations=args.partial_refine_anisotropic_pre_icp_iterations,
+            icp_iterations=args.partial_refine_anisotropic_icp_iterations,
+            max_pairs=args.partial_refine_max_pairs,
+            complete_trim_quantile=args.partial_refine_complete_trim_quantile,
+            partial_trim_quantile=args.partial_refine_partial_trim_quantile,
+            partial_weight=args.partial_refine_partial_weight,
+            max_step_translation=args.partial_refine_max_step_translation,
+            min_step_scale=args.partial_refine_min_step_scale,
+            max_step_scale=args.partial_refine_max_step_scale,
+            objective_pc_p95_weight=args.partial_refine_objective_pc_p95_weight,
+            objective_cp70_weight=args.partial_refine_objective_cp70_weight,
+            objective_scale_reg_weight=args.partial_refine_objective_scale_reg_weight,
+            seed=args.seed,
+        )
+        if partial_refinement.get("enabled") and partial_refinement.get("candidate_distance"):
+            complete_to_partial, partial_refinement = choose_anisotropic_partial_refinement(
+                complete_to_partial,
+                partial_optimized,
+                partial_refinement,
+                min_distance_improvement=args.partial_refine_min_distance_improvement,
+                min_delta_axis_scale=args.partial_refine_min_delta_axis_scale,
+                max_delta_axis_scale=args.partial_refine_max_delta_axis_scale,
+                max_delta_translation=args.partial_refine_max_delta_translation,
+            )
+    elif args.partial_refine_mode == "continuous_affine":
+        partial_optimized, partial_refinement = optimize_partial_affine_delta(
+            complete_to_partial,
+            complete_points,
+            partial_points,
+            pre_icp_iterations=args.partial_refine_anisotropic_pre_icp_iterations,
+            max_pairs=args.partial_refine_max_pairs,
+            complete_trim_quantile=args.partial_refine_complete_trim_quantile,
+            partial_trim_quantile=args.partial_refine_partial_trim_quantile,
+            partial_weight=args.partial_refine_partial_weight,
+            max_step_translation=args.partial_refine_max_step_translation,
+            min_step_scale=args.partial_refine_min_step_scale,
+            max_step_scale=args.partial_refine_max_step_scale,
+            iterations=args.partial_refine_iterations,
+            lr=args.partial_refine_lr,
+            distance_weight=args.partial_refine_distance_weight,
+            transform_reg_weight=args.partial_refine_transform_reg_weight,
+            axis_scale_reg_weight=args.partial_refine_objective_scale_reg_weight,
+            seed=args.seed,
+            device=args.device,
+        )
+        if partial_refinement.get("enabled") and partial_refinement.get("candidate_distance"):
+            complete_to_partial, partial_refinement = choose_anisotropic_partial_refinement(
+                complete_to_partial,
+                partial_optimized,
+                partial_refinement,
+                min_distance_improvement=args.partial_refine_min_distance_improvement,
+                min_delta_axis_scale=args.partial_refine_min_delta_axis_scale,
+                max_delta_axis_scale=args.partial_refine_max_delta_axis_scale,
+                max_delta_translation=args.partial_refine_max_delta_translation,
+            )
+    else:
+        partial_optimized, partial_refinement = refine_symmetric_partial_icp(
+            complete_to_partial,
+            complete_points,
+            partial_points,
+            iterations=args.partial_refine_iterations,
+            max_pairs=args.partial_refine_max_pairs,
+            complete_trim_quantile=args.partial_refine_complete_trim_quantile,
+            partial_trim_quantile=args.partial_refine_partial_trim_quantile,
+            partial_weight=args.partial_refine_partial_weight,
+            max_step_translation=args.partial_refine_max_step_translation,
+            min_step_scale=args.partial_refine_min_step_scale,
+            max_step_scale=args.partial_refine_max_step_scale,
+            seed=args.seed,
+        )
+        if partial_refinement.get("enabled") and partial_refinement.get("candidate_distance"):
+            complete_to_partial, partial_refinement = choose_partial_refinement(
+                complete_to_partial,
+                partial_optimized,
+                partial_refinement,
+                min_distance_improvement=args.partial_refine_min_distance_improvement,
+                max_delta_rotation_deg=args.partial_refine_max_delta_rotation_deg,
+                max_delta_translation=args.partial_refine_max_delta_translation,
+                min_delta_scale=args.partial_refine_min_delta_scale,
+                max_delta_scale=args.partial_refine_max_delta_scale,
+            )
     complete_in_moge = deepcopy(complete_pcd)
     complete_in_moge.points = o3d.utility.Vector3dVector(apply_sim3(complete_points, complete_to_moge))
     complete_in_partial = deepcopy(complete_pcd)
@@ -1548,6 +3187,9 @@ def run(args):
         "visible_3d_optimization": visible_3d_optimization,
         "visible_icp_history": icp_history,
         "visible_icp_acceptance": icp_acceptance,
+        "retry_2d_search": retry_2d_search,
+        "bridge_anchor_optimization": bridge_anchor_optimization,
+        "post_retry_silhouette_optimization": post_retry_silhouette_optimization,
         "complete_to_moge": complete_to_moge.tolist(),
         "complete_to_moge_decomposed": {
             "scale": float(scale),
@@ -1555,6 +3197,7 @@ def run(args):
             "translation": translation.tolist(),
         },
         "moge_to_partial": moge_to_partial.tolist(),
+        "registration_2d_acceptance": registration_2d_acceptance,
         "partial_refinement": partial_refinement,
         "complete_to_partial": complete_to_partial.tolist(),
         "outputs": paths,
@@ -1599,6 +3242,8 @@ def parse_args():
     parser.add_argument("--silhouette_opt_leakage_weight", type=float, default=1.25)
     parser.add_argument("--silhouette_opt_miss_weight", type=float, default=0.65)
     parser.add_argument("--silhouette_opt_outside_distance_weight", type=float, default=1.0)
+    parser.add_argument("--silhouette_opt_depth_weight", type=float, default=0.0)
+    parser.add_argument("--silhouette_opt_boundary_weight", type=float, default=0.0)
     parser.add_argument("--silhouette_opt_area_weight", type=float, default=0.15)
     parser.add_argument("--silhouette_opt_center_weight", type=float, default=2.0)
     parser.add_argument("--silhouette_opt_transform_reg_weight", type=float, default=0.02)
@@ -1626,8 +3271,81 @@ def parse_args():
     parser.add_argument("--icp_max_pairs", type=int, default=20000)
     parser.add_argument("--icp_rollback_on_score_drop", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--icp_min_score_gain", type=float, default=0.0)
-    parser.add_argument("--partial_refine_iterations", type=int, default=80)
-    parser.add_argument("--partial_refine_max_pairs", type=int, default=12000)
+    parser.add_argument("--require_2d_acceptance", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--min_2d_iou", type=float, default=0.78)
+    parser.add_argument("--min_2d_coverage", type=float, default=0.80)
+    parser.add_argument("--max_2d_leakage", type=float, default=0.12)
+    parser.add_argument("--min_2d_edge_iou", type=float, default=0.02)
+    parser.add_argument("--max_2d_edge_chamfer_px", type=float, default=18.0)
+    parser.add_argument("--retry_2d_on_gate_failure", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--retry_2d_top_k", type=int, default=12)
+    parser.add_argument("--retry_2d_scale_multipliers", default="0.45,0.55,0.65,0.75,0.85,1.0,1.15,1.3,1.45,1.6")
+    parser.add_argument("--retry_2d_translation_steps", default="0.12,0.06,0.03,0.015")
+    parser.add_argument("--retry_2d_rotation_steps_deg", default="12,6,3")
+    parser.add_argument("--retry_2d_scale_steps", default="1.12,1.06,1.03")
+    parser.add_argument("--retry_2d_refine_rounds", type=int, default=1)
+    parser.add_argument("--bridge_anchor_opt_enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--partial_to_moge_index_name", default=None)
+    parser.add_argument("--bridge_anchor_opt_max_anchors", type=int, default=20000)
+    parser.add_argument("--bridge_anchor_opt_iterations", type=int, default=80)
+    parser.add_argument("--bridge_anchor_opt_max_pairs", type=int, default=12000)
+    parser.add_argument("--bridge_anchor_opt_trim_quantile", type=float, default=0.45)
+    parser.add_argument("--bridge_anchor_opt_lr", type=float, default=0.01)
+    parser.add_argument("--bridge_anchor_opt_distance_loss", choices=("smooth_l1", "l2"), default="smooth_l1")
+    parser.add_argument("--bridge_anchor_opt_distance_weight", type=float, default=0.20)
+    parser.add_argument("--bridge_anchor_opt_silhouette_weight", type=float, default=1.0)
+    parser.add_argument("--bridge_anchor_opt_silhouette_render_size", type=int, default=128)
+    parser.add_argument("--bridge_anchor_opt_silhouette_points", type=int, default=12000)
+    parser.add_argument("--bridge_anchor_opt_silhouette_splat_radius", type=int, default=1)
+    parser.add_argument("--bridge_anchor_opt_silhouette_sigma", type=float, default=0.75)
+    parser.add_argument("--bridge_anchor_opt_silhouette_opacity", type=float, default=0.08)
+    parser.add_argument("--bridge_anchor_opt_leakage_weight", type=float, default=0.10)
+    parser.add_argument("--bridge_anchor_opt_miss_weight", type=float, default=2.0)
+    parser.add_argument("--bridge_anchor_opt_transform_reg_weight", type=float, default=0.10)
+    parser.add_argument("--bridge_anchor_opt_min_2d_objective_gain", type=float, default=0.0)
+    parser.add_argument("--bridge_anchor_opt_max_2d_objective_drop", type=float, default=0.02)
+    parser.add_argument("--bridge_anchor_opt_min_anchor_improvement", type=float, default=0.01)
+    parser.add_argument("--bridge_anchor_opt_retry_anchor_weight", type=float, default=0.35)
+    parser.add_argument("--retry_continuous_opt_enabled", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--retry_continuous_opt_iterations", type=int, default=24)
+    parser.add_argument("--retry_continuous_opt_max_pairs", type=int, default=6000)
+    parser.add_argument("--retry_continuous_opt_trim_quantile", type=float, default=0.45)
+    parser.add_argument("--retry_continuous_opt_lr", type=float, default=0.008)
+    parser.add_argument("--retry_continuous_opt_distance_loss", choices=("smooth_l1", "l2"), default="smooth_l1")
+    parser.add_argument("--retry_continuous_opt_distance_weight", type=float, default=0.20)
+    parser.add_argument("--retry_continuous_opt_silhouette_weight", type=float, default=1.0)
+    parser.add_argument("--retry_continuous_opt_silhouette_render_size", type=int, default=96)
+    parser.add_argument("--retry_continuous_opt_silhouette_points", type=int, default=6000)
+    parser.add_argument("--retry_continuous_opt_silhouette_splat_radius", type=int, default=1)
+    parser.add_argument("--retry_continuous_opt_silhouette_sigma", type=float, default=0.75)
+    parser.add_argument("--retry_continuous_opt_silhouette_opacity", type=float, default=0.08)
+    parser.add_argument("--retry_continuous_opt_leakage_weight", type=float, default=0.10)
+    parser.add_argument("--retry_continuous_opt_miss_weight", type=float, default=2.0)
+    parser.add_argument("--retry_continuous_opt_transform_reg_weight", type=float, default=0.10)
+    parser.add_argument("--retry_continuous_opt_max_2d_objective_drop", type=float, default=0.02)
+    parser.add_argument("--retry_continuous_opt_min_anchor_improvement", type=float, default=0.005)
+    parser.add_argument(
+        "--partial_refine_mode",
+        choices=("pca_anisotropic", "symmetric_icp", "continuous_affine"),
+        default="pca_anisotropic",
+    )
+    parser.add_argument("--partial_refine_iterations", type=int, default=12)
+    parser.add_argument("--partial_refine_max_pairs", type=int, default=6000)
+    parser.add_argument("--partial_refine_complete_trim_quantile", type=float, default=0.05)
+    parser.add_argument("--partial_refine_partial_trim_quantile", type=float, default=1.0)
+    parser.add_argument("--partial_refine_partial_weight", type=float, default=8.0)
+    parser.add_argument("--partial_refine_anisotropic_pre_icp_iterations", type=int, default=12)
+    parser.add_argument("--partial_refine_anisotropic_icp_iterations", type=int, default=6)
+    parser.add_argument(
+        "--partial_refine_anisotropic_scale_triplets",
+        default="1.0,0.85,1.0;1.08,0.85,1.08;1.0,0.85,1.08;1.08,0.95,1.08;0.95,0.85,1.0;1.0,0.85,0.95;0.95,0.85,0.95;1.08,0.85,1.0",
+    )
+    parser.add_argument("--partial_refine_objective_pc_p95_weight", type=float, default=0.30)
+    parser.add_argument("--partial_refine_objective_cp70_weight", type=float, default=0.20)
+    parser.add_argument("--partial_refine_objective_scale_reg_weight", type=float, default=0.004)
+    parser.add_argument("--partial_refine_max_step_translation", type=float, default=0.08)
+    parser.add_argument("--partial_refine_min_step_scale", type=float, default=0.85)
+    parser.add_argument("--partial_refine_max_step_scale", type=float, default=1.15)
     parser.add_argument("--partial_refine_trim_quantile", type=float, default=0.35)
     parser.add_argument("--partial_refine_lr", type=float, default=0.01)
     parser.add_argument("--partial_refine_distance_loss", choices=("smooth_l1", "l2"), default="smooth_l1")
@@ -1637,7 +3355,9 @@ def parse_args():
     parser.add_argument("--partial_refine_max_delta_rotation_deg", type=float, default=12.0)
     parser.add_argument("--partial_refine_max_delta_translation", type=float, default=0.12)
     parser.add_argument("--partial_refine_min_delta_scale", type=float, default=0.9)
-    parser.add_argument("--partial_refine_max_delta_scale", type=float, default=1.1)
+    parser.add_argument("--partial_refine_max_delta_scale", type=float, default=1.25)
+    parser.add_argument("--partial_refine_min_delta_axis_scale", type=float, default=0.60)
+    parser.add_argument("--partial_refine_max_delta_axis_scale", type=float, default=2.00)
     parser.add_argument("--final_name", default=None)
     return parser.parse_args()
 

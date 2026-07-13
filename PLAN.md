@@ -3,6 +3,11 @@
 This plan tracks the target refactor for partial point cloud reconstruction via
 Qwen-Image-Edit, MoGe, Hunyuan3D, and FreeReg.
 
+Research engineering constraint: this is academic-paper code. Prefer simple,
+explainable, reproducible method changes that can be ablated cleanly. Avoid
+over-engineering, model stacking, and sample-specific hacks; focused one-off
+diagnostic probes are acceptable only when clearly recorded as diagnostics.
+
 ## Goal
 
 Build a pipeline that reconstructs a complete 3D point cloud from a partial
@@ -14,6 +19,25 @@ The target relation is:
 ```text
 partial point index -> MoGe point index -> complete point index / complete aligned to partial
 ```
+
+Current Redwood metric target, requested 2026-07-13: optimize the current
+method while keeping the implementation academic-paper style, simple,
+explainable, and not over-engineered. Avoid sample-specific hacks; improvements
+must be evaluated on the full target set below.
+
+| sample | target CD-L1 x1e2 | target EMD x1e2 |
+| --- | ---: | ---: |
+| `01184` | `< 2.31` | `< 3.17` |
+| `09639` | `< 1.43` | `< 2.29` |
+| `05452` | `< 1.16` | `< 1.68` |
+| `05117` | `< 1.36` | `< 2.20` |
+| `06127` | `< 2.86` | `< 4.85` |
+| `07136` | `< 1.58` | `< 2.78` |
+| `07306` | `< 2.72` | `< 4.36` |
+| `06188` | `< 1.36` | `< 2.47` |
+| `06145` | `< 1.28` | `< 2.07` |
+| `06830` | `< 1.38` | `< 2.97` |
+| Average | `< 1.74` | `< 2.88` |
 
 ## Stage 1 - Partial to Image to MoGe Index Bridge
 
@@ -62,10 +86,11 @@ Open work:
 
 Current Qwen completion direction:
 - Use Qwen-Image-Edit-2511 with `QwenImageEditPlusPipeline`.
-- Use one edit stage: input is the projected incomplete depth image, output is a
-  complete realistic RGB/semantic image.
-- Prompt asks to generate a complete realistic object photo from the incomplete
-  depth image while preserving contour, pose, orientation, and camera viewpoint.
+- Use two edit stages by default. Stage 1 completes the projected incomplete
+  depth image as a depth-like image while preserving 2D projection, contour,
+  pose, orientation, and camera viewpoint. Stage 2 translates the completed
+  depth-like image into a realistic RGB/semantic image with a clean ordinary
+  photography-studio background.
 - Current default inference steps are `16`.
 - Current CFG settings are `true_cfg_scale=4.0` and `negative_prompt=" "`.
 - Do not pass `height` or `width`; the Plus pipeline outputs 1024x1024 from the
@@ -73,7 +98,7 @@ Current Qwen completion direction:
 - Qwen now runs an optional second refinement stage from the first completed
   semantic/RGB image. The second stage keeps only object outline, size,
   category, orientation, pose, and camera viewpoint, while making the object
-  and background a more realistic scene.
+  more realistic and keeping a clean ordinary photography-studio background.
 - Default projection is the original `view_select` path, which selects the
   camera with the most visible partial points. The semantic view candidate
   preview/selection experiment has been removed from the default pipeline.
@@ -209,13 +234,14 @@ Current default implementation:
   final `complete_to_partial`/`fused` outputs and is accepted only when partial
   distance improves and the delta stays within small scale/rotation/translation
   bounds.
-- `06127` needs a focused Stage 1/regeneration pass because the current
-  completed image/background mask includes surrounding environment, which
-  contaminates `img_sam.png`, Hunyuan geometry, and downstream registration.
+- Previous notes about `06127` background contamination are stale; use the
+  current artifacts and measured gate/metric values when judging that sample.
 
 Open work:
 - Inspect the no-FreeReg fused visualizations and overlays for high-metric
   samples, especially `06127`, `09639`, `06188`, `07306`, and `07136`.
+- Default Redwood target set is now `01184`, `09639`, `05452`, `05117`,
+  `06127`, `07136`, `07306`, `06188`, `06145`, and `06830`.
 - Rerun the Redwood batch with the updated 2D score/ICP rollback and compare
   overlays plus CD/EMD against the previous no-FreeReg run.
 - Rerun the Redwood batch with differentiable silhouette optimization enabled
@@ -223,6 +249,62 @@ Open work:
 - Rerun at least `01184` with visible-3D and partial-space refinement enabled,
   inspect `visible_3d_optimization` and `partial_refinement` metadata, then run
   the full Redwood batch and metric if the smoke result is stable.
+- 2026-07-13 requested full Redwood rerun: regenerate Stage 1 images, Hunyuan
+  PLYs, render-to-MoGe registration, and metric under
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713` using the current
+  pipeline and Qwen prompts constrained to a clean ordinary photography-studio
+  background.
+- 2026-07-13 `06188` prompt override changed to `red motorcyle` and the sample
+  was rerun in `workspace/redwood_qwen_studio_bg_full_rerun_20260713` by user
+  request. New metric is `CD-L1 x1e2 = 5.186385` and
+  `EMD x1e2 = 6.571867`, slightly worse than the previous same-root `06188`
+  result (`5.018309` / `6.483270`). The current 2D registration gate fails on
+  `iou = 0.749277 < 0.78` and `leakage = 0.153091 > 0.12`, so partial-space
+  refinement is skipped. Inspect/fix MoGe bridge or complete-to-MoGe 2D
+  alignment before treating this sample as an accepted result.
+- 2026-07-13 `07136` showed that the previous 2D gate was still too loose:
+  the run passed with `iou = 0.799961`, `coverage = 0.827981`,
+  `leakage = 0.040587`, and `edge_chamfer_px = 24.442658`, then partial-space
+  anisotropic refinement was accepted despite visibly poor 2D boundary
+  alignment. The gate now makes edge metrics hard thresholds and tightens the
+  main thresholds to `iou >= 0.82`, `coverage >= 0.84`, `leakage <= 0.10`,
+  `edge_iou >= 0.025`, and `edge_chamfer_px <= 18.0`. A registration-only
+  probe in
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/07136_strict_gate_probe`
+  found a better retry candidate (`iou = 0.879749`, `coverage = 0.899454`,
+  `leakage = 0.024298`, `edge_iou = 0.028900`) but still rejected it because
+  `edge_chamfer_px = 19.595064 > 18.0`; partial refinement was correctly
+  skipped with `registration_2d_threshold_not_met`.
+- 2026-07-13 retry coordinate search now optimizes `score_2d_gate_objective`
+  inside the gate-failure retry branch, while the main coordinate-search path
+  still uses the normal render score. This keeps the default path unchanged but
+  makes retry candidates refine toward the same 2D gate used for acceptance.
+  On `05117`, the strict-gate registration-only probe at
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05117_strict_gate_probe`
+  passed the stricter gate with `iou = 0.896573`, `coverage = 0.975105`,
+  `leakage = 0.082424`, `edge_iou = 0.082445`, and
+  `edge_chamfer_px = 7.722045`; partial anisotropic refinement was accepted.
+  Its metric is `CD-L1 x1e2 = 1.241699` and `EMD x1e2 = 1.684162`, still below
+  the user target `1.36 / 2.20`.
+- The same retry-objective probe on `07136` improved the metric from the
+  same-root old `07136` run (`CD-L1 x1e2 = 7.000`, `EMD x1e2 = 10.018`) to
+  `CD-L1 x1e2 = 5.126419` and `EMD x1e2 = 6.377791` at
+  `workspace/redwood_qwen_studio_bg_full_rerun_20260713/07136_retry_gate_objective_probe`.
+  It still failed the strict 2D gate only on `edge_chamfer_px`
+  (`19.427386 > 18.0`), so partial-space refinement was skipped. A heavier
+  top-K/finer-step retry probe was stopped because it was too slow for the
+  intended simple academic pipeline; the next useful optimization for `07136`
+  is a concise continuous boundary-aware loss, not more search breadth.
+- 2026-07-13 `07136` generation diagnostic: overriding the category to
+  `leather sofa` and using a depth-first Qwen prompt made the generated
+  `img.png` pose closer to the input depth image than the previous direct
+  photo prompt, but Hunyuan/registration still failed the strict 2D edge gate
+  (`edge_iou = 0.01248 < 0.025`, `edge_chamfer_px = 19.04 > 18.0`), so
+  partial refinement was skipped. The metric for the current main `07136`
+  output under `workspace/redwood_qwen_studio_bg_full_rerun_20260713/07136`
+  is `CD-L1 x1e2 = 5.923551`, `EMD x1e2 = 5.357981`, which is worse than the
+  target `1.58 / 2.78` and worse in CD than the previous retry-objective probe.
+  Treat this as a generation-side diagnostic, not an accepted result.
 - Regenerate `06127` Stage 1 image/mask before trusting its Stage 2/metric
   result.
 - Tune per-category candidate parameters if visual inspection still shows
@@ -232,6 +314,52 @@ Open work:
   be precomputed and used to re-rank FreeReg image/point-cloud matches for
   visualization without changing the selected transform. This is still an
   inspection experiment, not a main-flow registration criterion.
+- 2026-07-13 anisotropic partial-refinement Redwood rerun: reused existing
+  `img.png`, Hunyuan PLYs, and MoGe-to-partial bridge outputs under
+  `workspace/redwood_stage1_qwen_refine_preview`, reran render-to-MoGe Sim3
+  registration with `partial_refine_mode=pca_anisotropic` for all 10 default
+  samples, and wrote final predictions to
+  `workspace/redwood_stage1_qwen_refine_preview/<sample>/<sample>_fused.ply`.
+  Metrics were saved to
+  `workspace/redwood_stage1_qwen_refine_preview/metrics_samples.csv` with mean
+  `CD-L1 x1e2 = 4.280061` and `EMD x1e2 = 5.799900`. Highest-error samples are
+  still `09639`, `05117`, `06188`, `06127`, and `07136`; inspect overlays and
+  Stage 1 masks before treating those as accepted outputs.
+- 2026-07-13 2D acceptance gate: render-to-MoGe registration now records
+  `registration_2d_acceptance` and requires `final_score.iou >= 0.82`,
+  `final_score.coverage >= 0.84`, `final_score.leakage <= 0.10`,
+  `final_score.edge_iou >= 0.025`, and
+  `final_score.edge_chamfer_px <= 18.0` before running partial-space
+  refinement. Edge metrics are hard gates because `07136` showed that coarse
+  IoU/coverage/leakage can pass while the 2D boundary is still visibly wrong.
+  This explicitly rejects cases like `05117`, where the 2D render alignment is
+  poor despite later partial-distance improvement.
+- After adding the gate, `05117` was rerun and correctly failed
+  `registration_2d_acceptance` on `iou` and `leakage`; partial refinement was
+  skipped. Its current metric is `CD-L1 x1e2 = 5.295647` and
+  `EMD x1e2 = 7.239970`, and the metrics CSVs were updated for that sample.
+- The gate-failure path now retries top-K candidates with a 2D-focused
+  objective and wider scale multipliers. On `05117`, this selected
+  `retry_candidate_73` and improved `final_score` to `iou = 0.727344`,
+  `coverage = 0.841554`, `leakage = 0.157247`, but it still fails the hard 2D
+  gate on `iou` and `leakage`. The current `05117` metric is
+  `CD-L1 x1e2 = 4.018119` and `EMD x1e2 = 5.561677`. This is better but still
+  not a visually accepted 2D registration; likely next work is Stage 1/Hunyuan
+  geometry regeneration or non-Sim3 deformation/shape correction, not simply
+  more partial-space refinement.
+- 2026-07-13 bridge-anchor continuous optimization: render-to-MoGe registration
+  now loads `<sample>_moge_to_raw_partial_partial_to_moge_index.npy`, maps valid
+  raw partial points back into the MoGe frame with `moge_to_partial^-1`, and
+  uses those points as bridge anchors. Retry candidates record anchor distance
+  and are ranked with a joint 2D+anchor objective. A continuous delta-Sim3
+  optimizer then fits complete points to bridge anchors with a soft 2D
+  silhouette guard; it is accepted only if anchor distance improves and the 2D
+  objective stays within tolerance. On `05117`, the bridge file had 56,385
+  valid matches out of 56,582 partial points (`match_ratio = 0.9965`), but the
+  continuous candidate was correctly rejected because it reduced leakage while
+  dropping IoU/coverage and worsening anchor mean distance. Final output stayed
+  on `retry_candidate_73`; current one-off metric is `CD-L1 x1e2 = 4.007` and
+  `EMD x1e2 = 5.533`.
 
 Redwood `01184` original F-FreeReg experiment:
 - Image input:

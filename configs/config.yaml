@@ -26,14 +26,17 @@ sample_ids:
   - "05452"
   - "06127"
   - "06145"
-  - "06188"
   - "06830"
+  - "06188"
   - "07136"
   - "07306"
   - "09639"
 max_samples: null # set an integer to truncate auto-discovered samples
 prompt_overrides:
   "05117": "red chair"
+  "06188": "red motorcyle"
+  "07136": "leather sofa"
+  "07306": "Office Trash Can"
 run_stage1: true
 run_stage2: true
 run_metric: true
@@ -143,6 +146,8 @@ render_sim3_silhouette_opt_opacity: 0.08
 render_sim3_silhouette_opt_leakage_weight: 1.25
 render_sim3_silhouette_opt_miss_weight: 0.65
 render_sim3_silhouette_opt_outside_distance_weight: 1.0
+render_sim3_silhouette_opt_depth_weight: 0.0
+render_sim3_silhouette_opt_boundary_weight: 0.0
 render_sim3_silhouette_opt_area_weight: 0.15
 render_sim3_silhouette_opt_center_weight: 2.0
 render_sim3_silhouette_opt_transform_reg_weight: 0.02
@@ -170,8 +175,73 @@ render_sim3_icp_trim_quantile: 0.7
 render_sim3_icp_max_pairs: 20000
 render_sim3_icp_rollback_on_score_drop: true
 render_sim3_icp_min_score_gain: 0.0
-render_sim3_partial_refine_iterations: 80
-render_sim3_partial_refine_max_pairs: 12000
+render_sim3_require_2d_acceptance: true
+render_sim3_min_2d_iou: 0.82
+render_sim3_min_2d_coverage: 0.84
+render_sim3_max_2d_leakage: 0.10
+render_sim3_min_2d_edge_iou: 0.025
+render_sim3_max_2d_edge_chamfer_px: 18.0
+render_sim3_retry_2d_on_gate_failure: true
+render_sim3_retry_2d_top_k: 12
+render_sim3_retry_2d_scale_multipliers: "0.45,0.55,0.65,0.75,0.85,1.0,1.15,1.3,1.45,1.6"
+render_sim3_retry_2d_translation_steps: "0.12,0.06,0.03,0.015"
+render_sim3_retry_2d_rotation_steps_deg: "12,6,3"
+render_sim3_retry_2d_scale_steps: "1.12,1.06,1.03"
+render_sim3_retry_2d_refine_rounds: 1
+render_sim3_bridge_anchor_opt_enabled: true
+render_sim3_bridge_anchor_opt_max_anchors: 20000
+render_sim3_bridge_anchor_opt_iterations: 80
+render_sim3_bridge_anchor_opt_max_pairs: 12000
+render_sim3_bridge_anchor_opt_trim_quantile: 0.45
+render_sim3_bridge_anchor_opt_lr: 0.01
+render_sim3_bridge_anchor_opt_distance_loss: "smooth_l1"
+render_sim3_bridge_anchor_opt_distance_weight: 0.20
+render_sim3_bridge_anchor_opt_silhouette_weight: 1.0
+render_sim3_bridge_anchor_opt_silhouette_render_size: 128
+render_sim3_bridge_anchor_opt_silhouette_points: 12000
+render_sim3_bridge_anchor_opt_silhouette_splat_radius: 1
+render_sim3_bridge_anchor_opt_silhouette_sigma: 0.75
+render_sim3_bridge_anchor_opt_silhouette_opacity: 0.08
+render_sim3_bridge_anchor_opt_leakage_weight: 0.10
+render_sim3_bridge_anchor_opt_miss_weight: 2.0
+render_sim3_bridge_anchor_opt_transform_reg_weight: 0.10
+render_sim3_bridge_anchor_opt_min_2d_objective_gain: 0.0
+render_sim3_bridge_anchor_opt_max_2d_objective_drop: 0.02
+render_sim3_bridge_anchor_opt_min_anchor_improvement: 0.01
+render_sim3_bridge_anchor_opt_retry_anchor_weight: 0.35
+render_sim3_retry_continuous_opt_enabled: true
+render_sim3_retry_continuous_opt_iterations: 24
+render_sim3_retry_continuous_opt_max_pairs: 6000
+render_sim3_retry_continuous_opt_trim_quantile: 0.45
+render_sim3_retry_continuous_opt_lr: 0.008
+render_sim3_retry_continuous_opt_distance_loss: "smooth_l1"
+render_sim3_retry_continuous_opt_distance_weight: 0.20
+render_sim3_retry_continuous_opt_silhouette_weight: 1.0
+render_sim3_retry_continuous_opt_silhouette_render_size: 96
+render_sim3_retry_continuous_opt_silhouette_points: 6000
+render_sim3_retry_continuous_opt_silhouette_splat_radius: 1
+render_sim3_retry_continuous_opt_silhouette_sigma: 0.75
+render_sim3_retry_continuous_opt_silhouette_opacity: 0.08
+render_sim3_retry_continuous_opt_leakage_weight: 0.10
+render_sim3_retry_continuous_opt_miss_weight: 2.0
+render_sim3_retry_continuous_opt_transform_reg_weight: 0.10
+render_sim3_retry_continuous_opt_max_2d_objective_drop: 0.02
+render_sim3_retry_continuous_opt_min_anchor_improvement: 0.005
+render_sim3_partial_refine_mode: "pca_anisotropic"
+render_sim3_partial_refine_iterations: 12
+render_sim3_partial_refine_max_pairs: 6000
+render_sim3_partial_refine_complete_trim_quantile: 0.05
+render_sim3_partial_refine_partial_trim_quantile: 1.0
+render_sim3_partial_refine_partial_weight: 8.0
+render_sim3_partial_refine_anisotropic_pre_icp_iterations: 12
+render_sim3_partial_refine_anisotropic_icp_iterations: 6
+render_sim3_partial_refine_anisotropic_scale_triplets: "1.0,0.85,1.0;1.08,0.85,1.08;1.0,0.85,1.08;1.08,0.95,1.08;0.95,0.85,1.0;1.0,0.85,0.95;0.95,0.85,0.95;1.08,0.85,1.0"
+render_sim3_partial_refine_objective_pc_p95_weight: 0.30
+render_sim3_partial_refine_objective_cp70_weight: 0.20
+render_sim3_partial_refine_objective_scale_reg_weight: 0.004
+render_sim3_partial_refine_max_step_translation: 0.08
+render_sim3_partial_refine_min_step_scale: 0.85
+render_sim3_partial_refine_max_step_scale: 1.15
 render_sim3_partial_refine_trim_quantile: 0.35
 render_sim3_partial_refine_lr: 0.01
 render_sim3_partial_refine_distance_loss: "smooth_l1"
@@ -181,7 +251,9 @@ render_sim3_partial_refine_min_distance_improvement: 0.01
 render_sim3_partial_refine_max_delta_rotation_deg: 12.0
 render_sim3_partial_refine_max_delta_translation: 0.12
 render_sim3_partial_refine_min_delta_scale: 0.9
-render_sim3_partial_refine_max_delta_scale: 1.1
+render_sim3_partial_refine_max_delta_scale: 1.25
+render_sim3_partial_refine_min_delta_axis_scale: 0.60
+render_sim3_partial_refine_max_delta_axis_scale: 2.00
 reg_geotransformer_weights: "third_party/GeoTransformer/weights/geotransformer-modelnet.pth.tar"
 reg_geotransformer_num_points: 717
 reg_geotransformer_seed: 7351
