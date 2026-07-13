@@ -31,6 +31,7 @@ class DefaultConfigQwenEditTest(unittest.TestCase):
         self.assertNotIn("qwen_controlnet_conditioning_scale", config)
         self.assertEqual(config["depth_projection"], "view_select")
         self.assertFalse(config["save_depth_view_point_cloud"])
+        self.assertEqual(config["reg_backend"], "render_to_moge_sim3")
         self.assertNotIn("semantic_view_selector", config)
         for key in config:
             self.assertFalse(key.startswith("semantic_view_"), key)

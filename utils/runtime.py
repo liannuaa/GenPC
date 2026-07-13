@@ -132,6 +132,14 @@ def _profile_keep_patterns(flag, profile, stage):
             "*_objectmask_complete_registered_to_object_depthpro.ply",
             "*_objectmask_gray_object_depthpro_blue_complete_fused.ply",
             "*_objectmask_info.json",
+            "*_complete_registered_to_moge.ply",
+            "*_moge_gray_complete_blue_fused.ply",
+            "*_complete_aligned_to_raw_partial.ply",
+            "*_raw_partial_gray_complete_blue_aligned.ply",
+            "*_complete_to_moge_transform.npy",
+            "*_complete_to_partial_transform.npy",
+            "*_render_to_moge_overlay.png",
+            "*_render_to_moge_sim3_info.json",
         ]
         if stage == "stage1":
             return [

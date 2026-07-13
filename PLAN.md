@@ -161,9 +161,9 @@ Redwood `01184` experiment:
 
 ## Stage 3 - MoGe to Complete Registration
 
-Status: implemented experimentally with fixed-uv/Sim3 F-FreeReg and adaptive
-`ir_3d` fallback. The random-transform failure mode has been fixed for the
-current Redwood batch.
+Status: integrated into the main pipeline with no-FreeReg render-to-MoGe Sim3.
+The fixed-uv/Sim3 F-FreeReg path remains available as a historical experiment,
+but `configs/config.yaml` now defaults to `reg_backend: render_to_moge_sim3`.
 
 Intended FreeReg input:
 - Image: the same completed image used by MoGe, with background.
@@ -180,23 +180,24 @@ Important clarification:
 - Do not replace original F-FreeReg image depth with MoGe inside FreeReg unless
   this is explicitly a separate experiment.
 
-Current issue:
-- Original F-FreeReg with DepthPro can produce too few Kabsch hypotheses even
-  when YOHO descriptor match count is nonzero. The upstream solver then returns
-  `random_se3()`, which caused hundreds-scale translations for several Redwood
-  samples.
-- `scripts/run_freereg_original_depthpro.py` now rejects candidates with fewer
-  than two hypotheses or unreasonable complete-to-image translation and retries
-  with `ir_3d = 0.10` and then `ir_3d = 0.20`. The selected candidate and
-  hypothesis counts are saved in `freereg_candidates`.
+Current default implementation:
+- `ScaleAdapter.render_to_moge_sim3_reg` runs the MoGe-to-raw-partial bridge
+  and then `scripts/run_render_to_moge_sim3.py`.
+- The complete point cloud is aligned directly to MoGe by Sim3 candidate
+  search, z-buffer depth/silhouette scoring, coordinate-search refinement, and
+  visible trimmed ICP.
+- FreeReg and DepthPro are not used by the default main pipeline.
 
 Open work:
-- Integrate the adaptive fixed-uv/Sim3 FreeReg variant into the main pipeline
-  rather than keeping it only as an experiment script.
-- Add robust validation visualizations for image-point correspondences.
-- If needed, add fallback refinement such as similarity ICP or projection
-  silhouette consistency, but keep that separate from the original FreeReg
-  experiment.
+- Inspect the no-FreeReg fused visualizations and overlays for high-metric
+  samples, especially `06127`, `09639`, `06188`, `07306`, and `07136`.
+- Tune render-to-MoGe scoring or per-category candidate parameters if visual
+  inspection shows systematic orientation or scale failures.
+- Keep the FreeReg adaptive path as a comparison baseline, not the default.
+- 2026-07-13 semantic-feature probe: DINOv2-large image patch features can now
+  be precomputed and used to re-rank FreeReg image/point-cloud matches for
+  visualization without changing the selected transform. This is still an
+  inspection experiment, not a main-flow registration criterion.
 
 Redwood `01184` original F-FreeReg experiment:
 - Image input:
@@ -265,11 +266,61 @@ Redwood `01184` original F-FreeReg experiment:
   - Sampled CPU Chamfer x1e2 mean improved from about `19899.46` to `14.00`.
   - Summary:
     `workspace/redwood_stage1_qwen_refine_preview/freereg_adaptive_ir3d_cpu_cd_summary.csv`
+- `06145` DINOv2 semantic-match visualization probe:
+  - Feature extractor:
+    `scripts/extract_dinov2_image_features.py`
+  - FreeReg wrapper:
+    `scripts/run_freereg_original_depthpro.py`
+  - DINOv2-large image feature grid:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_dinov2_large_img_features.npz`
+  - Original match-line figure:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_freereg_adaptive_ir3d_image_pointcloud_match_lines.png`
+  - DINO semantic-filtered match-line figure, `min_similarity=0.55`, 8 valid
+    matches:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_freereg_adaptive_ir3d_dino_semantic_match_lines.png`
+  - DINO semantic-filtered match-line figure, `min_similarity=0.35`, 12 valid
+    matches:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_freereg_adaptive_ir3d_dino035_dino_semantic_match_lines.png`
+  - Combined comparison:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_freereg_dino_match_comparison.png`
+  - Risk/decision: DINO currently re-ranks matches after the selected transform
+    and is only a diagnostic visualization. It should not become a registration
+    criterion until it is tested as an inlier/candidate scoring term across
+    multiple object categories.
+- `06145` projected-silhouette candidate-selection probe:
+  - FreeReg wrapper:
+    `scripts/run_freereg_original_depthpro.py`
+  - Candidate mode:
+    `--candidate-selection silhouette`
+  - Candidate thresholds:
+    `auto, 0.08, 0.1, 0.15, 0.2, 0.3`
+  - Selected candidate:
+    `fallback_0.08`
+  - Selected candidate silhouette score:
+    `score=0.4198`, `IoU=0.3766`, `coverage=0.7759`,
+    `leakage=0.5774`, `edge_chamfer_px=31.01`
+  - FreeReg fused visualization:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_freereg_silhouette_select_gray_object_depthpro_blue_complete_fused.ply`
+  - Complete-to-partial fused visualization:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_complete_to_partial_silhouette_select_raw_partial_gray_complete_blue_aligned.ply`
+  - Silhouette overlay:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_freereg_silhouette_select_silhouette_overlay.png`
+  - Adaptive-vs-silhouette overlay comparison:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_adaptive_vs_silhouette_overlay_comparison.png`
+  - Metric summary:
+    `workspace/redwood_stage1_qwen_refine_preview/06145/06145_silhouette_select_metric_summary.json`
+  - Same-seed metric comparison against `data/GT/06145.ply`, sampled with
+    `metric_num_points=16384`, `metric_seed=1184`:
+    adaptive `CD-L1 x1e2=9.3714`, `EMD x1e2=9.0747`; silhouette-select
+    `CD-L1 x1e2=5.2366`, `EMD x1e2=6.5815`.
+  - Risk/decision: silhouette selection improved `06145`, but leakage remains
+    high. Test across more categories before promoting it from probe to default
+    candidate selection.
 
 ## Stage 4 - Complete Back to Partial
 
-Status: implemented experimentally for the default Redwood batch, not fully
-integrated into `main.py`.
+Status: integrated into `main.py` through `ScaleAdapter` when
+`reg_backend: render_to_moge_sim3`.
 
 Flow:
 1. Use Stage 1 index bridge:
@@ -287,9 +338,9 @@ Final output:
 - Index mapping from partial points to complete points where possible.
 
 Open work:
-- Implement composition cleanly inside the main pipeline.
-- Define saved output names and cleanup behavior.
-- Add tests for transform direction and coordinate-frame composition.
+- Add broader tests around the `ScaleAdapter.render_to_moge_sim3_reg` adapter
+  once heavy MoGe calls can be mocked cleanly.
+- Inspect and tune the high-metric samples from the 2026-07-13 no-FreeReg run.
 
 Redwood `01184` composed output:
 - Complete aligned to raw partial:
@@ -328,6 +379,40 @@ Redwood batch run on 2026-07-13:
   `workspace/redwood_stage1_qwen_refine_preview/freereg_adaptive_ir3d_cpu_cd_summary.csv`.
 - Core method documentation:
   `docs/core_registration_pipeline.md`.
+
+Redwood no-FreeReg main-pipeline run on 2026-07-13:
+- Command:
+  `CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py --workspace workspace/redwood_stage1_qwen_refine_preview --skip_existing --save_intermediates`
+- Default backend:
+  `render_to_moge_sim3`
+- Samples:
+  `01184`, `05117`, `05452`, `06127`, `06145`, `06188`, `06830`, `07136`,
+  `07306`, `09639`.
+- Per-sample outputs:
+  `<sample>_complete_registered_to_moge.ply`,
+  `<sample>_moge_gray_complete_blue_fused.ply`,
+  `<sample>_complete_aligned_to_raw_partial.ply`,
+  `<sample>_raw_partial_gray_complete_blue_aligned.ply`,
+  `<sample>_complete_to_moge_transform.npy`,
+  `<sample>_complete_to_partial_transform.npy`,
+  `<sample>_render_to_moge_overlay.png`,
+  `<sample>_render_to_moge_sim3_info.json`,
+  and metric prediction `<sample>_fused.ply`.
+- Metric summary:
+  `workspace/redwood_stage1_qwen_refine_preview/metrics_samples.csv`
+- Mean metrics:
+  `CD-L1 x1e2 = 4.198972`, `EMD x1e2 = 4.746163`.
+- Per-sample `CD-L1 x1e2 / EMD x1e2`:
+  `01184=2.476381/2.828803`,
+  `05117=4.696598/5.814887`,
+  `05452=1.503627/1.928873`,
+  `06127=8.357799/8.122091`,
+  `06145=1.472761/2.026613`,
+  `06188=4.973479/6.414759`,
+  `06830=2.431914/3.379773`,
+  `07136=4.854884/4.702779`,
+  `07306=4.865654/5.496590`,
+  `09639=6.356620/6.746463`.
 
 ## Current Risks
 

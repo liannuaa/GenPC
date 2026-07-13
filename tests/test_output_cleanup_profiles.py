@@ -39,6 +39,14 @@ class OutputCleanupProfileTests(unittest.TestCase):
                 "01184_freereg_original_depthpro_objectmask_complete_registered_to_object_depthpro.ply",
                 "01184_freereg_original_depthpro_objectmask_gray_object_depthpro_blue_complete_fused.ply",
                 "01184_freereg_original_depthpro_objectmask_info.json",
+                "01184_complete_registered_to_moge.ply",
+                "01184_moge_gray_complete_blue_fused.ply",
+                "01184_complete_aligned_to_raw_partial.ply",
+                "01184_raw_partial_gray_complete_blue_aligned.ply",
+                "01184_complete_to_moge_transform.npy",
+                "01184_complete_to_partial_transform.npy",
+                "01184_render_to_moge_overlay.png",
+                "01184_render_to_moge_sim3_info.json",
                 "01184_fused.ply",
                 "raw_depth.png",
                 "mask.png",
@@ -65,6 +73,10 @@ class OutputCleanupProfileTests(unittest.TestCase):
             self.assertIn("01184_moge_to_raw_partial_partial_to_moge_index.npy", kept)
             self.assertIn("01184_moge_to_raw_partial_moge_to_raw_partial_transform.npy", kept)
             self.assertIn("01184_freereg_original_depthpro_objectmask_gray_object_depthpro_blue_complete_fused.ply", kept)
+            self.assertIn("01184_complete_registered_to_moge.ply", kept)
+            self.assertIn("01184_complete_aligned_to_raw_partial.ply", kept)
+            self.assertIn("01184_complete_to_partial_transform.npy", kept)
+            self.assertIn("01184_render_to_moge_sim3_info.json", kept)
             self.assertIn("01184_fused.ply", kept)
             self.assertNotIn("qwen_edit_stage1.png", kept)
             self.assertNotIn("raw_depth.png", kept)

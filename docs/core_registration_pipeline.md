@@ -15,15 +15,15 @@ partial raw points
   -> camera-1 depth image
   -> Qwen completed RGB/semantic image
   -> MoGe image point cloud
-  -> DepthPro/FreeReg image frame
   -> Hunyuan complete point cloud
+  -> render-to-MoGe Sim3
   -> complete point cloud aligned to raw partial
 ```
 
 The method intentionally separates image-space correspondence from 3D
-registration. Pixel correspondence is used where images share the same rendered
-view; FreeReg is used where the image must be aligned to the generated complete
-point cloud.
+registration. Pixel correspondence is used to align MoGe to the raw partial
+scan. The generated complete point cloud is now aligned directly to MoGe with a
+no-FreeReg Sim3 search over rendered depth, silhouette overlap, and visible ICP.
 
 ## Stage 1: Partial To Image
 
@@ -78,90 +78,73 @@ Outputs:
 The current main workflow keeps the final sampled `.ply`; GLB intermediates are
 not required for the registration method.
 
-## Stage 4: FreeReg Image-Complete Registration
+## Stage 4: No-FreeReg Complete-To-MoGe Sim3 Registration
 
-Use original F-FreeReg as image + point-cloud registration:
+Use render-to-MoGe Sim3 registration:
 
-- image input: the same `img.png` used by MoGe
-- point cloud input: `<sample>_hunyuan2.1.ply`
+- image/MoGe input: the same `img.png` used by Stage 2
+- MoGe object mask: `<sample>_moge_to_raw_partial_object_mask.png`
+- complete point cloud input: `<sample>_hunyuan2.1.ply`
 - object mask: `<sample>_moge_to_raw_partial_object_mask.png`
 
 Implementation:
 
-- `scripts/run_freereg_original_depthpro.py`
-- vendored FreeReg source: `third_party/FreeReg`
+- `scripts/run_render_to_moge_sim3.py`
+- main pipeline integration: `ScaleAdapter.render_to_moge_sim3_reg`
 
-The current FreeReg variant is fixed-uv + Sim3 with an adaptive 3D inlier
-threshold:
+The current default variant does not use FreeReg or DepthPro:
 
-- DepthPro backprojects only object-mask pixels, not the full image.
-- YOHO image keypoint uv coordinates are projected directly from image
-  keypoints.
-- FreeReg's estimated scale is applied in the saved Sim3 transform.
-- The wrapper first tries the original auto `ir_3d = voxel_size * 5`. If that
-  produces too few Kabsch hypotheses, it rejects the run instead of accepting
-  FreeReg's `random_se3()` fallback, then retries with `ir_3d = 0.10` and
-  `ir_3d = 0.20`.
-- The selected threshold and per-candidate hypothesis counts are recorded in
-  `freereg_candidates` inside the FreeReg info JSON.
+- Run MoGe on `img.png` and keep object-mask pixels.
+- Build candidate Sim3 transforms from axis-aligned rotations and scale
+  multipliers.
+- Score candidates by z-buffer rendering the complete point cloud into the MoGe
+  camera and comparing silhouette overlap plus depth agreement.
+- Refine the best candidate with coordinate search over translation, rotation,
+  and scale.
+- Optionally run visible trimmed ICP from rendered complete points to MoGe
+  object points.
 
 Outputs:
 
-- `<sample>_freereg_original_depthpro_fixeduv_sim3_object_depthpro_points.ply`
-- `<sample>_freereg_original_depthpro_fixeduv_sim3_complete_registered_to_object_depthpro.ply`
-- `<sample>_freereg_original_depthpro_fixeduv_sim3_gray_object_depthpro_blue_complete_fused.ply`
-- `<sample>_freereg_original_depthpro_fixeduv_sim3_info.json`
+- `<sample>_complete_registered_to_moge.ply`
+- `<sample>_moge_gray_complete_blue_fused.ply`
+- `<sample>_complete_to_moge_transform.npy`
+- `<sample>_render_to_moge_overlay.png`
+- `<sample>_render_to_moge_sim3_info.json`
 
-The resulting transform is `complete_to_depthpro`.
+The resulting transform is `complete_to_moge`.
 
-## Stage 5: DepthPro To MoGe Same-Pixel Bridge
+## Stage 5: Compose Complete To Partial
 
-DepthPro and MoGe run on the same `img.png`, so no feature matching is needed
-between them. However, they still produce different 3D coordinate frames and
-depth scales. The bridge uses same-pixel 3D correspondences:
-
-1. Project object DepthPro points back to image pixels with FreeReg's intrinsic.
-2. Match those pixels to MoGe object pixels from the same image.
-3. Estimate a robust Sim3 transform `depthpro_to_moge`.
-
-Implementation:
-
-- `scripts/compose_complete_to_partial_via_depthpro_moge.py`
-
-## Stage 6: Compose Complete To Partial
-
-The final transform is:
+The final transform is now:
 
 ```text
 complete_to_partial =
     moge_to_partial
-    @ depthpro_to_moge
-    @ complete_to_depthpro
+    @ complete_to_moge
 ```
 
 Final outputs:
 
-- `<sample>_complete_to_partial_depthpro_moge_complete_aligned_to_raw_partial.ply`
-- `<sample>_complete_to_partial_depthpro_moge_raw_partial_gray_complete_blue_aligned.ply`
-- `<sample>_complete_to_partial_depthpro_moge_complete_to_raw_partial_transform.npy`
-- `<sample>_complete_to_partial_depthpro_moge_info.json`
+- `<sample>_complete_aligned_to_raw_partial.ply`
+- `<sample>_raw_partial_gray_complete_blue_aligned.ply`
+- `<sample>_complete_to_partial_transform.npy`
+- `<sample>_fused.ply`
 
 The fused visualization colors the raw partial point cloud gray and the aligned
-complete point cloud blue.
+complete point cloud blue. `<sample>_fused.ply` is the metric prediction path.
 
 ## Failure Signals
 
 Do not trust a fused result only because files exist. Check the metadata:
 
-- `freereg_matches < 100` is weak, but match count alone is not enough:
-  `06188` had many matches while still failing before adaptive hypothesis
-  checks.
-- `freereg_candidates[*].hypotheses < 2` means the candidate is not usable.
-  Previous runs accepted FreeReg's random fallback in this case, producing
-  hundreds-scale translations.
-- `depthpro_to_moge_ransac.inlier_ratio < 0.8` is weak.
-- very large `complete_to_partial` translation norm is usually a failed FreeReg
-  result.
+- Low `final_score.iou`, low `final_score.coverage`, or high
+  `final_score.leakage` in `<sample>_render_to_moge_sim3_info.json` means the
+  complete-to-MoGe render alignment is weak.
+- Large visible ICP mean/p95 distances are suspicious even if final files
+  exist.
+- Very large `complete_to_partial` translation norm is usually a failed
+  registration result.
 - huge metric values, especially `CD-L1 x1e2` in the thousands, indicate a
   transform-scale or translation failure.
 
@@ -194,12 +177,22 @@ Batch summaries:
 - `workspace/redwood_stage1_qwen_refine_preview/redwood_complete_to_partial_metrics.csv`
 - `workspace/redwood_stage1_qwen_refine_preview/freereg_adaptive_ir3d_cpu_cd_summary.csv`
 
+The no-FreeReg render-to-MoGe Sim3 main-pipeline run on 2026-07-13 wrote
+`<sample>_fused.ply` for all default Redwood samples and saved metrics to:
+
+- `workspace/redwood_stage1_qwen_refine_preview/metrics_samples.csv`
+- `workspace/redwood_stage1_qwen_refine_preview/metrics_by_category.csv`
+
+Its mean metrics were `CD-L1 x1e2 = 4.198972` and `EMD x1e2 = 4.746163`.
+Higher-error samples were `06127`, `09639`, `06188`, `07306`, and `07136`.
+
 ## Runtime Notes
 
 - Use `/opt/data/private/cr/miniconda3/envs/genpc/bin/python` for GenPC, MoGe,
   Hunyuan, Qwen, RMBG, compose, and metric code.
-- Use `/opt/data/private/cr/miniconda3/envs/freereg/bin/python` for FreeReg
-  because it requires MinkowskiEngine.
+- Use `/opt/data/private/cr/miniconda3/envs/freereg/bin/python` only for
+  historical FreeReg experiments, because FreeReg requires MinkowskiEngine. The
+  default main pipeline no longer needs FreeReg.
 - `third_party/FreeReg` contains source only. Checkpoints are intentionally not
   committed. By default the vendored FreeReg wrapper falls back to the existing
   checkpoint paths under `/opt/data/private/cr/lab/FreeReg`. These can be

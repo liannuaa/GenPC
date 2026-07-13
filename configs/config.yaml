@@ -12,6 +12,7 @@ models:
   rmbg_model_path: "RMBG-2.0"
   hunyuan_model_path: "Hunyuan3D-2.1"
   hunyuan_omni_model_path: "Hunyuan3D-Omni"
+  moge_model_path: "moge-2-vitl"
 
 outputs:
   save_intermediates: false # set true to keep every debug/intermediate artifact
@@ -115,7 +116,26 @@ metric_save_indices: false
 # GT point clouds are reserved for metric evaluation only.
 # Default ScanSalon/Hunyuan-Omni registration is GeoTransformer-only; do not chain
 # the legacy 2D pose optimization, ICP, or torch refinement after it.
-reg_backend: "geotransformer" # geotransformer, legacy, one_sided
+reg_backend: "render_to_moge_sim3" # render_to_moge_sim3, geotransformer, legacy, one_sided
+moge_fp16: true
+moge_bridge_max_pixel_distance: 2.0
+moge_bridge_ransac_iterations: 5000
+moge_bridge_ransac_threshold: 0.08
+moge_bridge_max_correspondences: 4000
+object_alpha_threshold: 128
+object_mask_erode_pixels: 2
+render_moge_object_mask_erode_pixels: 0
+render_sim3_eval_points: 60000
+render_sim3_seed: 6145
+render_sim3_splat_radius: 1
+render_sim3_scale_multipliers: "0.55,0.7,0.85,1.0,1.15,1.3"
+render_sim3_translation_steps: "0.12,0.06,0.03,0.015"
+render_sim3_rotation_steps_deg: "12,6,3"
+render_sim3_scale_steps: "1.12,1.06,1.03"
+render_sim3_refine_rounds: 1
+render_sim3_visible_icp_iterations: 3
+render_sim3_icp_trim_quantile: 0.7
+render_sim3_icp_max_pairs: 20000
 reg_geotransformer_weights: "third_party/GeoTransformer/weights/geotransformer-modelnet.pth.tar"
 reg_geotransformer_num_points: 717
 reg_geotransformer_seed: 7351

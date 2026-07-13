@@ -485,6 +485,18 @@ if __name__ == '__main__':
         "--models_dir",
         help="Optional models directory that overrides paths.models_dir.",
     )
+    parser.add_argument(
+        "--skip_existing",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Reuse existing per-sample outputs when possible.",
+    )
+    parser.add_argument(
+        "--save_intermediates",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Keep intermediate/debug files for this run.",
+    )
     args = parser.parse_args()
 
     cfg_txt = open(args.config, "r").read()
@@ -496,5 +508,9 @@ if __name__ == '__main__':
         cfg.paths.output_dir = args.workspace
     if args.models_dir:
         cfg.paths.models_dir = args.models_dir
+    if args.skip_existing is not None:
+        cfg.skip_existing = args.skip_existing
+    if args.save_intermediates is not None:
+        cfg.outputs.save_intermediates = args.save_intermediates
     normalize_runtime_config(cfg)
     main(cfg)
