@@ -191,12 +191,18 @@ Current default implementation:
   silhouette and edge alignment more strongly, and visible ICP is accepted only
   when it preserves or improves the render-to-MoGe 2D score. If ICP lowers that
   score, the saved transform rolls back to the coordinate-search result.
+- Differentiable 2D silhouette optimization is now inserted after
+  coordinate-search refinement. It optimizes a small delta-Sim3 with soft point
+  splatting against the object mask and accepts the result only if the
+  full-resolution hard render score improves.
 
 Open work:
 - Inspect the no-FreeReg fused visualizations and overlays for high-metric
   samples, especially `06127`, `09639`, `06188`, `07306`, and `07136`.
 - Rerun the Redwood batch with the updated 2D score/ICP rollback and compare
   overlays plus CD/EMD against the previous no-FreeReg run.
+- Rerun the Redwood batch with differentiable silhouette optimization enabled
+  and inspect which samples accept the optimized delta-Sim3.
 - Tune per-category candidate parameters if visual inspection still shows
   systematic orientation or scale failures.
 - Keep the FreeReg adaptive path as a comparison baseline, not the default.
@@ -437,6 +443,12 @@ Redwood no-FreeReg main-pipeline run on 2026-07-13:
   `07136=6.110398/5.828304`,
   `07306=4.254048/5.096049`,
   `09639=10.478231/11.549450`.
+- Differentiable silhouette smoke test:
+  `01184` ran successfully with `render_size=128`, `max_points=12000`,
+  `iterations=80`, and wrote `silhouette_optimization` metadata. The soft
+  optimizer reduced its own loss, but the full-resolution hard render score did
+  not improve (`candidate_score=1.479652` vs `baseline_score=1.541576`), so
+  the candidate was rejected as intended.
 
 ## Current Risks
 

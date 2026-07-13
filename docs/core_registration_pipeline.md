@@ -103,6 +103,11 @@ The current default variant does not use FreeReg or DepthPro:
   depth.
 - Refine the best candidate with coordinate search over translation, rotation,
   and scale.
+- Run a differentiable 2D silhouette optimization from the coordinate-search
+  transform. It optimizes a small delta-Sim3 with soft point splatting against
+  the object mask, using silhouette Dice, leakage, missing-mask, distance,
+  area, center, and transform-regularization terms. The candidate is accepted
+  only if the full-resolution hard render score improves.
 - Optionally run visible trimmed ICP from rendered complete points to MoGe
   object points. The ICP result is accepted only if it preserves or improves
   the render-to-MoGe 2D score; otherwise the pipeline rolls back to the
@@ -147,6 +152,8 @@ Do not trust a fused result only because files exist. Check the metadata:
   complete-to-MoGe render alignment is weak.
 - Low `final_score.edge_iou` or high `final_score.edge_chamfer_norm` means the
   2D silhouette boundary is misaligned even if coarse mask overlap is nonzero.
+- `silhouette_optimization.accepted = false` means the soft differentiable
+  optimization ran but did not improve the full-resolution hard render score.
 - Large visible ICP mean/p95 distances are suspicious even if final files
   exist.
 - Very large `complete_to_partial` translation norm is usually a failed

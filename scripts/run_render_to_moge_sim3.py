@@ -10,6 +10,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 import open3d as o3d
+import torch
 from PIL import Image
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
@@ -541,6 +542,204 @@ def choose_icp_refinement(
     )
 
 
+def torch_rodrigues(rotvec):
+    theta = torch.linalg.norm(rotvec) + 1e-8
+    x, y, z = rotvec
+    zero = torch.zeros((), dtype=rotvec.dtype, device=rotvec.device)
+    k = torch.stack(
+        [
+            torch.stack([zero, -z, y]),
+            torch.stack([z, zero, -x]),
+            torch.stack([-y, x, zero]),
+        ]
+    )
+    eye = torch.eye(3, dtype=rotvec.dtype, device=rotvec.device)
+    return eye + (torch.sin(theta) / theta) * k + ((1.0 - torch.cos(theta)) / (theta * theta)) * (k @ k)
+
+
+def resize_target_mask(mask, render_size):
+    mask = np.asarray(mask, dtype=np.float32)
+    resized = cv2.resize(mask, (int(render_size), int(render_size)), interpolation=cv2.INTER_AREA)
+    return np.clip(resized, 0.0, 1.0).astype(np.float32)
+
+
+def render_soft_silhouette_torch(points, intrinsic_px, image_shape, render_size, splat_radius, sigma, opacity):
+    height, width = int(image_shape[0]), int(image_shape[1])
+    render_size = int(render_size)
+    z = points[:, 2]
+    valid = torch.isfinite(points).all(dim=1) & (z > 1e-6)
+    projected = points @ intrinsic_px.T
+    uv = projected[:, :2] / torch.clamp(projected[:, 2:3], min=1e-6)
+    uv = uv * torch.tensor(
+        [render_size / max(width, 1), render_size / max(height, 1)],
+        dtype=points.dtype,
+        device=points.device,
+    )
+    valid = valid & (uv[:, 0] >= 0) & (uv[:, 0] <= render_size - 1) & (uv[:, 1] >= 0) & (uv[:, 1] <= render_size - 1)
+    uv = uv[valid]
+    if uv.numel() == 0:
+        return torch.zeros((render_size, render_size), dtype=points.dtype, device=points.device)
+
+    base = torch.floor(uv).long()
+    flat_size = render_size * render_size
+    density = torch.zeros(flat_size, dtype=points.dtype, device=points.device)
+    radius = max(1, int(splat_radius))
+    sigma_sq = max(float(sigma) ** 2, 1e-6)
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            xy = base + torch.tensor([dx, dy], dtype=torch.long, device=points.device)
+            keep = (xy[:, 0] >= 0) & (xy[:, 0] < render_size) & (xy[:, 1] >= 0) & (xy[:, 1] < render_size)
+            if not bool(keep.any()):
+                continue
+            center = xy[keep].to(points.dtype) + 0.5
+            dist2 = torch.sum((uv[keep] - center) ** 2, dim=1)
+            weights = torch.exp(-0.5 * dist2 / sigma_sq)
+            indices = xy[keep, 1] * render_size + xy[keep, 0]
+            density.index_add_(0, indices, weights)
+    density = density.reshape(render_size, render_size)
+    return 1.0 - torch.exp(-float(opacity) * density)
+
+
+def optimize_silhouette_delta_sim3(
+    initial_transform,
+    source_points,
+    intrinsic_px,
+    image_shape,
+    target_mask,
+    *,
+    render_size,
+    max_points,
+    iterations,
+    lr,
+    splat_radius,
+    sigma,
+    opacity,
+    leakage_weight,
+    miss_weight,
+    outside_distance_weight,
+    area_weight,
+    center_weight,
+    transform_reg_weight,
+    seed,
+    device,
+):
+    if int(iterations) <= 0:
+        return np.asarray(initial_transform, dtype=np.float64), {"enabled": False}
+
+    rng = np.random.default_rng(int(seed))
+    points = np.asarray(source_points, dtype=np.float64)
+    if len(points) > int(max_points):
+        points = points[rng.choice(len(points), size=int(max_points), replace=False)]
+
+    base_points = apply_sim3(points, initial_transform)
+    target_np = resize_target_mask(target_mask, render_size)
+    outside_distance = cv2.distanceTransform((target_np <= 0.5).astype(np.uint8), cv2.DIST_L2, 3)
+    outside_distance = outside_distance / max(float(np.linalg.norm(target_np.shape)), 1.0)
+
+    torch_device = torch.device(device if str(device).startswith("cuda") and torch.cuda.is_available() else "cpu")
+    dtype = torch.float32
+    base = torch.as_tensor(base_points, dtype=dtype, device=torch_device)
+    intrinsic = torch.as_tensor(np.asarray(intrinsic_px, dtype=np.float32), dtype=dtype, device=torch_device)
+    target = torch.as_tensor(target_np, dtype=dtype, device=torch_device)
+    outside = torch.as_tensor(outside_distance.astype(np.float32), dtype=dtype, device=torch_device)
+    target_sum = torch.clamp(target.sum(), min=1.0)
+    yy, xx = torch.meshgrid(
+        torch.linspace(0.0, 1.0, int(render_size), dtype=dtype, device=torch_device),
+        torch.linspace(0.0, 1.0, int(render_size), dtype=dtype, device=torch_device),
+        indexing="ij",
+    )
+    target_cx = (target * xx).sum() / target_sum
+    target_cy = (target * yy).sum() / target_sum
+
+    log_scale = torch.nn.Parameter(torch.zeros((), dtype=dtype, device=torch_device))
+    rotvec = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    translation = torch.nn.Parameter(torch.zeros(3, dtype=dtype, device=torch_device))
+    optimizer = torch.optim.Adam([log_scale, rotvec, translation], lr=float(lr))
+
+    best = {
+        "loss": float("inf"),
+        "log_scale": 0.0,
+        "rotvec": [0.0, 0.0, 0.0],
+        "translation": [0.0, 0.0, 0.0],
+    }
+    eps = 1e-6
+    for iteration in range(int(iterations)):
+        optimizer.zero_grad(set_to_none=True)
+        scale = torch.exp(log_scale)
+        rotation = torch_rodrigues(rotvec)
+        moved = scale * (base @ rotation.T) + translation
+        silhouette = render_soft_silhouette_torch(
+            moved,
+            intrinsic,
+            image_shape,
+            render_size=render_size,
+            splat_radius=splat_radius,
+            sigma=sigma,
+            opacity=opacity,
+        )
+        pred_sum = torch.clamp(silhouette.sum(), min=eps)
+        intersection = (silhouette * target).sum()
+        dice_loss = 1.0 - (2.0 * intersection + eps) / (pred_sum + target_sum + eps)
+        leakage = (silhouette * (1.0 - target)).sum() / pred_sum
+        miss = (target * (1.0 - silhouette)).sum() / target_sum
+        outside_loss = (silhouette * outside).sum() / pred_sum
+        area_loss = ((pred_sum - target_sum) / target_sum) ** 2
+        pred_cx = (silhouette * xx).sum() / pred_sum
+        pred_cy = (silhouette * yy).sum() / pred_sum
+        center_loss = (pred_cx - target_cx) ** 2 + (pred_cy - target_cy) ** 2
+        transform_reg = log_scale.square() + 0.25 * rotvec.square().sum() + 0.25 * translation.square().sum()
+        loss = (
+            dice_loss
+            + float(leakage_weight) * leakage
+            + float(miss_weight) * miss
+            + float(outside_distance_weight) * outside_loss
+            + float(area_weight) * area_loss
+            + float(center_weight) * center_loss
+            + float(transform_reg_weight) * transform_reg
+        )
+        loss.backward()
+        optimizer.step()
+        loss_value = float(loss.detach().cpu())
+        if loss_value < best["loss"]:
+            best = {
+                "loss": loss_value,
+                "iteration": int(iteration),
+                "log_scale": float(log_scale.detach().cpu()),
+                "rotvec": rotvec.detach().cpu().numpy().astype(float).tolist(),
+                "translation": translation.detach().cpu().numpy().astype(float).tolist(),
+                "dice_loss": float(dice_loss.detach().cpu()),
+                "leakage": float(leakage.detach().cpu()),
+                "miss": float(miss.detach().cpu()),
+                "outside_loss": float(outside_loss.detach().cpu()),
+                "area_loss": float(area_loss.detach().cpu()),
+                "center_loss": float(center_loss.detach().cpu()),
+            }
+
+    with torch.no_grad():
+        best_rotvec = torch.as_tensor(best["rotvec"], dtype=dtype, device=torch_device)
+        best_rotation = torch_rodrigues(best_rotvec).detach().cpu().numpy()
+    delta = make_sim3(
+        scale=float(math.exp(best["log_scale"])),
+        rotation=best_rotation,
+        translation=best["translation"],
+    )
+    optimized = delta @ np.asarray(initial_transform, dtype=np.float64)
+    info = {
+        "enabled": True,
+        "accepted": None,
+        "render_size": int(render_size),
+        "points": int(len(points)),
+        "iterations": int(iterations),
+        "lr": float(lr),
+        "splat_radius": int(splat_radius),
+        "sigma": float(sigma),
+        "opacity": float(opacity),
+        "best": best,
+        "delta": delta.tolist(),
+    }
+    return optimized, info
+
+
 def draw_overlay(path, image_path, target_mask, rendered_mask):
     image = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
     overlay = image.copy()
@@ -645,6 +844,60 @@ def run(args):
         scale_steps=parse_float_list(args.scale_steps),
         rounds=args.refine_rounds,
     )
+    silhouette_optimized, silhouette_optimization = optimize_silhouette_delta_sim3(
+        refined,
+        complete_points,
+        intrinsic_px,
+        image_shape,
+        target_mask,
+        render_size=args.silhouette_opt_render_size,
+        max_points=args.silhouette_opt_max_points,
+        iterations=args.silhouette_opt_iterations,
+        lr=args.silhouette_opt_lr,
+        splat_radius=args.silhouette_opt_splat_radius,
+        sigma=args.silhouette_opt_sigma,
+        opacity=args.silhouette_opt_opacity,
+        leakage_weight=args.silhouette_opt_leakage_weight,
+        miss_weight=args.silhouette_opt_miss_weight,
+        outside_distance_weight=args.silhouette_opt_outside_distance_weight,
+        area_weight=args.silhouette_opt_area_weight,
+        center_weight=args.silhouette_opt_center_weight,
+        transform_reg_weight=args.silhouette_opt_transform_reg_weight,
+        seed=args.seed,
+        device=args.device,
+    )
+    if silhouette_optimization.get("enabled"):
+        silhouette_score = evaluate_transform(
+            eval_points,
+            silhouette_optimized,
+            intrinsic_px,
+            target_depth,
+            target_mask,
+            splat_radius=args.splat_radius,
+        )
+        min_gain = float(args.silhouette_opt_min_score_gain)
+        if silhouette_score["score"] > refined_score["score"] + min_gain:
+            refined = silhouette_optimized
+            silhouette_optimization.update(
+                {
+                    "accepted": True,
+                    "reason": "render_score_improved",
+                    "min_score_gain": min_gain,
+                    "baseline_score": refined_score,
+                    "candidate_score": silhouette_score,
+                }
+            )
+            refined_score = silhouette_score
+        else:
+            silhouette_optimization.update(
+                {
+                    "accepted": False,
+                    "reason": "render_score_not_improved",
+                    "min_score_gain": min_gain,
+                    "baseline_score": refined_score,
+                    "candidate_score": silhouette_score,
+                }
+            )
     coordinate_refined = np.asarray(refined, dtype=np.float64).copy()
     if args.visible_icp_iterations > 0:
         icp_refined, icp_history = refine_visible_icp(
@@ -769,6 +1022,7 @@ def run(args):
         "refined_score": refined_score,
         "final_score": final_score,
         "refine_history": refine_history,
+        "silhouette_optimization": silhouette_optimization,
         "visible_icp_history": icp_history,
         "visible_icp_acceptance": icp_acceptance,
         "complete_to_moge": complete_to_moge.tolist(),
@@ -811,6 +1065,20 @@ def parse_args():
     parser.add_argument("--rotation_steps_deg", default="12,6,3")
     parser.add_argument("--scale_steps", default="1.12,1.06,1.03")
     parser.add_argument("--refine_rounds", type=int, default=1)
+    parser.add_argument("--silhouette_opt_iterations", type=int, default=80)
+    parser.add_argument("--silhouette_opt_render_size", type=int, default=128)
+    parser.add_argument("--silhouette_opt_max_points", type=int, default=12000)
+    parser.add_argument("--silhouette_opt_lr", type=float, default=0.02)
+    parser.add_argument("--silhouette_opt_splat_radius", type=int, default=1)
+    parser.add_argument("--silhouette_opt_sigma", type=float, default=0.75)
+    parser.add_argument("--silhouette_opt_opacity", type=float, default=0.08)
+    parser.add_argument("--silhouette_opt_leakage_weight", type=float, default=1.25)
+    parser.add_argument("--silhouette_opt_miss_weight", type=float, default=0.65)
+    parser.add_argument("--silhouette_opt_outside_distance_weight", type=float, default=1.0)
+    parser.add_argument("--silhouette_opt_area_weight", type=float, default=0.15)
+    parser.add_argument("--silhouette_opt_center_weight", type=float, default=2.0)
+    parser.add_argument("--silhouette_opt_transform_reg_weight", type=float, default=0.02)
+    parser.add_argument("--silhouette_opt_min_score_gain", type=float, default=0.0)
     parser.add_argument("--visible_icp_iterations", type=int, default=3)
     parser.add_argument("--icp_trim_quantile", type=float, default=0.7)
     parser.add_argument("--icp_max_pairs", type=int, default=20000)

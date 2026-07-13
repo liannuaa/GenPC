@@ -8,6 +8,7 @@ from scripts.run_render_to_moge_sim3 import (
     compose_complete_to_partial,
     infer_paths,
     make_sim3,
+    optimize_silhouette_delta_sim3,
     score_depth_render,
     zbuffer_depth,
 )
@@ -111,6 +112,46 @@ class RenderToMogeSim3Test(unittest.TestCase):
         np.testing.assert_allclose(chosen, icp)
         self.assertEqual(final_score["score"], 1.1)
         self.assertTrue(acceptance["accepted"])
+
+    def test_silhouette_optimizer_disabled_returns_initial_transform(self):
+        transform = np.eye(4, dtype=np.float64)
+        points = np.array(
+            [
+                [0.0, 0.0, 1.0],
+                [0.1, 0.0, 1.0],
+                [0.0, 0.1, 1.0],
+                [0.1, 0.1, 1.0],
+            ],
+            dtype=np.float64,
+        )
+        intrinsic = np.eye(3, dtype=np.float64)
+        mask = np.ones((8, 8), dtype=bool)
+
+        optimized, info = optimize_silhouette_delta_sim3(
+            transform,
+            points,
+            intrinsic,
+            image_shape=(8, 8),
+            target_mask=mask,
+            render_size=8,
+            max_points=4,
+            iterations=0,
+            lr=0.01,
+            splat_radius=1,
+            sigma=0.75,
+            opacity=0.1,
+            leakage_weight=1.0,
+            miss_weight=1.0,
+            outside_distance_weight=1.0,
+            area_weight=0.1,
+            center_weight=1.0,
+            transform_reg_weight=0.01,
+            seed=1,
+            device="cpu",
+        )
+
+        np.testing.assert_allclose(optimized, transform)
+        self.assertFalse(info["enabled"])
 
     def test_compose_complete_to_partial_left_multiplies_moge_to_partial(self):
         complete_to_moge = np.eye(4, dtype=np.float64)
