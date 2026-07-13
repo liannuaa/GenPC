@@ -22,14 +22,7 @@ def _zh_object_labels(flag):
 
 def build_completion_prompt(flag):
     _, photo_label = _zh_object_labels(flag)
-    return (
-        f"根据这张不完整的{photo_label}深度图生成完整的{photo_label}深度图，"
-        "输出仍然是灰度深度图风格，"
-        "保持已有部分的轮廓、姿态、朝向和相机视角不变，"
-        "严格保持深度图中的2D投影轮廓、物体位置和大小，"
-        "不要旋转、平移、缩放、换视角或重新构图，合理补全缺失部分，"
-        "不要生成真实照片、颜色、材质、纹理或摄影背景。"
-    )
+    return f"这是一个{photo_label}的深度图，补全它"
 
 
 def build_refinement_prompt(flag):
