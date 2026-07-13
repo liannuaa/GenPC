@@ -98,11 +98,15 @@ The current default variant does not use FreeReg or DepthPro:
 - Build candidate Sim3 transforms from axis-aligned rotations and scale
   multipliers.
 - Score candidates by z-buffer rendering the complete point cloud into the MoGe
-  camera and comparing silhouette overlap plus depth agreement.
+  camera and comparing silhouette overlap, edge alignment, leakage, and depth
+  agreement. The score weights 2D silhouette/edge terms more heavily than
+  depth.
 - Refine the best candidate with coordinate search over translation, rotation,
   and scale.
 - Optionally run visible trimmed ICP from rendered complete points to MoGe
-  object points.
+  object points. The ICP result is accepted only if it preserves or improves
+  the render-to-MoGe 2D score; otherwise the pipeline rolls back to the
+  coordinate-search transform.
 
 Outputs:
 
@@ -141,6 +145,8 @@ Do not trust a fused result only because files exist. Check the metadata:
 - Low `final_score.iou`, low `final_score.coverage`, or high
   `final_score.leakage` in `<sample>_render_to_moge_sim3_info.json` means the
   complete-to-MoGe render alignment is weak.
+- Low `final_score.edge_iou` or high `final_score.edge_chamfer_norm` means the
+  2D silhouette boundary is misaligned even if coarse mask overlap is nonzero.
 - Large visible ICP mean/p95 distances are suspicious even if final files
   exist.
 - Very large `complete_to_partial` translation norm is usually a failed
@@ -185,6 +191,14 @@ The no-FreeReg render-to-MoGe Sim3 main-pipeline run on 2026-07-13 wrote
 
 Its mean metrics were `CD-L1 x1e2 = 4.198972` and `EMD x1e2 = 4.746163`.
 Higher-error samples were `06127`, `09639`, `06188`, `07306`, and `07136`.
+
+After visual inspection showed weak overlays, the render-to-MoGe score was
+changed to emphasize silhouette/edge alignment and to reject visible ICP when
+it lowers the 2D render score. A rerun rejected visible ICP on all 10 Redwood
+samples. The updated overlays are more conservative with respect to the 2D
+score, but the mean metric worsened to `CD-L1 x1e2 = 6.427336` and
+`EMD x1e2 = 7.728549`; this is an overlay-protection setting, not yet a better
+3D metric setting.
 
 ## Runtime Notes
 

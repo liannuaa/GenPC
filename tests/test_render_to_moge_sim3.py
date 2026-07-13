@@ -4,6 +4,7 @@ import numpy as np
 
 from scripts.run_render_to_moge_sim3 import (
     apply_sim3,
+    choose_icp_refinement,
     compose_complete_to_partial,
     infer_paths,
     make_sim3,
@@ -61,6 +62,55 @@ class RenderToMogeSim3Test(unittest.TestCase):
         self.assertGreater(good["score"], bad["score"])
         self.assertLess(good["depth_mae"], bad["depth_mae"])
         self.assertGreater(good["iou"], bad["iou"])
+
+    def test_score_depth_render_penalizes_edge_misalignment(self):
+        target_mask = np.zeros((8, 8), dtype=bool)
+        target_mask[2:6, 2:6] = True
+        target_depth = np.ones((8, 8), dtype=np.float64)
+        aligned_mask = target_mask.copy()
+        shifted_mask = np.zeros((8, 8), dtype=bool)
+        shifted_mask[2:6, 3:7] = True
+
+        aligned = score_depth_render(target_depth, aligned_mask, target_depth, target_mask)
+        shifted = score_depth_render(target_depth, shifted_mask, target_depth, target_mask)
+
+        self.assertGreater(aligned["score"], shifted["score"])
+        self.assertGreater(aligned["edge_iou"], shifted["edge_iou"])
+        self.assertLess(aligned["edge_chamfer_norm"], shifted["edge_chamfer_norm"])
+
+    def test_choose_icp_refinement_rolls_back_when_render_score_drops(self):
+        baseline = np.eye(4, dtype=np.float64)
+        icp = np.eye(4, dtype=np.float64)
+        icp[:3, 3] = [1.0, 0.0, 0.0]
+
+        chosen, final_score, acceptance = choose_icp_refinement(
+            baseline,
+            {"score": 1.0},
+            icp,
+            {"score": 0.9},
+            rollback_on_score_drop=True,
+        )
+
+        np.testing.assert_allclose(chosen, baseline)
+        self.assertEqual(final_score["score"], 1.0)
+        self.assertFalse(acceptance["accepted"])
+
+    def test_choose_icp_refinement_accepts_when_render_score_improves(self):
+        baseline = np.eye(4, dtype=np.float64)
+        icp = np.eye(4, dtype=np.float64)
+        icp[:3, 3] = [1.0, 0.0, 0.0]
+
+        chosen, final_score, acceptance = choose_icp_refinement(
+            baseline,
+            {"score": 1.0},
+            icp,
+            {"score": 1.1},
+            rollback_on_score_drop=True,
+        )
+
+        np.testing.assert_allclose(chosen, icp)
+        self.assertEqual(final_score["score"], 1.1)
+        self.assertTrue(acceptance["accepted"])
 
     def test_compose_complete_to_partial_left_multiplies_moge_to_partial(self):
         complete_to_moge = np.eye(4, dtype=np.float64)

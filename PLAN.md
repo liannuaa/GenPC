@@ -187,12 +187,18 @@ Current default implementation:
   search, z-buffer depth/silhouette scoring, coordinate-search refinement, and
   visible trimmed ICP.
 - FreeReg and DepthPro are not used by the default main pipeline.
+- Update after overlay inspection: render-to-MoGe scoring now emphasizes 2D
+  silhouette and edge alignment more strongly, and visible ICP is accepted only
+  when it preserves or improves the render-to-MoGe 2D score. If ICP lowers that
+  score, the saved transform rolls back to the coordinate-search result.
 
 Open work:
 - Inspect the no-FreeReg fused visualizations and overlays for high-metric
   samples, especially `06127`, `09639`, `06188`, `07306`, and `07136`.
-- Tune render-to-MoGe scoring or per-category candidate parameters if visual
-  inspection shows systematic orientation or scale failures.
+- Rerun the Redwood batch with the updated 2D score/ICP rollback and compare
+  overlays plus CD/EMD against the previous no-FreeReg run.
+- Tune per-category candidate parameters if visual inspection still shows
+  systematic orientation or scale failures.
 - Keep the FreeReg adaptive path as a comparison baseline, not the default.
 - 2026-07-13 semantic-feature probe: DINOv2-large image patch features can now
   be precomputed and used to re-rank FreeReg image/point-cloud matches for
@@ -413,6 +419,24 @@ Redwood no-FreeReg main-pipeline run on 2026-07-13:
   `07136=4.854884/4.702779`,
   `07306=4.865654/5.496590`,
   `09639=6.356620/6.746463`.
+- Overlay-protection rerun after strengthening 2D silhouette/edge scoring and
+  rolling back ICP score drops:
+  all 10 samples rejected visible ICP because it lowered render-to-MoGe 2D
+  score. Updated overlays and `<sample>_fused.ply` were written in the same
+  sample directories. Mean metric worsened to `CD-L1 x1e2 = 6.427336`,
+  `EMD x1e2 = 7.728549`, so this change protects 2D overlay but is not yet a
+  better 3D metric setting.
+- Overlay-protection per-sample `CD-L1 x1e2 / EMD x1e2`:
+  `01184=5.257216/5.661427`,
+  `05117=5.300537/7.242264`,
+  `05452=2.480401/3.567437`,
+  `06127=7.886697/8.750742`,
+  `06145=11.054984/13.021341`,
+  `06188=8.373745/12.120620`,
+  `06830=3.077107/4.447857`,
+  `07136=6.110398/5.828304`,
+  `07306=4.254048/5.096049`,
+  `09639=10.478231/11.549450`.
 
 ## Current Risks
 

@@ -222,6 +222,8 @@ class ScaleAdapter():
                 visible_icp_iterations=int(getattr(self.cfg, "render_sim3_visible_icp_iterations", 3)),
                 icp_trim_quantile=float(getattr(self.cfg, "render_sim3_icp_trim_quantile", 0.7)),
                 icp_max_pairs=int(getattr(self.cfg, "render_sim3_icp_max_pairs", 20000)),
+                icp_rollback_on_score_drop=bool(getattr(self.cfg, "render_sim3_icp_rollback_on_score_drop", True)),
+                icp_min_score_gain=float(getattr(self.cfg, "render_sim3_icp_min_score_gain", 0.0)),
                 final_name=f"{flag}_fused.ply",
             )
         )

@@ -136,6 +136,8 @@ render_sim3_refine_rounds: 1
 render_sim3_visible_icp_iterations: 3
 render_sim3_icp_trim_quantile: 0.7
 render_sim3_icp_max_pairs: 20000
+render_sim3_icp_rollback_on_score_drop: true
+render_sim3_icp_min_score_gain: 0.0
 reg_geotransformer_weights: "third_party/GeoTransformer/weights/geotransformer-modelnet.pth.tar"
 reg_geotransformer_num_points: 717
 reg_geotransformer_seed: 7351

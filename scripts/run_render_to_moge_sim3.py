@@ -131,6 +131,24 @@ def zbuffer_depth(uv, depth, image_shape, splat_radius=1):
     return rendered, mask
 
 
+def mask_boundary(mask):
+    mask = np.asarray(mask, dtype=bool)
+    if not mask.any():
+        return np.zeros_like(mask, dtype=bool)
+    kernel = np.ones((3, 3), dtype=np.uint8)
+    eroded = cv2.erode(mask.astype(np.uint8), kernel, iterations=1).astype(bool)
+    return mask & ~eroded
+
+
+def boundary_chamfer_pixels(source_boundary, target_boundary):
+    source_boundary = np.asarray(source_boundary, dtype=bool)
+    target_boundary = np.asarray(target_boundary, dtype=bool)
+    if not source_boundary.any() or not target_boundary.any():
+        return float("inf")
+    distance = cv2.distanceTransform((~target_boundary).astype(np.uint8), cv2.DIST_L2, 3)
+    return float(distance[source_boundary].mean())
+
+
 def score_depth_render(rendered_depth, rendered_mask, target_depth, target_mask):
     rendered_mask = np.asarray(rendered_mask, dtype=bool)
     target_mask = np.asarray(target_mask, dtype=bool)
@@ -142,6 +160,19 @@ def score_depth_render(rendered_depth, rendered_mask, target_depth, target_mask)
     iou = float(intersection.sum() / max(int(union.sum()), 1))
     coverage = float(intersection.sum() / max(int(target_mask.sum()), 1))
     leakage = float((rendered_mask & ~target_mask).sum() / max(int(rendered_mask.sum()), 1))
+    rendered_edge = mask_boundary(rendered_mask)
+    target_edge = mask_boundary(target_mask)
+    edge_intersection = rendered_edge & target_edge
+    edge_union = rendered_edge | target_edge
+    edge_iou = float(edge_intersection.sum() / max(int(edge_union.sum()), 1))
+    forward_edge_chamfer = boundary_chamfer_pixels(rendered_edge, target_edge)
+    backward_edge_chamfer = boundary_chamfer_pixels(target_edge, rendered_edge)
+    if np.isfinite(forward_edge_chamfer) and np.isfinite(backward_edge_chamfer):
+        edge_chamfer = 0.5 * (forward_edge_chamfer + backward_edge_chamfer)
+        edge_chamfer_norm = float(edge_chamfer / max(np.linalg.norm(target_mask.shape), 1.0))
+    else:
+        edge_chamfer = float("inf")
+        edge_chamfer_norm = 1.0
 
     if intersection.any():
         depth_error = np.abs(rendered_depth[intersection] - target_depth[intersection])
@@ -157,17 +188,29 @@ def score_depth_render(rendered_depth, rendered_mask, target_depth, target_mask)
         depth_p95 = float("inf")
         depth_norm = 10.0
 
-    score = float(iou + 0.35 * coverage - 0.55 * leakage - 0.45 * min(depth_norm, 10.0))
+    score = float(
+        1.25 * iou
+        + 0.55 * coverage
+        + 0.35 * edge_iou
+        - 0.85 * leakage
+        - 0.45 * edge_chamfer_norm
+        - 0.25 * min(depth_norm, 10.0)
+    )
     return {
         "score": score,
         "iou": iou,
         "coverage": coverage,
         "leakage": leakage,
+        "edge_iou": edge_iou,
+        "edge_chamfer_px": edge_chamfer,
+        "edge_chamfer_norm": edge_chamfer_norm,
         "depth_mae": depth_mae,
         "depth_p95": depth_p95,
         "rendered_pixels": int(rendered_mask.sum()),
         "target_pixels": int(target_mask.sum()),
         "intersection_pixels": int(intersection.sum()),
+        "rendered_edge_pixels": int(rendered_edge.sum()),
+        "target_edge_pixels": int(target_edge.sum()),
     }
 
 
@@ -463,6 +506,41 @@ def refine_visible_icp(
     return current, history
 
 
+def choose_icp_refinement(
+    coordinate_refined,
+    refined_score,
+    icp_refined,
+    icp_score,
+    *,
+    rollback_on_score_drop=True,
+    min_score_gain=0.0,
+):
+    min_score_gain = float(min_score_gain)
+    if bool(rollback_on_score_drop) and icp_score["score"] < refined_score["score"] + min_score_gain:
+        return (
+            np.asarray(coordinate_refined, dtype=np.float64),
+            refined_score,
+            {
+                "accepted": False,
+                "reason": "render_score_drop",
+                "min_score_gain": min_score_gain,
+                "baseline_score": refined_score,
+                "candidate_score": icp_score,
+            },
+        )
+    return (
+        np.asarray(icp_refined, dtype=np.float64),
+        icp_score,
+        {
+            "accepted": True,
+            "reason": "render_score_preserved",
+            "min_score_gain": min_score_gain,
+            "baseline_score": refined_score,
+            "candidate_score": icp_score,
+        },
+    )
+
+
 def draw_overlay(path, image_path, target_mask, rendered_mask):
     image = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
     overlay = image.copy()
@@ -567,9 +645,10 @@ def run(args):
         scale_steps=parse_float_list(args.scale_steps),
         rounds=args.refine_rounds,
     )
+    coordinate_refined = np.asarray(refined, dtype=np.float64).copy()
     if args.visible_icp_iterations > 0:
-        refined, icp_history = refine_visible_icp(
-            refined,
+        icp_refined, icp_history = refine_visible_icp(
+            coordinate_refined,
             complete_points,
             object_moge.points,
             intrinsic_px,
@@ -580,16 +659,32 @@ def run(args):
             max_pairs=args.icp_max_pairs,
             seed=args.seed,
         )
+        icp_score = evaluate_transform(
+            eval_points,
+            icp_refined,
+            intrinsic_px,
+            target_depth,
+            target_mask,
+            splat_radius=args.splat_radius,
+        )
+        refined, final_score, icp_acceptance = choose_icp_refinement(
+            coordinate_refined,
+            refined_score,
+            icp_refined,
+            icp_score,
+            rollback_on_score_drop=getattr(args, "icp_rollback_on_score_drop", True),
+            min_score_gain=getattr(args, "icp_min_score_gain", 0.0),
+        )
     else:
         icp_history = []
-    final_score = evaluate_transform(
-        eval_points,
-        refined,
-        intrinsic_px,
-        target_depth,
-        target_mask,
-        splat_radius=args.splat_radius,
-    )
+        final_score = refined_score
+        icp_acceptance = {
+            "accepted": False,
+            "reason": "disabled",
+            "min_score_gain": float(getattr(args, "icp_min_score_gain", 0.0)),
+            "baseline_score": refined_score,
+            "candidate_score": None,
+        }
 
     complete_to_moge = refined
     moge_to_partial = np.load(moge_to_partial_path)
@@ -675,6 +770,7 @@ def run(args):
         "final_score": final_score,
         "refine_history": refine_history,
         "visible_icp_history": icp_history,
+        "visible_icp_acceptance": icp_acceptance,
         "complete_to_moge": complete_to_moge.tolist(),
         "complete_to_moge_decomposed": {
             "scale": float(scale),
@@ -718,6 +814,8 @@ def parse_args():
     parser.add_argument("--visible_icp_iterations", type=int, default=3)
     parser.add_argument("--icp_trim_quantile", type=float, default=0.7)
     parser.add_argument("--icp_max_pairs", type=int, default=20000)
+    parser.add_argument("--icp_rollback_on_score_drop", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--icp_min_score_gain", type=float, default=0.0)
     parser.add_argument("--final_name", default=None)
     return parser.parse_args()
 
