@@ -25,19 +25,6 @@ def build_completion_prompt(flag):
     return f"生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的{photo_label}，纯白背景"
 
 
-def build_refinement_prompt(flag):
-    _, photo_label = _zh_object_labels(flag)
-    return (
-        f"根据这张完整的{photo_label}参考图生成真实{photo_label}照片。"
-        "只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，"
-        "严格保持输入图中的2D投影轮廓、物体位置和大小，"
-        "不要旋转、平移、缩放、换视角或重新构图，"
-        "不需要保留原图的颜色、材质、光照和背景细节；"
-        "让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，"
-        "不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。"
-    )
-
-
 def resize_stage1_image_for_output(image, size):
     image = image.convert("RGB")
     target_size = (int(size), int(size))
@@ -56,20 +43,15 @@ class QwenImageEdit:
         generation_size,
         true_cfg_scale,
         negative_prompt,
-        refine_stage=False,
-        refine_step=None,
         cpu_offload=True,
     ):
         self.device = torch.device(device)
         self.step = int(step)
-        self.refine_stage = bool(refine_stage)
-        self.refine_step = int(refine_step) if refine_step is not None else int(step)
         self.generation_size = int(generation_size)
         self.true_cfg_scale = float(true_cfg_scale)
         self.negative_prompt = str(negative_prompt)
         self.last_prompt = None
         self.last_stage1_prompt = None
-        self.last_refinement_prompt = None
         self.last_stage1_image = None
         transformer_path = Path(transformer_path).expanduser().resolve()
         pipeline_path = Path(pipeline_path).expanduser().resolve()
@@ -118,22 +100,7 @@ class QwenImageEdit:
         self.last_stage1_prompt = prompt
         self.last_stage1_image = output.images[0].convert("RGB")
         result = self.last_stage1_image
-        if self.refine_stage:
-            refinement_prompt = build_refinement_prompt(flag)
-            output = self.pipeline(
-                image=[result.convert("RGB")],
-                prompt=refinement_prompt,
-                true_cfg_scale=self.true_cfg_scale,
-                negative_prompt=self.negative_prompt,
-                num_inference_steps=self.refine_step,
-                generator=generator,
-            )
-            self.last_refinement_prompt = refinement_prompt
-            result = output.images[0]
-            self.last_prompt = refinement_prompt
-        else:
-            self.last_refinement_prompt = None
-            self.last_prompt = prompt
+        self.last_prompt = prompt
         if result.size != (size, size):
             result = result.resize((size, size), Image.Resampling.LANCZOS)
         return result

@@ -52,11 +52,13 @@ the image-generation results for the full 10-sample set; do not change
 
 2026-07-14 image diagnostic: user requested regenerating `09639` and `06188`
 images with Qwen stage 2 at 24 inference steps and then asked to preserve the
-stage-1 depth-completion image. The pipeline now keeps `raw_depth.png`,
-`qwen_edit_stage1.png`, `qwen_edit_stage1_prompt.txt`, and
-`qwen_edit_stage2_prompt.txt` in the lean profile. The current diagnostic
-sets `qwen_edit_depth_input_name: raw_depth.png`, so Qwen stage 1 uses the raw
-projected depth image rather than `depth.png`.
+stage-1 image. The pipeline later converged to a simpler accepted one-stage
+Qwen flow: use `raw_depth.png` as the input, prompt
+`生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的{photo_label}，纯白背景`,
+run 40 Qwen steps, resize the result to `512x512`, save it as both
+`qwen_edit_stage1.png` and `img.png`, and do not run a second Qwen refinement
+stage. The lean profile keeps `raw_depth.png`, `qwen_edit_stage1.png`, and
+`qwen_edit_stage1_prompt.txt`; stale `qwen_edit_stage2_prompt.txt` is removed.
 
 2026-07-14 image diagnostic: user reported the `06188` 40/40-step image result
 was still poor, then requested a shorter 8/16-step retry, and then requested
@@ -157,6 +159,22 @@ Current registration changes under test:
 - 2026-07-14 note: MoGe-frame anisotropic 2D refinement is kept as an optional
   ablation but disabled by default because diagnostics on `05117` and `07306`
   did not improve the final metric or 2D gate.
+- 2026-07-14 one-stage raw-depth 512 image rerun: copied accepted image
+  artifacts into
+  `workspace/redwood_onestage_rawdepth_512_stage2_20260714` and ran Stage 2 +
+  metric with `run_stage1=False`, `run_stage2=True`, `run_metric=True`. Final
+  predictions and partial comparison point clouds exist for all 10 samples:
+  `<sample>/<sample>_fused.ply` and
+  `<sample>/<sample>_raw_partial_gray_complete_blue_aligned.ply`.
+  Metrics were saved to
+  `workspace/redwood_onestage_rawdepth_512_stage2_20260714/metrics_samples.csv`.
+  Mean metric was `CD-L1 x1e2 = 4.735808`, `EMD x1e2 = 5.475576`, so this run
+  does not meet the full target. Per-sample `CD-L1 x1e2 / EMD x1e2`:
+  `01184=1.540649/2.189986`, `05117=4.559220/5.782998`,
+  `05452=2.468731/3.322789`, `06127=2.657951/3.998549`,
+  `06145=7.291526/7.595840`, `06830=6.588601/7.112984`,
+  `06188=3.137147/4.403348`, `07136=4.572681/4.840745`,
+  `07306=9.030136/8.985695`, `09639=5.511441/6.522825`.
 
 Diagnostics:
 - The final target is the full 10-sample table plus average, not a single

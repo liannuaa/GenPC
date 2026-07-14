@@ -83,9 +83,6 @@ qwen_edit_steps: 40
 qwen_edit_generate_res: 1024
 qwen_edit_true_cfg_scale: 4.0
 qwen_edit_negative_prompt: " "
-qwen_edit_refine_stage: false
-qwen_edit_refine_steps: 8
-
 # crop and rescale
 rescale: True  #
 padding: 0.15

@@ -8,7 +8,6 @@ from PIL import Image
 from tools.qwen_image_edit import (
     QwenImageEdit,
     build_completion_prompt,
-    build_refinement_prompt,
     resize_stage1_image_for_output,
 )
 
@@ -26,17 +25,6 @@ class QwenImageEditPromptTest(unittest.TestCase):
         self.assertEqual(prompt, "生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的chair，纯白背景")
         self.assertNotIn("汽车", prompt)
 
-    def test_refinement_prompt_keeps_only_shape_pose_category_and_camera(self):
-        prompt = build_refinement_prompt("red chair")
-
-        self.assertIn("根据这张完整的red chair参考图生成真实red chair照片", prompt)
-        self.assertNotIn("深度图", prompt)
-        self.assertIn("只保留物体的轮廓、大小、种类、朝向、姿态和相机视角", prompt)
-        self.assertIn("严格保持输入图中的2D投影轮廓、物体位置和大小", prompt)
-        self.assertIn("不要旋转、平移、缩放、换视角或重新构图", prompt)
-        self.assertIn("不需要保留原图的颜色、材质、光照和背景细节", prompt)
-        self.assertIn("纯白背景", prompt)
-
     def test_qwen_edit_uses_explicit_generation_settings(self):
         with (
             patch.object(Path, "exists", return_value=True),
@@ -51,13 +39,9 @@ class QwenImageEditPromptTest(unittest.TestCase):
                 generation_size=1024,
                 true_cfg_scale=4.0,
                 negative_prompt=" ",
-                refine_stage=True,
-                refine_step=16,
             )
 
         self.assertEqual(editor.step, 16)
-        self.assertTrue(editor.refine_stage)
-        self.assertEqual(editor.refine_step, 16)
         self.assertEqual(editor.generation_size, 1024)
         self.assertEqual(editor.true_cfg_scale, 4.0)
         self.assertEqual(editor.negative_prompt, " ")
@@ -70,7 +54,7 @@ class QwenImageEditPromptTest(unittest.TestCase):
         self.assertEqual(resized.size, (512, 512))
         self.assertEqual(resized.mode, "RGB")
 
-    def test_generate_runs_two_plus_stages_then_downscales_to_requested_size(self):
+    def test_generate_runs_single_stage_then_downscales_to_requested_size(self):
         with (
             patch.object(Path, "exists", return_value=True),
             patch("tools.qwen_image_edit.NunchakuQwenImageTransformer2DModel"),
@@ -84,8 +68,6 @@ class QwenImageEditPromptTest(unittest.TestCase):
                 generation_size=1024,
                 true_cfg_scale=4.0,
                 negative_prompt=" ",
-                refine_stage=True,
-                refine_step=16,
             )
 
         calls = []
@@ -98,7 +80,7 @@ class QwenImageEditPromptTest(unittest.TestCase):
         editor.pipeline = fake_pipeline
         result = editor.generate(Image.new("RGB", (512, 512)), "car", size=512)
 
-        self.assertEqual(len(calls), 2)
+        self.assertEqual(len(calls), 1)
         self.assertIsInstance(calls[0]["image"], list)
         self.assertEqual(calls[0]["image"][0].size, (512, 512))
         self.assertEqual(calls[0]["image"][0].mode, "RGB")
@@ -108,22 +90,8 @@ class QwenImageEditPromptTest(unittest.TestCase):
         self.assertEqual(calls[0]["negative_prompt"], " ")
         self.assertEqual(calls[0]["true_cfg_scale"], 4.0)
         self.assertEqual(calls[0]["num_inference_steps"], 16)
-        self.assertIsInstance(calls[1]["image"], list)
-        self.assertEqual(len(calls[1]["image"]), 1)
-        self.assertEqual(calls[1]["image"][0].size, (1024, 1024))
-        self.assertEqual(calls[1]["image"][0].mode, "RGB")
-        self.assertIn("根据这张完整的汽车参考图生成真实汽车照片", calls[1]["prompt"])
-        self.assertNotIn("深度图", calls[1]["prompt"])
-        self.assertIn("只保留物体的轮廓、大小、种类、朝向、姿态和相机视角", calls[1]["prompt"])
-        self.assertIn("不要旋转、平移、缩放、换视角或重新构图", calls[1]["prompt"])
-        self.assertIn("纯白背景", calls[1]["prompt"])
-        self.assertEqual(calls[1]["negative_prompt"], " ")
-        self.assertEqual(calls[1]["true_cfg_scale"], 4.0)
-        self.assertEqual(calls[1]["num_inference_steps"], 16)
         self.assertEqual(editor.last_stage1_image.size, (1024, 1024))
         self.assertEqual(editor.last_stage1_prompt, "生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的汽车，纯白背景")
-        self.assertIn("完整的汽车参考图生成真实汽车照片", editor.last_refinement_prompt)
-        self.assertNotIn("深度图", editor.last_refinement_prompt)
         self.assertEqual(result.size, (512, 512))
 
 

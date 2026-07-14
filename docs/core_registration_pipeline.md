@@ -18,7 +18,7 @@ The core relation is:
 ```text
 partial raw points
   -> camera-1 depth image
-  -> Qwen completed RGB/semantic image
+  -> Qwen completed RGB image
   -> MoGe image point cloud
   -> Hunyuan complete point cloud
   -> render-to-MoGe Sim3
@@ -39,20 +39,27 @@ no-FreeReg Sim3 search over rendered depth, silhouette overlap, and visible ICP.
 - `point_uv.npy`
 - `raw_depth.png`
 - `depth.png`
-- `qwen_edit_stage1.png` after depth-like completion
-- `img.png` after Qwen completion
+- `qwen_edit_stage1.png` after one-stage Qwen completion
+- `img.png`, copied from the same one-stage Qwen output
 
-The Qwen completion/refinement prompts should keep the object pose and camera
-view fixed while using a clean ordinary photography-studio background. For
-hard pose cases, use a depth-first two-stage prompt: first complete the input
-as a depth-like image while preserving 2D projection, then translate that
-completed depth-like image into a realistic object photo. This keeps the
-geometry constraint explicit before appearance generation.
+The accepted Qwen image-generation flow is now intentionally simple and
+one-stage. It uses `raw_depth.png` as the input image and asks Qwen to generate
+a complete object image from the occluded depth cue:
 
-The Qwen input depth image is selected by `qwen_edit_depth_input_name`. The
-current raw-depth experiment sets it to `raw_depth.png` instead of the
-inpainted/flipped `depth.png`, while keeping `qwen_edit_stage1.png` and the
-stage prompt files under the lean output profile.
+```text
+生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的{photo_label}，纯白背景
+```
+
+The output is resized to `512x512` and saved as both `qwen_edit_stage1.png` and
+`img.png`. The second Qwen refinement stage was removed from the main pipeline
+after the one-stage raw-depth results were accepted visually; stale
+`qwen_edit_stage2_prompt.txt` files are removed during Stage 1 output writing.
+Keep this path simple and ablatable unless a future experiment explicitly
+reintroduces a second image stage.
+
+The Qwen input depth image is selected by `qwen_edit_depth_input_name`; the
+current accepted setting is `raw_depth.png`, not the inpainted/flipped
+`depth.png`.
 
 Important coordinate detail:
 

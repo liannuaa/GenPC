@@ -28,7 +28,6 @@ class OutputCleanupProfileTests(unittest.TestCase):
                 "camera.pth",
                 "point_uv.npy",
                 "qwen_edit_prompt.txt",
-                "qwen_edit_stage2_prompt.txt",
                 "img_sam.png",
                 "01184_hunyuan2.1.ply",
                 "01184_moge_to_raw_partial_moge_object_only.ply",
@@ -81,7 +80,6 @@ class OutputCleanupProfileTests(unittest.TestCase):
             self.assertIn("01184_fused.ply", kept)
             self.assertIn("qwen_edit_stage1.png", kept)
             self.assertIn("qwen_edit_stage1_prompt.txt", kept)
-            self.assertIn("qwen_edit_stage2_prompt.txt", kept)
             self.assertIn("raw_depth.png", kept)
             self.assertNotIn("01184_freereg_original_depthpro_gray_image_blue_complete_fused.ply", kept)
             self.assertNotIn("01184_moge_to_raw_partial_moge_object_partial_hits_red.ply", kept)
@@ -99,7 +97,6 @@ class OutputCleanupProfileTests(unittest.TestCase):
                 "qwen_edit_prompt.txt",
                 "qwen_edit_stage1.png",
                 "qwen_edit_stage1_prompt.txt",
-                "qwen_edit_stage2_prompt.txt",
                 "raw_depth.png",
             ]:
                 (sample / name).write_text("x")
@@ -117,7 +114,6 @@ class OutputCleanupProfileTests(unittest.TestCase):
                     "qwen_edit_prompt.txt",
                     "qwen_edit_stage1.png",
                     "qwen_edit_stage1_prompt.txt",
-                    "qwen_edit_stage2_prompt.txt",
                     "raw_depth.png",
                 },
             )
