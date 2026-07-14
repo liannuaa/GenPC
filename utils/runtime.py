@@ -114,11 +114,15 @@ def _profile_keep_patterns(flag, profile, stage):
         return ["*"]
     if profile == "lean":
         base = [
+            "raw_depth.png",
             "depth.png",
             "img.png",
             "camera.pth",
             "point_uv.npy",
             "qwen_edit_prompt.txt",
+            "qwen_edit_stage1.png",
+            "qwen_edit_stage1_prompt.txt",
+            "qwen_edit_stage2_prompt.txt",
             "img_sam.png",
             f"{flag}_hunyuan2.1.ply",
             f"{flag}_hunyuan2.0.ply",
@@ -143,11 +147,15 @@ def _profile_keep_patterns(flag, profile, stage):
         ]
         if stage == "stage1":
             return [
+                "raw_depth.png",
                 "depth.png",
                 "img.png",
                 "camera.pth",
                 "point_uv.npy",
                 "qwen_edit_prompt.txt",
+                "qwen_edit_stage1.png",
+                "qwen_edit_stage1_prompt.txt",
+                "qwen_edit_stage2_prompt.txt",
             ]
         return base
     return [f"{flag}_fused.ply"]

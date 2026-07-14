@@ -32,12 +32,14 @@ no-FreeReg Sim3 search over rendered depth, silhouette overlap, and visible ICP.
 
 ## Stage 1: Partial To Image
 
-`DepthPrompting` projects the raw partial point cloud to `depth.png` and saves
-the projection state:
+`DepthPrompting` projects the raw partial point cloud to `raw_depth.png` and
+`depth.png`, then saves the projection state:
 
 - `camera.pth`
 - `point_uv.npy`
+- `raw_depth.png`
 - `depth.png`
+- `qwen_edit_stage1.png` after depth-like completion
 - `img.png` after Qwen completion
 
 The Qwen completion/refinement prompts should keep the object pose and camera
@@ -46,6 +48,11 @@ hard pose cases, use a depth-first two-stage prompt: first complete the input
 as a depth-like image while preserving 2D projection, then translate that
 completed depth-like image into a realistic object photo. This keeps the
 geometry constraint explicit before appearance generation.
+
+The Qwen input depth image is selected by `qwen_edit_depth_input_name`. The
+current raw-depth experiment sets it to `raw_depth.png` instead of the
+inpainted/flipped `depth.png`, while keeping `qwen_edit_stage1.png` and the
+stage prompt files under the lean output profile.
 
 Important coordinate detail:
 

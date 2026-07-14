@@ -22,13 +22,13 @@ def _zh_object_labels(flag):
 
 def build_completion_prompt(flag):
     _, photo_label = _zh_object_labels(flag)
-    return f"这是一个{photo_label}的深度图，补全它。输出仍然是灰度深度图。"
+    return f"生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的{photo_label}，纯白背景"
 
 
 def build_refinement_prompt(flag):
     _, photo_label = _zh_object_labels(flag)
     return (
-        f"根据这张完整的{photo_label}深度图生成真实{photo_label}照片。"
+        f"根据这张完整的{photo_label}参考图生成真实{photo_label}照片。"
         "只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，"
         "严格保持输入图中的2D投影轮廓、物体位置和大小，"
         "不要旋转、平移、缩放、换视角或重新构图，"
@@ -36,6 +36,14 @@ def build_refinement_prompt(flag):
         "让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，"
         "不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。"
     )
+
+
+def resize_stage1_image_for_output(image, size):
+    image = image.convert("RGB")
+    target_size = (int(size), int(size))
+    if image.size == target_size:
+        return image
+    return image.resize(target_size, Image.Resampling.LANCZOS)
 
 
 class QwenImageEdit:

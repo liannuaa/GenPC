@@ -6,6 +6,196 @@ asks to preserve a pipeline state.
 
 ## Accepted Results
 
+### 2026-07-14 16:38 CST - Redwood One-Stage Raw-Depth Qwen Image Batch
+
+Status: accepted visual baseline. User said this one-stage raw-depth Qwen
+result is "效果非常好". Preserve these one-stage image outputs unless the user
+explicitly asks to overwrite them.
+
+Samples:
+- `01184`, `05117`, `05452`, `06127`, `06145`, `06830`, `06188`, `07136`,
+  `07306`, `09639`
+
+Inputs:
+- Raw partial point clouds: `data/<sample>.ply`
+- Qwen input images:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/<sample>/raw_depth.png`
+
+Outputs:
+- Stage 1 Qwen images:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/<sample>/qwen_edit_stage1.png`
+- Main single-stage images:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/<sample>/img.png`
+- Stage 1 prompt records:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/<sample>/qwen_edit_stage1_prompt.txt`
+
+Model/checkpoint:
+- Qwen pipeline: `models/Qwen-Image-Edit-2511`
+- Qwen transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+- Hunyuan3D: not run for this accepted image-only result.
+- RMBG: not run for this accepted image-only result.
+- MoGe: not run for this accepted image-only result.
+
+Prompts:
+- `01184`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的rubbish bin，纯白背景`
+- `05117`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red chair，纯白背景`
+- `05452`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的armchair，纯白背景`
+- `06127`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的terracotta flower pot with leafy plant，纯白背景`
+- `06145`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的table，纯白背景`
+- `06830`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的tricycle，纯白背景`
+- `06188`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red motorcyle，纯白背景`
+- `07136`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的leather sofa，纯白背景`
+- `07306`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red office trash can，纯白背景`
+- `09639`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的Ergonomic Chair，纯白背景`
+- Negative prompt for all samples: `" "`
+
+Generation parameters:
+- Input image size: `512x512`
+- Qwen pipeline output size before resize: `1024x1024`
+- Saved `qwen_edit_stage1.png` size: `512x512`
+- Saved `img.png` size: `512x512`
+- Stage 1 steps: `40`
+- `true_cfg_scale`: `4.0`
+- Seed: `UNKNOWN`, not explicitly fixed by current main pipeline
+- Scheduler/backend: Qwen-Image-Edit-2511 Plus pipeline with Nunchaku
+  transformer; exact scheduler `UNKNOWN`
+
+Postprocessing:
+- `DepthPrompting` generated or reused `raw_depth.png`.
+- Qwen output was resized to `512x512`.
+- `qwen_edit_stage1.png` and `img.png` are the same one-stage image.
+- Qwen stage 2 was not run. Hunyuan, RMBG, MoGe, FreeReg, ICP, coordinate
+  flips, and metrics were not run for this accepted image-only batch.
+
+What was approved:
+- The one-stage raw-depth Qwen image-generation result for the 10 Redwood
+  target samples, with the prompt template above and 40 steps.
+
+Do not overwrite without asking:
+- `workspace/redwood_depthfirst_semantic_full_rerun_20260713/<sample>/qwen_edit_stage1.png`
+- `workspace/redwood_depthfirst_semantic_full_rerun_20260713/<sample>/img.png`
+
+### 2026-07-14 16:10 CST - 06188 Raw-Depth One-Stage Qwen Diagnostic
+
+Status: accepted diagnostic visual baseline. User said this `06188` one-stage
+result is good enough to try on the other samples. Preserve this diagnostic
+unless the user explicitly asks to overwrite it.
+
+Sample:
+- `06188`
+
+Inputs:
+- Raw partial point cloud: `data/06188.ply`
+- Qwen input image:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06188/raw_depth.png`
+
+Outputs:
+- Stage 1 Qwen image:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06188/qwen_edit_stage1.png`
+- Stage 1 prompt record:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06188/qwen_edit_stage1_prompt.txt`
+
+Model/checkpoint:
+- Qwen pipeline: `models/Qwen-Image-Edit-2511`
+- Qwen transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+- Hunyuan3D: not run for this accepted image-only result.
+- RMBG: not run for this accepted image-only result.
+- MoGe: not run for this accepted image-only result.
+
+Prompt:
+- Stage 1:
+  `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red motorcyle，纯白背景`
+- Negative prompt: `" "`
+
+Generation parameters:
+- Input image size: `512x512`
+- Qwen pipeline output size before any later resize: `1024x1024`
+- Saved stage-1 image size at acceptance time: `1024x1024`
+- Stage 1 steps: `40`
+- `true_cfg_scale`: `4.0`
+- Seed: `UNKNOWN`, not explicitly fixed by current script
+- Scheduler/backend: Qwen-Image-Edit-2511 Plus pipeline with Nunchaku
+  transformer; exact scheduler `UNKNOWN`
+
+Postprocessing:
+- The Qwen input came from the existing projected `raw_depth.png`.
+- Qwen output was saved as `qwen_edit_stage1.png`.
+- No Qwen stage 2, Hunyuan, RMBG, MoGe, FreeReg, ICP, coordinate flips, or
+  metric were run for this accepted image-only diagnostic.
+
+What was approved:
+- The `06188` one-stage raw-depth Qwen result with prompt above and 40 steps.
+- User requested trying the same one-stage method on the other samples.
+
+Do not overwrite without asking:
+- `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06188/qwen_edit_stage1.png`
+
+### 2026-07-14 01:20 CST - 07136 Leather Sofa Depth-First Qwen Image
+
+Status: accepted visual baseline. User said the `07136` result is "非常完美".
+Preserve this image result unless the user explicitly asks to overwrite it.
+
+Sample:
+- `07136`
+
+Inputs:
+- Raw partial point cloud: `data/07136.ply`
+- Projected depth image:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/depth.png`
+
+Outputs:
+- Stage 1 completed depth-like image:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/qwen_edit_stage1.png`
+- Stage 2 final realistic/semantic image:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/img.png`
+- Stage 1 prompt record:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/qwen_edit_stage1_prompt.txt`
+- Stage 2 prompt record:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/qwen_edit_stage2_prompt.txt`
+
+Model/checkpoint:
+- Qwen pipeline: `models/Qwen-Image-Edit-2511`
+- Nunchaku Qwen transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+- Hunyuan3D: not run for this accepted image-only result.
+- RMBG: not run for this accepted image-only result.
+- MoGe: not run for this accepted image-only result.
+
+Prompt:
+- Stage 1:
+  `这是一个leather sofa的深度图，补全它。输出仍然是灰度深度图。`
+- Stage 2:
+  `根据这张完整的leather sofa深度图生成真实leather sofa照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- Negative prompt: `" "`
+
+Generation parameters:
+- Input depth/image size: `512x512`
+- Qwen pipeline output size before resize: `1024x1024`
+- Saved final image size: `512x512`
+- Stage 1 steps: `16`
+- Stage 2 steps: `16`
+- `true_cfg_scale`: `4.0`
+- Seed: `UNKNOWN`, not explicitly fixed by current main pipeline
+- Scheduler/backend: Qwen-Image-Edit-2511 Plus pipeline with Nunchaku
+  transformer; exact scheduler `UNKNOWN`
+
+Postprocessing:
+- Stage 1 projected partial depth generated by `DepthPrompting`.
+- Stage 1 Qwen output saved as completed depth-like image.
+- Stage 2 Qwen output resized to `512x512` and saved as `img.png`.
+- No Hunyuan, RMBG, MoGe, FreeReg, ICP, coordinate flips, or metric were run
+  for this accepted image-only result.
+
+What was approved:
+- The regenerated two-stage `07136` visual result with leather sofa category,
+  simple depth-completion prompt, pure white background, and 16/16 Qwen steps.
+
+Do not overwrite without asking:
+- `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/qwen_edit_stage1.png`
+- `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/img.png`
+
 ### 2026-07-14 00:47 CST - 06127 Terracotta Flower Pot Depth-First Qwen Image
 
 Status: accepted visual baseline. User said this result is good after
@@ -602,3 +792,192 @@ Do not treat as accepted:
 - The old same-root `06188` metric before the prompt override was
   `CD-L1 x1e2 = 5.018309`, `EMD x1e2 = 6.483270`.
 - The `red motorcyle` prompt label did not improve this sample.
+
+### 2026-07-14 01:30 CST - 07306 Red Office Trash Can Depth-First Qwen Image
+
+Status: accepted image generation baseline. User said `07306效果也很好`.
+
+Sample:
+- `07306`
+
+Input:
+- Raw partial point cloud: `data/07306.ply`
+- Depth input image:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07306/depth.png`
+
+Accepted outputs:
+- Completed depth-like image:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07306/qwen_edit_stage1.png`
+- Final semantic/RGB image:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07306/img.png`
+- Stage 1 prompt record:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07306/qwen_edit_stage1_prompt.txt`
+- Stage 2 prompt record:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07306/qwen_edit_stage2_prompt.txt`
+
+Model/checkpoint:
+- Qwen pipeline: `models/Qwen-Image-Edit-2511`
+- Qwen transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+- RMBG: `models/RMBG-2.0`
+- Hunyuan3D: `models/Hunyuan3D-2.1`, shape subfolder `hunyuan3d-dit-v2-1`,
+  checkpoint variant `fp16`
+- MoGe: `models/moge-2-vitl`
+
+Full prompts:
+- Stage 1 prompt:
+  `这是一个red office trash can的深度图，补全它。输出仍然是灰度深度图。`
+- Stage 2 prompt:
+  `根据这张完整的red office trash can深度图生成真实red office trash can照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- Negative prompt: `" "`
+
+Generation parameters:
+- Qwen input/output: `depth_image_input_res=512`, `qwen_edit_generate_res=1024`,
+  final `generate_res=512`
+- Qwen stage 1 steps: `16`
+- Qwen stage 2 steps: `16`
+- Qwen CFG: `qwen_edit_true_cfg_scale=4.0`
+- Qwen seed: UNKNOWN, not explicitly set by current main pipeline
+- Backend/scheduler choices: UNKNOWN
+
+Postprocessing:
+- This accepted entry covers the image-generation result only.
+- Stage 1 used incomplete depth image to completed depth-like image.
+- Stage 2 used the completed depth-like image to generate the final realistic
+  semantic/RGB image with pure white background.
+- Later RMBG, MoGe, Hunyuan, FreeReg, ICP, and metric stages are not part of
+  this accepted image baseline unless recorded separately.
+
+Preservation:
+- Do not overwrite this `07306` image result without asking.
+- The accepted category label is `red office trash can`.
+- Reproducibility note: Qwen seed and scheduler/backend details were not fully
+  recorded, so this is not exactly reproducible.
+
+### 2026-07-14 01:36 CST - Full Redwood Depth-First Qwen Image Batch Accepted
+
+Status: accepted image-generation baseline for the 10-sample Redwood target
+set. User said this batch's image-generation part is very good and should not
+be changed further; continue only with later 3D generation, registration, and
+metric optimization.
+
+Output root:
+- `workspace/redwood_depthfirst_semantic_full_rerun_20260713`
+
+Samples:
+- `01184`, `09639`, `05452`, `05117`, `06127`, `07136`, `07306`, `06188`,
+  `06145`, `06830`
+
+Inputs:
+- Raw partial point clouds: `data/<sample>.ply`
+- Depth input images:
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/<sample>/depth.png`
+
+Accepted image outputs:
+- `01184`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/01184/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/01184/img.png`
+- `09639`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/09639/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/09639/img.png`
+- `05452`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/05452/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/05452/img.png`
+- `05117`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/05117/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/05117/img.png`
+- `06127`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06127/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06127/img.png`
+- `07136`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07136/img.png`
+- `07306`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07306/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/07306/img.png`
+- `06188`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06188/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06188/img.png`
+- `06145`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06145/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06145/img.png`
+- `06830`:
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06830/qwen_edit_stage1.png`
+  - `workspace/redwood_depthfirst_semantic_full_rerun_20260713/06830/img.png`
+
+Model/checkpoint:
+- Qwen pipeline: `models/Qwen-Image-Edit-2511`
+- Qwen transformer:
+  `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
+- RMBG: `models/RMBG-2.0`
+- Hunyuan3D: `models/Hunyuan3D-2.1`, shape subfolder `hunyuan3d-dit-v2-1`,
+  checkpoint variant `fp16`
+- MoGe: `models/moge-2-vitl`
+
+Full prompts:
+- `01184` stage 1:
+  `这是一个rubbish bin的深度图，补全它。输出仍然是灰度深度图。`
+- `01184` stage 2:
+  `根据这张完整的rubbish bin深度图生成真实rubbish bin照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `09639` stage 1:
+  `这是一个Ergonomic Chair的深度图，补全它。输出仍然是灰度深度图。`
+- `09639` stage 2:
+  `根据这张完整的Ergonomic Chair深度图生成真实Ergonomic Chair照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `05452` stage 1:
+  `这是一个armchair的深度图，补全它。输出仍然是灰度深度图。`
+- `05452` stage 2:
+  `根据这张完整的armchair深度图生成真实armchair照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `05117` stage 1:
+  `这是一个red chair的深度图，补全它。输出仍然是灰度深度图。`
+- `05117` stage 2:
+  `根据这张完整的red chair深度图生成真实red chair照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `06127` stage 1:
+  `这是一个terracotta flower pot with leafy plant的深度图，补全它。输出仍然是灰度深度图。`
+- `06127` stage 2:
+  `根据这张完整的terracotta flower pot with leafy plant深度图生成真实terracotta flower pot with leafy plant照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `07136` stage 1:
+  `这是一个leather sofa的深度图，补全它。输出仍然是灰度深度图。`
+- `07136` stage 2:
+  `根据这张完整的leather sofa深度图生成真实leather sofa照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `07306` stage 1:
+  `这是一个red office trash can的深度图，补全它。输出仍然是灰度深度图。`
+- `07306` stage 2:
+  `根据这张完整的red office trash can深度图生成真实red office trash can照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `06188` stage 1:
+  `这是一个red motorcyle的深度图，补全它。输出仍然是灰度深度图。`
+- `06188` stage 2:
+  `根据这张完整的red motorcyle深度图生成真实red motorcyle照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `06145` stage 1:
+  `这是一个table的深度图，补全它。输出仍然是灰度深度图。`
+- `06145` stage 2:
+  `根据这张完整的table深度图生成真实table照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- `06830` stage 1:
+  `这是一个tricycle的深度图，补全它。输出仍然是灰度深度图。`
+- `06830` stage 2:
+  `根据这张完整的tricycle深度图生成真实tricycle照片。只保留物体的轮廓、大小、种类、朝向、姿态和相机视角，严格保持输入图中的2D投影轮廓、物体位置和大小，不要旋转、平移、缩放、换视角或重新构图，不需要保留原图的颜色、材质、光照和背景细节；让物体结构、材质和外观更真实自然，背景使用干净的纯白背景，不要生成桌面、地面、石台、墙面、植物丛或其他环境前景。`
+- Negative prompt for all samples: `" "`
+
+Generation parameters:
+- Qwen input/output: `depth_image_input_res=512`, `qwen_edit_generate_res=1024`,
+  final `generate_res=512`
+- Qwen stage 1 steps: `16`
+- Qwen stage 2 steps: `16`
+- Qwen CFG: `qwen_edit_true_cfg_scale=4.0`
+- Qwen seed: UNKNOWN, not explicitly set by current main pipeline
+- Backend/scheduler choices: UNKNOWN
+
+Postprocessing:
+- This accepted entry covers image-generation outputs only.
+- Stage 1 used incomplete depth image to completed depth-like image.
+- Stage 2 used the completed depth-like image to generate the final
+  realistic/semantic RGB image with pure white background.
+- Later RMBG, MoGe, Hunyuan, registration, ICP, and metric outputs remain
+  optimization targets and may be overwritten.
+
+Preservation:
+- Do not change prompts, regenerate images, or overwrite these `depth.png`,
+  `qwen_edit_stage1.png`, or `img.png` files without asking.
+- Continue method work only from Stage 2 onward.
+- Final metric target remains all 10 samples plus average below the requested
+  CD/EMD thresholds. `05117` is only a diagnostic sample and must not be used
+  as the sole success criterion.

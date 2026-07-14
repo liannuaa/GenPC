@@ -23,12 +23,13 @@ class DefaultConfigQwenEditTest(unittest.TestCase):
         self.assertNotIn("qwen_transformer_path", config["models"])
         self.assertNotIn("qwen_pipeline_path", config["models"])
         self.assertNotIn("qwen_controlnet_path", config["models"])
-        self.assertEqual(config["qwen_edit_steps"], 16)
+        self.assertEqual(config["qwen_edit_steps"], 40)
+        self.assertEqual(config["qwen_edit_depth_input_name"], "raw_depth.png")
         self.assertEqual(config["qwen_edit_generate_res"], 1024)
         self.assertEqual(config["qwen_edit_true_cfg_scale"], 4.0)
         self.assertEqual(config["qwen_edit_negative_prompt"], " ")
-        self.assertTrue(config["qwen_edit_refine_stage"])
-        self.assertEqual(config["qwen_edit_refine_steps"], 16)
+        self.assertFalse(config["qwen_edit_refine_stage"])
+        self.assertEqual(config["qwen_edit_refine_steps"], 8)
         self.assertNotIn("qwen_controlnet_conditioning_scale", config)
         self.assertEqual(config["depth_projection"], "view_select")
         self.assertFalse(config["save_depth_view_point_cloud"])
@@ -49,6 +50,16 @@ class DefaultConfigQwenEditTest(unittest.TestCase):
             resolve_prompt_label("06127", config),
             "terracotta flower pot with leafy plant",
         )
+
+    def test_redwood_09639_prompt_label_is_ergonomic_chair(self):
+        config = Munch.fromDict(yaml.safe_load(Path("configs/config.yaml").read_text()))
+
+        self.assertEqual(resolve_prompt_label("09639", config), "Ergonomic Chair")
+
+    def test_redwood_07306_prompt_label_is_red_office_trash_can(self):
+        config = Munch.fromDict(yaml.safe_load(Path("configs/config.yaml").read_text()))
+
+        self.assertEqual(resolve_prompt_label("07306", config), "red office trash can")
 
     def test_qwen_refinement_prompt_discourages_environment_foreground(self):
         prompt = build_refinement_prompt("a vase with leafy plant")

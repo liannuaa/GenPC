@@ -160,9 +160,7 @@ def hunyuan3d_2(cfg, flag, img):
 
     print(f"Shape generation finished in {int(shape_elapsed)}s")
 
-    _export_point_cloud(
-        mesh,
-        str(sample_file(cfg, flag, f"{flag}_{model_name}.ply")),
-        point_sample_num,
-    )
-    print(f"Saved Hunyuan3D point cloud to {sample_file(cfg, flag, f'{flag}_{model_name}.ply')}")
+    output_name = getattr(cfg, "hunyuan_output_ply_name", f"{flag}_{model_name}.ply")
+    output_path = sample_file(cfg, flag, output_name)
+    _export_point_cloud(mesh, str(output_path), point_sample_num)
+    print(f"Saved Hunyuan3D point cloud to {output_path}")

@@ -37,7 +37,8 @@ prompt_overrides:
   "06127": "terracotta flower pot with leafy plant"
   "06188": "red motorcyle"
   "07136": "leather sofa"
-  "07306": "Office Trash Can"
+  "07306": "red office trash can"
+  "09639": "Ergonomic Chair"
 run_stage1: true
 run_stage2: true
 run_metric: true
@@ -77,12 +78,13 @@ res: 512 # projected depth and inpainting resolution
 edge_point_size: 2
 generate_res: 512
 depth_image_input_res: 512
-qwen_edit_steps: 16
+qwen_edit_depth_input_name: "raw_depth.png"
+qwen_edit_steps: 40
 qwen_edit_generate_res: 1024
 qwen_edit_true_cfg_scale: 4.0
 qwen_edit_negative_prompt: " "
-qwen_edit_refine_stage: true
-qwen_edit_refine_steps: 16
+qwen_edit_refine_stage: false
+qwen_edit_refine_steps: 8
 
 # crop and rescale
 rescale: True  #
@@ -101,6 +103,7 @@ hunyuan_octree_resolution: 384
 hunyuan_num_chunks: 8000
 hunyuan_point_sample_num: 100000
 hunyuan_seed: null
+hunyuan_candidate_seeds: ""
 hunyuan_omni_steps: 50
 hunyuan_omni_octree_resolution: 512
 hunyuan_omni_guidance_scale: 4.5

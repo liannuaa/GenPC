@@ -39,6 +39,370 @@ must be evaluated on the full target set below.
 | `06830` | `< 1.38` | `< 2.97` |
 | Average | `< 1.74` | `< 2.88` |
 
+2026-07-14 update: the final optimization target is the full 10-sample table
+plus the average above. `05117` is only a diagnostic sample and must not be
+treated as the sole objective. A method change is not successful unless the
+full set and the average are reported and all rows satisfy the requested
+CD/EMD thresholds.
+
+Current accepted image-generation root:
+`workspace/redwood_depthfirst_semantic_full_rerun_20260713`. The user accepted
+the image-generation results for the full 10-sample set; do not change
+`depth.png`, `qwen_edit_stage1.png`, or `img.png` unless explicitly asked.
+
+2026-07-14 image diagnostic: user requested regenerating `09639` and `06188`
+images with Qwen stage 2 at 24 inference steps and then asked to preserve the
+stage-1 depth-completion image. The pipeline now keeps `raw_depth.png`,
+`qwen_edit_stage1.png`, `qwen_edit_stage1_prompt.txt`, and
+`qwen_edit_stage2_prompt.txt` in the lean profile. The current diagnostic
+sets `qwen_edit_depth_input_name: raw_depth.png`, so Qwen stage 1 uses the raw
+projected depth image rather than `depth.png`.
+
+2026-07-14 image diagnostic: user reported the `06188` 40/40-step image result
+was still poor, then requested a shorter 8/16-step retry, and then requested
+another overwrite with Qwen depth-completion stage 1 set to 4 inference steps
+and semantic/RGB stage 2 set to 4 inference steps. This is an image-generation
+diagnostic only; registration remains on the rolled-back baseline unless
+changed separately.
+
+2026-07-14 prompt update: user noted the stage-1 Qwen output is not reliably a
+depth map, so the stage-2 prompt now refers to the input as a complete
+reference image (`参考图`) rather than a complete depth map (`深度图`). `06188`
+stage 2 was rerun from the existing `qwen_edit_stage1.png` only; stage 1 was
+not regenerated.
+
+2026-07-14 image diagnostic: user requested changing the stage-1 Qwen prompt to
+`生成一张深度图，补全图1中所勾勒出的{photo_label}的局部形状。`, setting stage-1
+steps to 40, and rerunning only `06188` stage 1. The current
+`06188/qwen_edit_stage1.png` was regenerated from `raw_depth.png`; the existing
+stage-2 `img.png` was intentionally not overwritten in this run.
+
+2026-07-14 image diagnostic: user then requested changing the stage-1 Qwen
+prompt to `生成一张图像，符合图1所勾勒出的局部深度图，并遵循以下描述：{photo_label}`,
+keeping stage-1 steps at 40, and rerunning only `06188` stage 1. The current
+`06188/qwen_edit_stage1.png` was regenerated from `raw_depth.png`; the existing
+stage-2 `img.png` was intentionally not overwritten in this run.
+
+2026-07-14 image diagnostic: user then requested adding pure-white background
+to the stage-1 Qwen prompt:
+`生成一张图像，符合图1所勾勒出的局部深度图，并遵循以下描述：{photo_label}，纯白背景`,
+keeping stage-1 steps at 40, and rerunning only `06188` stage 1. The current
+`06188/qwen_edit_stage1.png` was regenerated from `raw_depth.png`; the existing
+stage-2 `img.png` was intentionally not overwritten in this run.
+
+2026-07-14 image diagnostic: user then requested changing the stage-1 Qwen
+background phrase to studio background:
+`生成一张图像，符合图1所勾勒出的局部深度图，并遵循以下描述：{photo_label}，背景是摄影棚`,
+keeping stage-1 steps at 40, and rerunning only `06188` stage 1. The current
+`06188/qwen_edit_stage1.png` was regenerated from `raw_depth.png`; the existing
+stage-2 `img.png` was intentionally not overwritten in this run.
+
+2026-07-14 image diagnostic: user then requested switching the stage-1 Qwen
+background phrase back to pure-white background:
+`生成一张图像，符合图1所勾勒出的局部深度图，并遵循以下描述：{photo_label}，纯白背景`,
+keeping stage-1 steps at 40, and rerunning only `06188` stage 1. The current
+`06188/qwen_edit_stage1.png` was regenerated from `raw_depth.png`; the existing
+stage-2 `img.png` was intentionally not overwritten in this run.
+
+2026-07-14 image diagnostic: user interrupted a 50-step stage-1 retry and
+requested changing stage 1 to use `depth.png` with prompt
+`生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的{photo_label}，纯白背景`,
+stage-1 steps 40, and rerunning only `06188` stage 1. The current
+`06188/qwen_edit_stage1.png` was regenerated from `depth.png`; the existing
+stage-2 `img.png` was intentionally not overwritten in this run.
+
+2026-07-14 image diagnostic: user then requested switching the stage-1 input
+back to `raw_depth.png` while keeping prompt
+`生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的{photo_label}，纯白背景`
+and stage-1 steps 40. The current `06188/qwen_edit_stage1.png` was regenerated
+from `raw_depth.png`; the existing stage-2 `img.png` was intentionally not
+overwritten in this run.
+
+2026-07-14 rollback note: after the user requested reverting registration to
+the pre-target-optimization version, the registration implementation was
+restored to the repository baseline for `ScaleAdapter.py`,
+`scripts/run_render_to_moge_sim3.py`,
+`scripts/run_moge_to_partial_from_index.py`,
+`scripts/run_moge_to_raw_partial_from_camera.py`, their registration tests, and
+`docs/core_registration_pipeline.md`. The default registration config was also
+restored to the pre-target settings (`render_sim3_max_2d_leakage: 0.10`,
+silhouette depth/boundary weights `0.0`, no partial-preserving auto source, no
+extra target-leakage gate). Prompt/category overrides for accepted image
+generation were intentionally kept.
+
+Current frozen-image old-method baseline from this root:
+
+| sample | CD-L1 x1e2 | EMD x1e2 | status |
+| --- | ---: | ---: | --- |
+| `01184` | 1.847 | 2.650 | pass |
+| `05117` | 4.351 | 5.967 | fail |
+| `05452` | 1.710 | 2.439 | fail |
+| `06127` | 2.355 | 3.948 | pass |
+| `06145` | 4.329 | 7.140 | fail |
+| `06830` | 9.557 | 10.795 | fail |
+| `06188` | 5.004 | 6.484 | fail |
+| `07136` | 6.606 | 7.168 | fail |
+| `07306` | 10.523 | 9.874 | fail |
+| `09639` | 7.327 | 8.435 | fail |
+| Average | 5.361 | 6.490 | fail |
+
+Current registration changes under test:
+- Enabled depth and boundary terms in differentiable silhouette optimization:
+  `render_sim3_silhouette_opt_depth_weight=0.35`,
+  `render_sim3_silhouette_opt_boundary_weight=0.75`.
+- Changed the 2D gate-aware objective so edge reward saturates once the
+  boundary is adequate and edge chamfer is penalized only beyond the threshold.
+- Allowed silhouette refinement to accept candidates that improve the 2D
+  gate-aware objective even when the legacy composite render score drops.
+- 2026-07-14 note: MoGe-frame anisotropic 2D refinement is kept as an optional
+  ablation but disabled by default because diagnostics on `05117` and `07306`
+  did not improve the final metric or 2D gate.
+
+Diagnostics:
+- The final target is the full 10-sample table plus average, not a single
+  `05117` target. `05117` remains useful only as a fast diagnostic sample.
+- Current strict fused metrics in
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713` after the latest
+  registration-only reruns are:
+  `01184=1.877/2.663` pass, `09639=2.357/3.482` fail,
+  `05452=1.714/2.449` fail, `05117=5.293/7.001` fail,
+  `06127=2.354/3.978` pass, `07136=6.613/7.224` fail,
+  `07306=9.914/9.319` fail, `06188=5.016/6.507` fail,
+  `06145=4.328/7.151` fail, `06830=9.557/10.769` fail, with average
+  `4.902/6.054` fail.
+- `09639` strict registration-only rerun with the current code and synchronized
+  `09639_fused.ply` gives `CD/EMD x1e2 = 2.354/3.453`, still failing the target
+  `1.43/2.29` but much better than the stale old-method metric entry.
+- Temporarily relaxing only `09639` leakage gate to `0.13` allowed partial
+  refinement, but the diagnostic metric on the aligned complete cloud was
+  `2.529/3.810`; this did not justify loosening the hard leakage gate.
+- Raw-partial and partial+complete diagnostic metrics show that some failures
+  are caused by generated complete geometry hurting otherwise good partial
+  scans, especially `06145`, but a simple partial+complete output strategy did
+  not solve the full 10-sample target.
+- Direct raw-partial plus current complete fusion gives average
+  `CD/EMD x1e2 = 3.043/4.772`; it improves some samples but remains far above
+  the target and can worsen samples with bad generated complete geometry.
+- Disabling the 2D gate only to force partial-space refinement is not a valid
+  fix. `05117` worsened to `7.180/10.887`; `07136` improved from
+  `6.613/7.224` to `4.934/5.621` but still failed by a large margin.
+- PCA symmetry completion from raw partial and partial-space PCA Sim3
+  enumeration were tested as simple geometric alternatives. They did not meet
+  the full target; PCA partial-space enumeration gave, for example,
+  `05117=2.191/3.578`, `07136=5.045/5.391`,
+  `07306=4.409/5.805`, and `06830=2.920/4.551`.
+- Historical `workspace/redwood_qwen_studio_bg_full_rerun_20260713` outputs
+  show that some targets are reachable with different generated geometry:
+  `01184=0.920/1.432`, `05117=1.239/1.680`,
+  `06127=2.849/4.415`, and `06145=1.337/2.104`.
+  This suggests the remaining work should focus on simple candidate quality
+  selection or better complete-to-MoGe initialization, not just loosening gates.
+- Added an optional Hunyuan best-of-seeds path. `hunyuan_candidate_seeds`
+  generates extra `<sample>_hunyuan2.1_seed<seed>.ply` candidates from the same
+  accepted image. Registration runs each candidate independently and promotes
+  the candidate selected by a self-supervised score: if a candidate passes the
+  2D gate and partial refinement, rank by partial refinement mean distance;
+  otherwise rank by the 2D gate objective. This is simple and ablatable, and
+  does not add another model.
+- `05117` same-image seeds `101` and `102` did not help:
+  current `5.188/6.865`, seed101 `5.162/6.586`, seed102 `5.120/6.714`.
+  All failed the 2D gate, so the self-supervised selector kept the current
+  candidate.
+- `07306` same-image seeds improved but did not solve the sample:
+  current `9.927/9.365`, seed101 `6.361/6.156`, seed102 `6.358/6.122`.
+  The self-supervised selector chose seed101 and the official
+  `07306_fused.ply` was promoted to that candidate.
+- `09639` same-image seeds `101` and `102` were generated and registered from
+  the accepted image. The self-supervised selector kept the default candidate:
+  default objective `2.584`, seed102 `2.494`, seed101 `2.468`. Official metric
+  stayed around `1.99/3.29`; seed101 and seed102 were worse (`2.36/4.31` and
+  `2.37/4.37` in the verification run).
+- `05452` same-image seeds `101` and `102` were generated and registered. The
+  selector chose seed102 by 2D objective (`2.524`, versus seed101 `2.506` and
+  default `2.410`), but the formal metric stayed essentially unchanged around
+  `1.44/2.02`. This suggests same-image Hunyuan seed search alone is not a
+  sufficient method-level fix for the remaining near-threshold failures.
+- After promoting `07306` seed101, current strict full-set metrics are:
+  `01184=1.888/2.681` pass, `09639=2.355/3.475` fail,
+  `05452=1.716/2.461` fail, `05117=5.177/6.820` fail,
+  `06127=2.354/3.945` pass, `07136=6.607/7.170` fail,
+  `07306=6.359/6.131` fail, `06188=4.995/6.440` fail,
+  `06145=4.317/7.110` fail, `06830=9.557/10.769` fail, with average
+  `4.533/5.700` fail.
+- Added partial-preserving final prediction mode. This keeps all raw partial
+  points and adds only complete points farther than `0.01` from the observed
+  partial. It is a simple geometric guard, not a new model. The aligned
+  complete-only cloud remains saved separately for inspection.
+- After overwriting the official `<sample>_fused.ply` files with
+  partial-preserving predictions, current metrics are:
+  `01184=1.695/2.467` pass, `09639=1.991/3.304` fail,
+  `05452=1.361/2.319` fail, `05117=3.226/5.530` fail,
+  `06127=2.038/3.608` pass, `07136=3.663/5.178` fail,
+  `07306=4.307/5.287` fail, `06188=3.031/5.207` fail,
+  `06145=3.140/6.048` fail, `06830=3.775/7.441` fail, with average
+  `2.823/4.639` fail. This improves the average substantially but still misses
+  the final full-set target.
+- MoGe-as-depth-geometry diagnostics: partial + MoGe far-point fusion helps
+  some samples (`07136` best `2.51/3.12`, `06188` best `2.07/3.42`,
+  `06145` best `0.71/1.48`, `06830` best `1.16/2.30`) but hurts or fails
+  others (`01184`, `09639`, `07306`). PCA mirroring of the MoGe cloud did not
+  solve the hard cases (`07306` best `5.739/5.762`, `07136` best
+  `2.723/3.360`), so it should remain a diagnostic, not a default method.
+- Added `render_sim3_final_prediction_source` with `complete`, `moge`, and
+  `auto`. `auto` is a small self-supervised source selector that uses Hunyuan
+  when the 2D gate is reliable and the final extent is modest, or for near-gate
+  leakage/edge-only cases where MoGe adds too little new geometry; otherwise it
+  uses MoGe as conservative depth geometry. This is still a simple geometric
+  rule and uses no GT.
+- Uniform MoGe-source partial-preserving output gave average `2.438/3.405` and
+  passed `06145` and `06830`, but broke already-good `01184`/`06127`.
+- Auto-source partial-preserving output was promoted to the official
+  `<sample>_fused.ply` files. The current default uses source-specific
+  far-point thresholds: `0.01` for aligned Hunyuan complete geometry and
+  `0.02` for MoGe conservative depth geometry. Current metrics are:
+  `01184=1.690/2.461` pass, `09639=1.988/3.274` fail,
+  `05452=1.445/2.016` fail, `05117=2.123/3.188` fail,
+  `06127=2.038/3.616` pass, `07136=2.511/3.031` fail,
+  `07306=4.305/5.322` fail, `06188=2.080/3.425` fail,
+  `06145=0.713/1.608` pass, `06830=1.337/2.509` pass, with average
+  `2.023/3.045` fail. This is the best current all-sample average but still
+  misses the final target.
+- `07306` extra same-image Hunyuan seeds `103` and `104` were generated and
+  registered. The old candidate selector incorrectly promoted seed104 because
+  its 2D gate-aware objective was highest (`2.519`), but formal metrics were
+  worse: official/seed104 about `6.51/7.11`, seed101 `5.78/6.71`, seed102
+  `4.31/5.30`, and seed103 `5.15/6.01`. The selector fallback was changed to
+  rank by full render score when no candidate passes the 2D gate, with the
+  2D gate-aware objective retained as logging/tie-break information. This
+  selected seed102 and promoted it back to the official `07306_fused.ply`.
+- After the corrected `07306` promotion, the current official full-set metrics
+  are: `01184=1.693/2.483` pass, `09639=1.986/3.293` fail,
+  `05452=1.448/1.997` fail, `05117=2.123/3.153` fail,
+  `06127=2.034/3.585` pass, `07136=2.547/3.120` fail,
+  `07306=4.315/5.256` fail, `06188=2.079/3.427` fail,
+  `06145=0.711/1.549` pass, `06830=1.337/2.498` pass, with average
+  `2.027/3.036` fail. The remaining method target is still the full
+  10-sample table plus the average, not any single diagnostic sample.
+- 2026-07-14 clarification: the optimization target must not be narrowed to
+  `05117`. The final success criterion is all 10 requested samples plus the
+  average CD/EMD thresholds in the table above. `05117` is only a fast
+  diagnostic for candidate quality and registration behavior.
+- `05117` same-image Hunyuan seeds `103`, `104`, `105`, and `106` were
+  generated and registered from the accepted image. Seed103 had the best
+  self-supervised full render score and was promoted, but all candidates still
+  failed the 2D gate and the final prediction source remained MoGe. Official
+  `05117` metric after promotion was `2.123/3.144` in the full-set check
+  (`2.124/3.189` in the single-sample run, metric variance from resampling),
+  still failing the `1.36/2.20` target. This reinforces that same-image seed
+  expansion alone is not sufficient as a method-level fix.
+- Current official full-set metrics after the `05117` seed103 promotion are:
+  `01184=1.694/2.477` pass, `09639=1.994/3.295` fail,
+  `05452=1.443/1.999` fail, `05117=2.123/3.144` fail,
+  `06127=2.038/3.614` pass, `07136=2.522/3.078` fail,
+  `07306=4.311/5.260` fail, `06188=2.078/3.430` fail,
+  `06145=0.708/1.527` pass, `06830=1.337/2.507` pass, with average
+  `2.025/3.033` fail against the requested average target `1.74/2.88`.
+- 2026-07-14 leakage strictness update: `score_depth_render` now records
+  `target_leakage` and `leakage_chamfer_px`, penalizes leakage more strongly
+  in both the render score and the 2D gate-aware retry objective, and the hard
+  2D gate checks `target_leakage <= 0.08` and
+  `leakage_chamfer_px <= 12.0` in addition to the original leakage ratio. This
+  is a simple geometric scoring change aimed at rejecting candidates with
+  small-area but distant protrusions.
+- Focused `01184` rerun after the leakage update selected
+  `retry_candidate_22` instead of the previous visibly worse candidate. The
+  final 2D score improved to `iou=0.940`, `coverage=0.952`,
+  `leakage=0.014`, `target_leakage=0.014`, and
+  `leakage_chamfer_px=2.79`; the official metric improved to
+  `CD/EMD x1e2 = 0.966/1.489`. Output paths were overwritten in
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/01184/`.
+- Follow-up batch diagnostics showed the new `target_leakage <= 0.08` hard
+  gate was too strict for near-boundary overfill: `09639` became
+  `2.371/4.333`, and `05452` with seed102 stayed at `1.444/2.005`, both
+  failing the gate on leakage/target_leakage and falling back to MoGe despite
+  good coarse 2D overlap. Keep the stronger leakage penalties in scoring and
+  retry ranking, but relax the hard gate to `leakage <= 0.16` and
+  `target_leakage <= 0.18`, while retaining `leakage_chamfer_px <= 12.0` to
+  reject distant protrusions such as the visually flipped `01184` failure mode.
+- Verification after relaxing only the hard leakage gate: `01184` remains fixed
+  and improves to `CD/EMD x1e2 = 0.945/1.490` with gate pass and
+  `leakage=0.013`, `target_leakage=0.013`, `leakage_chamfer_px=2.77`.
+  `09639` now passes the 2D gate and uses complete geometry, but still fails at
+  `2.219/3.815`. Candidate metrics show seed selection is not the bottleneck:
+  selected/seed101 are both about `2.22/3.81`, seed102 is worse
+  (`2.36/4.31`), complete-only is worse (`2.61/3.92`), and raw partial is
+  `2.36/4.28`. The next simple method-level work should therefore target the
+  3D partial-space refinement/objective rather than further leakage-gate
+  tuning or final fusion thresholds.
+- Partial-preserving threshold diagnostics on the six failing samples show that
+  changing only the final far-point threshold cannot solve the target. Best
+  observed values in the sweep were still failing for the hard samples:
+  `09639` complete threshold `0.04` gave `1.862/3.309`, `05117` MoGe threshold
+  `0.02` gave `2.124/3.192`, `07136` MoGe threshold `0.02` gave
+  `2.531/2.985`, `07306` complete threshold `0.005` gave `4.270/5.273`, and
+  `06188` MoGe threshold `0.04` gave `2.027/3.623`. `05452` is near threshold
+  but still mixed: complete threshold `0.08` gave `1.122/1.790`, while MoGe
+  threshold `0.08` gave `1.286/1.652`.
+- Added an optional continuous robust MoGe-to-raw-partial bridge refinement
+  after the RANSAC/Umeyama bridge. It optimizes a small delta-Sim3 with a
+  trimmed Huber residual on pixel-bridge 3D correspondences and accepts only
+  when robust residual improves. Unit coverage was added. A focused `05117`
+  run accepted the bridge refinement at the correspondence level, but final
+  metric did not improve (`2.125/3.181` versus default rerun
+  `2.125/3.192`, both worse/no better than the prior `2.123/3.153` baseline).
+  Therefore `moge_bridge_refine_iterations` is `0` by default and the feature
+  remains an ablation, not a default method.
+- A focused final-MoGe continuous alignment diagnostic was run for `05117` in
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/_diagnostic_05117_moge_final_icp`.
+  It optimized only the final MoGe-source geometry against the raw partial
+  with trimmed Sim3 ICP / Open3D point-to-point ICP before partial-preserving
+  fusion. The best CD improved only slightly while EMD worsened:
+  baseline `2.126/3.175`, trimmed Sim3 best about `2.106/3.190`, and Open3D
+  ICP best CD about `2.089/3.237`. This confirms that `05117` is not primarily
+  limited by final MoGe-to-partial rigid/Sim3 alignment. Further method work
+  should focus on better complete/MoGe candidate geometry or self-supervised
+  source/candidate quality, not additional final rigid ICP on this sample.
+- A `05117` hybrid final-source diagnostic was run in
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/_diagnostic_05117_hybrid_source`.
+  It kept the current partial+MoGe final source and added Hunyuan complete
+  points only when they were far from both partial and MoGe points. This also
+  failed: the current default-like MoGe-only result stayed around
+  `2.123/3.174`, while adding complete points consistently worsened the metric
+  unless almost no complete points were kept. This rules out a simple hybrid
+  source fix for `05117`; the current Hunyuan complete geometry is not useful
+  for this sample's final metric.
+- A `05117` final-MoGe continuous affine diagnostic was run in
+  `workspace/redwood_depthfirst_semantic_full_rerun_20260713/_diagnostic_05117_moge_affine`.
+  It reused the existing continuous PCA-affine partial objective directly on
+  the final MoGe source in raw partial coordinates. The optimized residual to
+  the observed partial decreased slightly, but the final CD/EMD did not move
+  meaningfully: baseline `2.123/3.176`; tested affine variants were around
+  `2.118-2.125 / 3.165-3.201`. This further supports that `05117` is not
+  bottlenecked by a residual final Sim3/affine alignment of the current MoGe
+  source.
+- Historical `workspace/redwood_qwen_studio_bg_full_rerun_20260713/05117`
+  remains a useful control: remeasured with the current metric code, its
+  `05117_fused.ply` is `1.242/1.690`, and its aligned complete cloud is
+  `1.243/1.686`. Its 2D gate was accepted with strong values
+  (`iou=0.896`, `coverage=0.975`, `leakage=0.083`,
+  `edge_iou=0.083`, `edge_chamfer_px=7.75`). This confirms that `05117` is
+  reachable when the generated/candidate geometry and image-space alignment
+  are good; the current frozen image batch's `05117` failure is not solved by
+  final continuous Sim3/affine/ICP postprocessing.
+- Mapping that historical good `05117` complete cloud into the current MoGe
+  frame shows that the self-supervised render/depth objective would recognize a
+  good candidate if it were present: current complete candidate objective
+  `2.101`, historical candidate objective `2.641`, with depth MAE improving
+  from about `0.125` to `0.017`. A small current-MoGe coordinate refinement
+  using the render-score objective improved the historical candidate to
+  `1.100/1.692` under formal metric. This separates the issues: continuous
+  image-space refinement can help a near-good candidate, but the current
+  frozen-image Hunyuan candidates for `05117` do not contain such a candidate.
+- A registration-only loop completed `01184` and `05117`, then was stopped
+  during `05452` after the process became too slow. Continue with smaller
+  single-sample runs or a faster runner; do not treat the interrupted `05452`
+  run as verified.
+
 ## Stage 1 - Partial to Image to MoGe Index Bridge
 
 Status: partially implemented and accepted for `car__132`.

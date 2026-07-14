@@ -4,6 +4,7 @@ from torchvision import transforms
 import numpy as np
 import open3d as o3d
 from types import SimpleNamespace
+import copy
 from utils.dataUtils import save_ply_xyzrgb
 from utils.runtime import data_dir, model_path, sample_dir, sample_file
 import warnings
@@ -98,8 +99,33 @@ class ScaleAdapter():
         if bool(getattr(self.cfg, "skip_existing", False)) and ply_path.exists():
             print(f" Skip shape generation for {flag}: existing {ply_path.name}.")
             return
-        img = Image.open(sample_file(self.cfg, flag, "img_sam.png"))
+        with Image.open(sample_file(self.cfg, flag, "img_sam.png")) as source:
+            img = source.copy()
         self.generative(self.cfg, flag, img)
+        for seed in self._parse_hunyuan_candidate_seeds(
+            getattr(self.cfg, "hunyuan_candidate_seeds", "")
+        ):
+            output_name = f"{flag}_{self.cfg.generative_model}_seed{seed}.ply"
+            output_path = sample_file(self.cfg, flag, output_name)
+            if bool(getattr(self.cfg, "skip_existing", False)) and output_path.exists():
+                print(f" Skip Hunyuan candidate seed {seed} for {flag}: existing {output_name}.")
+                continue
+            candidate_cfg = copy.copy(self.cfg)
+            setattr(candidate_cfg, "hunyuan_seed", seed)
+            setattr(candidate_cfg, "hunyuan_output_ply_name", output_name)
+            self.generative(candidate_cfg, flag, img.copy())
+
+    @staticmethod
+    def _parse_hunyuan_candidate_seeds(value):
+        if value is None or value == "":
+            return []
+        if isinstance(value, str):
+            raw_items = [item.strip() for item in value.split(",")]
+        elif isinstance(value, (list, tuple, set)):
+            raw_items = list(value)
+        else:
+            raw_items = [value]
+        return [int(item) for item in raw_items if str(item).strip()]
 
     def scaleReg(self, flag):
         if str(getattr(self.cfg, "reg_backend", "")).lower() == "render_to_moge_sim3":

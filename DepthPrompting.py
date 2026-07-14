@@ -13,6 +13,7 @@ import warnings
 from utils.dataUtils import getRandomColor, resolve_prompt_label, save_ply_xyzrgb
 from utils.camera_utils import calculate_up_vector, create_cameras
 from utils.runtime import model_path, sample_dir, sample_file, save_intermediates
+from tools.qwen_image_edit import resize_stage1_image_for_output
 import fpsample
 from diffusers.utils import load_image
 warnings.filterwarnings("ignore")
@@ -137,7 +138,8 @@ class DepthPrompting:
         if depth_gen:
             self.getDepth(xyz, flag, rgb)
         depth_input_res = int(self.cfg.depth_image_input_res)
-        self.depth = load_image(str(sample_file(self.cfg, flag, "depth.png"))).resize(
+        depth_input_name = str(getattr(self.cfg, "qwen_edit_depth_input_name", "depth.png"))
+        self.depth = load_image(str(sample_file(self.cfg, flag, depth_input_name))).resize(
             (depth_input_res, depth_input_res)
         )
         if img_gen:
@@ -159,21 +161,42 @@ class DepthPrompting:
                         prompt_label,
                         size=self.cfg.generate_res,
                     )
-                if save_intermediates(self.cfg):
-                    if self.cfg.control_model == "qwen_edit":
-                        stage1_image = getattr(self.depth2Image, "last_stage1_image", None)
-                        if stage1_image is not None:
-                            stage1_image.save(sample_file(self.cfg, flag, "qwen_edit_stage1.png"))
-                        stage1_prompt = getattr(self.depth2Image, "last_stage1_prompt", None)
-                        refinement_prompt = getattr(
-                            self.depth2Image, "last_refinement_prompt", None
+                if self.cfg.control_model == "qwen_edit":
+                    stage1_image = getattr(self.depth2Image, "last_stage1_image", None)
+                    if stage1_image is not None:
+                        stage1_image = resize_stage1_image_for_output(
+                            stage1_image,
+                            self.cfg.generate_res,
                         )
+                        stage1_image.save(sample_file(self.cfg, flag, "qwen_edit_stage1.png"))
+                    stage1_prompt = getattr(self.depth2Image, "last_stage1_prompt", None)
+                    refinement_prompt = getattr(
+                        self.depth2Image, "last_refinement_prompt", None
+                    )
+                    with open(
+                        sample_file(self.cfg, flag, "qwen_edit_prompt.txt"),
+                        "w",
+                        encoding="utf-8",
+                    ) as handle:
+                        handle.write(f"input_image: {depth_input_name}\n")
+                        handle.write(f"prompt: {getattr(self.depth2Image, 'last_prompt', None)}\n")
+                        handle.write(
+                            f"negative_prompt: {self.depth2Image.negative_prompt!r}\n"
+                        )
+                        handle.write(
+                            f"true_cfg_scale: {self.depth2Image.true_cfg_scale}\n"
+                        )
+                        handle.write(f"num_inference_steps: {self.depth2Image.step}\n")
+                        handle.write(f"refine_stage: {self.depth2Image.refine_stage}\n")
+                        handle.write(f"refine_steps: {self.depth2Image.refine_step}\n")
+                    if stage1_prompt is not None:
                         with open(
-                            sample_file(self.cfg, flag, "qwen_edit_prompt.txt"),
+                            sample_file(self.cfg, flag, "qwen_edit_stage1_prompt.txt"),
                             "w",
                             encoding="utf-8",
                         ) as handle:
-                            handle.write(f"prompt: {getattr(self.depth2Image, 'last_prompt', None)}\n")
+                            handle.write(f"input_image: {depth_input_name}\n")
+                            handle.write(f"prompt: {stage1_prompt}\n")
                             handle.write(
                                 f"negative_prompt: {self.depth2Image.negative_prompt!r}\n"
                             )
@@ -181,45 +204,38 @@ class DepthPrompting:
                                 f"true_cfg_scale: {self.depth2Image.true_cfg_scale}\n"
                             )
                             handle.write(f"num_inference_steps: {self.depth2Image.step}\n")
-                            handle.write(f"refine_stage: {self.depth2Image.refine_stage}\n")
-                            handle.write(f"refine_steps: {self.depth2Image.refine_step}\n")
-                        if stage1_prompt is not None:
-                            with open(
-                                sample_file(self.cfg, flag, "qwen_edit_stage1_prompt.txt"),
-                                "w",
-                                encoding="utf-8",
-                            ) as handle:
-                                handle.write(f"prompt: {stage1_prompt}\n")
-                                handle.write(
-                                    f"negative_prompt: {self.depth2Image.negative_prompt!r}\n"
-                                )
-                                handle.write(
-                                    f"true_cfg_scale: {self.depth2Image.true_cfg_scale}\n"
-                                )
-                                handle.write(f"num_inference_steps: {self.depth2Image.step}\n")
-                        if refinement_prompt is not None:
-                            with open(
-                                sample_file(self.cfg, flag, "qwen_edit_stage2_prompt.txt"),
-                                "w",
-                                encoding="utf-8",
-                            ) as handle:
-                                handle.write(f"prompt: {refinement_prompt}\n")
-                                handle.write(
-                                    f"negative_prompt: {self.depth2Image.negative_prompt!r}\n"
-                                )
-                                handle.write(
-                                    f"true_cfg_scale: {self.depth2Image.true_cfg_scale}\n"
-                                )
-                                handle.write(f"num_inference_steps: {self.depth2Image.refine_step}\n")
+                    if refinement_prompt is not None:
+                        with open(
+                            sample_file(self.cfg, flag, "qwen_edit_stage2_prompt.txt"),
+                            "w",
+                            encoding="utf-8",
+                        ) as handle:
+                            handle.write(f"stage1_image: qwen_edit_stage1.png\n")
+                            handle.write(f"prompt: {refinement_prompt}\n")
+                            handle.write(
+                                f"negative_prompt: {self.depth2Image.negative_prompt!r}\n"
+                            )
+                            handle.write(
+                                f"true_cfg_scale: {self.depth2Image.true_cfg_scale}\n"
+                            )
+                            handle.write(f"num_inference_steps: {self.depth2Image.refine_step}\n")
                     else:
-                        prompt = getattr(self.depth2Image, "last_prompt", None)
-                        if prompt is not None:
-                            with open(
-                                sample_file(self.cfg, flag, "qwen_edit_prompt.txt"),
-                                "w",
-                                encoding="utf-8",
-                            ) as handle:
-                                handle.write(f"prompt: {prompt}\n")
+                        stage2_prompt_file = sample_file(
+                            self.cfg,
+                            flag,
+                            "qwen_edit_stage2_prompt.txt",
+                        )
+                        if stage2_prompt_file.exists():
+                            stage2_prompt_file.unlink()
+                elif save_intermediates(self.cfg):
+                    prompt = getattr(self.depth2Image, "last_prompt", None)
+                    if prompt is not None:
+                        with open(
+                            sample_file(self.cfg, flag, "qwen_edit_prompt.txt"),
+                            "w",
+                            encoding="utf-8",
+                        ) as handle:
+                            handle.write(f"prompt: {prompt}\n")
             self.image.save(sample_file(self.cfg, flag, "img.png"))
         end = time.time()
         print(f" Take {int(end-start)} seconds")
