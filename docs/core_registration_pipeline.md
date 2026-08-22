@@ -315,3 +315,33 @@ geometry.
   `reproducibility/06830_so3_lattice_sim3_v10_20260822.md` and
   `reproducibility/06145_so3_lattice_sim3_v10_20260822.md`;
 - detailed registration design: `docs/visibility_aware_pixel_sim3_ttt.md`.
+
+## Residual Partial-Core Local-Edit Candidate (v18)
+
+The current fusion candidate keeps the original registered 100k Pixal PLY/GLB
+as a frozen canonical artifact and creates a separate locally edited derivative.
+It converts only high-residual, same-camera visible correspondences into
+positional handles. A sparse translation-only graph pulls nearby generated
+geometry toward the immutable partial scan, while graph smoothness and identity
+regularization preserve local detail. A C1 compact window forces displacement
+to exactly zero beyond 7% of the partial bounding-box diagonal. All Pixal points
+are retained; no local scale, rotation, shear, cropping, or GT selection is used.
+
+The fused visualization/evaluation cloud is the full deformed 100k Pixal body
+plus the exact partial scan. The unmodified registered body, direct union, and
+local-edit union remain separate ablations. v18 is currently a two-sample
+candidate under `gpt_version/_pixal_strict_compact_local_edit_v18_20260822`;
+it must not be called the accepted fusion route until visual approval and a
+frozen shared-parameter full-ten run. The canonical v15 registration stays
+untouched; only the separate fusion derivative may move generated points.
+
+### v18 full-ten gate clarification
+
+The visible-correspondence gate is a hard prerequisite for local editing, not
+merely a diagnostic. If it fails, the method emits the full registered Pixal
+body plus the exact raw partial without deformation. The same fallback applies
+when compact support activates too much of the graph or projection/far-field
+guards fail. The frozen full-ten v18 candidate uses local editing on five
+samples and this conservative direct-union fallback on five samples. Its
+post-freeze mean CD-L1/EMD x1e2 is 1.675656/2.726899; visual approval remains
+pending.
