@@ -132,6 +132,47 @@ def zbuffer_depth(uv, depth, image_shape, splat_radius=1):
     return rendered, mask
 
 
+def zbuffer_depth_with_indices(uv, depth, image_shape, splat_radius=1):
+    """Render depth and retain the source point index at every visible pixel."""
+    height, width = int(image_shape[0]), int(image_shape[1])
+    uv = np.asarray(uv, dtype=np.float64)
+    depth = np.asarray(depth, dtype=np.float64)
+    rendered = np.full((height, width), np.inf, dtype=np.float64)
+    indices = np.full((height, width), -1, dtype=np.int64)
+    valid = np.isfinite(uv).all(axis=1) & np.isfinite(depth) & (depth > 1e-8)
+    if not valid.any():
+        return rendered, np.zeros((height, width), dtype=bool), indices
+
+    source_indices = np.where(valid)[0]
+    xy = np.rint(uv[valid]).astype(np.int64)
+    z = depth[valid]
+    radius = max(0, int(splat_radius))
+    for dy in range(-radius, radius + 1):
+        for dx in range(-radius, radius + 1):
+            if dx * dx + dy * dy > radius * radius:
+                continue
+            xx = xy[:, 0] + dx
+            yy = xy[:, 1] + dy
+            keep = (xx >= 0) & (xx < width) & (yy >= 0) & (yy < height)
+            if not keep.any():
+                continue
+            for source_index, x, y, value in zip(
+                source_indices[keep], xx[keep], yy[keep], z[keep]
+            ):
+                current = rendered[y, x]
+                current_index = indices[y, x]
+                if value < current - 1e-12 or (
+                    abs(float(value) - float(current)) <= 1e-12
+                    and (current_index < 0 or int(source_index) < int(current_index))
+                ):
+                    rendered[y, x] = value
+                    indices[y, x] = int(source_index)
+
+    mask = indices >= 0
+    rendered[~mask] = 0.0
+    return rendered, mask, indices
+
+
 def mask_boundary(mask):
     mask = np.asarray(mask, dtype=bool)
     if not mask.any():
@@ -349,6 +390,91 @@ def select_best_candidate(
         if best is None or score["score"] > best["score"]["score"]:
             best = item
     return best
+
+
+def rank_refined_sim3_candidates(
+    candidates,
+    source_points,
+    intrinsic_px,
+    target_depth,
+    target_mask,
+    *,
+    top_k,
+    splat_radius,
+    translation_steps,
+    rotation_steps_deg,
+    scale_steps,
+    rounds,
+    require_2d_acceptance=True,
+    min_iou=0.82,
+    min_coverage=0.84,
+    max_leakage=0.10,
+    min_edge_iou=0.025,
+    max_edge_chamfer_px=18.0,
+):
+    """Return deterministic, gate-scored top-K Sim3 candidates."""
+    ranked = []
+    for index, transform in enumerate(candidates):
+        score = evaluate_transform(
+            source_points,
+            transform,
+            intrinsic_px,
+            target_depth,
+            target_mask,
+            splat_radius=splat_radius,
+        )
+        ranked.append(
+            {
+                "index": int(index),
+                "initial_transform": np.asarray(transform, dtype=np.float64),
+                "initial_score": score,
+                "initial_2d_objective": score_2d_gate_objective(score),
+            }
+        )
+    ranked.sort(key=lambda item: (-item["initial_2d_objective"], item["index"]))
+
+    refined_items = []
+    for item in ranked[: max(0, int(top_k))]:
+        transform, score, history = refine_transform_coordinate_search(
+            item["initial_transform"],
+            source_points,
+            intrinsic_px,
+            target_depth,
+            target_mask,
+            splat_radius=splat_radius,
+            translation_steps=translation_steps,
+            rotation_steps_deg=rotation_steps_deg,
+            scale_steps=scale_steps,
+            rounds=rounds,
+            selection_objective="2d_gate",
+        )
+        acceptance = evaluate_2d_acceptance(
+            score,
+            enabled=require_2d_acceptance,
+            min_iou=min_iou,
+            min_coverage=min_coverage,
+            max_leakage=max_leakage,
+            min_edge_iou=min_edge_iou,
+            max_edge_chamfer_px=max_edge_chamfer_px,
+        )
+        refined_items.append(
+            {
+                **item,
+                "transform": np.asarray(transform, dtype=np.float64),
+                "score": score,
+                "objective": score_2d_gate_objective(score),
+                "acceptance": acceptance,
+                "history": history,
+            }
+        )
+    refined_items.sort(
+        key=lambda item: (
+            -int(bool(item["acceptance"]["accepted"])),
+            -item["objective"],
+            item["index"],
+        )
+    )
+    return refined_items
 
 
 def refine_transform_coordinate_search(

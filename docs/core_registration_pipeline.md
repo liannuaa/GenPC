@@ -1,303 +1,317 @@
 # Core Registration Pipeline
 
-This document records the current core GenPC method for registering a generated
-complete point cloud back to the original partial point cloud.
+## Canonical Method
 
-This is an academic-paper implementation. The core method should stay simple,
-explainable, reproducible, and easy to ablate. Prefer concise geometric or
-continuous-optimization changes over extra model stacks, broad engineering
-frameworks, or sample-specific rules.
+This is the canonical end-to-end method for the current GenPC project.  It
+replaces the old Qwen→external-MoGe→Hunyuan core description.
 
-## Goal
-
-Given a partial point cloud, reconstruct a complete 3D point cloud and express
-that complete cloud in the raw partial point cloud coordinate frame.
-
-The core relation is:
+The active route is:
 
 ```text
-partial raw points
-  -> camera-1 depth image
-  -> Qwen completed RGB image
-  -> MoGe image point cloud
-  -> Hunyuan complete point cloud
-  -> render-to-MoGe Sim3
-  -> complete point cloud aligned to raw partial
+raw partial point cloud
+  -> GenPC saved-camera depth projection
+  -> GPT ImageGen complete semantic/RGB image
+  -> Pixal3D complete GLB and deterministic 100k surface PLY
+  -> saved-camera 2D/depth + visible-partial SO(3)/Sim(3) TTT
+  -> registered full Pixal3D model
+  -> completeness-preserving observation fusion
+  -> frozen prediction
+  -> post-freeze GT CD-L1/EMD
 ```
 
-The method intentionally separates image-space correspondence from 3D
-registration. Pixel correspondence is used to align MoGe to the raw partial
-scan. The generated complete point cloud is now aligned directly to MoGe with a
-no-FreeReg Sim3 search over rendered depth, silhouette overlap, and visible ICP.
+The method remains recognizably descended from GenPC: it keeps GenPC's raw
+partial projection, saved camera, and 2D+3D registration logic; upgrades the
+image prior to GPT ImageGen; upgrades the complete-shape prior to Pixal3D; and
+turns registration/fusion into visibility-aware test-time posterior fitting.
 
-## Stage 1: Partial To Image
+The paper target is zero-shot Redwood completion with one shared configuration,
+no sample-specific tuning, and full-ten mean CD-L1 x1e2 below `1.74` and EMD
+x1e2 below `2.88`.
 
-`DepthPrompting` projects the raw partial point cloud to `raw_depth.png` and
-`depth.png`, then saves the projection state:
+## Current Freeze and Approval State
 
-- `camera.pth`
-- `point_uv.npy`
-- `raw_depth.png`
-- `depth.png`
-- `qwen_edit_stage1.png` after one-stage Qwen completion
-- `img.png`, copied from the same one-stage Qwen output
+- Accepted/frozen semantic images:
+  `gpt_version/<sample>/gpt_image.png` for all ten Redwood samples.
+- Accepted/frozen Pixal assets:
+  `gpt_version/<sample>/pixal3d.glb` and
+  `gpt_version/<sample>/pixal3d_sampled_100k.ply` for all ten samples.
+- Accepted/frozen v10 registrations: `06830` and `06145`, under
+  `gpt_version/_pixal_so3_lattice_sim3_v10_20260822/<sample>`.
+- No v10 completeness-preserving fusion has yet been approved.  Registration
+  and fusion must remain separate outputs and ablations.
 
-The accepted Qwen image-generation flow is now intentionally simple and
-one-stage. It uses `raw_depth.png` as the input image and asks Qwen to generate
-a complete object image from the occluded depth cue:
+Do not regenerate or overwrite an accepted GPT image, original Pixal GLB/PLY,
+accepted transform, registered PLY, or registered mesh without asking.
 
-```text
-生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的{photo_label}，纯白背景
-```
+## Stage 0 — Raw Partial, Depth, and Camera
 
-The output is resized to `512x512` and saved as both `qwen_edit_stage1.png` and
-`img.png`. The second Qwen refinement stage was removed from the main pipeline
-after the one-stage raw-depth results were accepted visually; stale
-`qwen_edit_stage2_prompt.txt` files are removed during Stage 1 output writing.
-Keep this path simple and ablatable unless a future experiment explicitly
-reintroduces a second image stage.
+Inputs and camera artifacts:
 
-The Qwen input depth image is selected by `qwen_edit_depth_input_name`; the
-current accepted setting is `raw_depth.png`, not the inpainted/flipped
-`depth.png`.
+- raw partial: `data/<sample>.ply`;
+- accepted depth: `gpt_version/<sample>/depth.png`, 512×512;
+- saved camera root:
+  `workspace/redwood_onestage_rawdepth_512_stage2_20260714/<sample>`;
+- camera/pixel state: `camera.pth` and `point_uv.npy`.
 
-Important coordinate detail:
+The depth and semantic images need only be approximately aligned after resize.
+The saved camera provides robust silhouette, visible-depth, and same-ray
+evidence; the method does not assume exact dense RGB/depth correspondence.
+Always use the established `SavedCameraProjector`, including GenPC's saved
+vertical image-coordinate convention, instead of rebuilding a new camera.
 
-- `DepthPrompting.paintPixels()` vertically flips the saved `depth.png`.
-- Any projection uv used against `img.png` or MoGe pixels must use the saved
-  image coordinate convention: `v = 1 - v`.
-- Do not use `depth_view_point_cloud.ply` as the raw partial target. It is in
-  depth-view coordinates, not the raw partial coordinate frame.
+## Stage 1 — GPT ImageGen Image Completion
 
-## Stage 2: Image To MoGe And Partial Bridge
+Purpose: complete the partial depth rendering into a realistic full-object
+image while preserving camera pose, image footprint, orientation, scale, and
+all observed geometry.
 
-Run MoGe on the completed image `img.png`. Remove background with RMBG-2.0 and
-erode the object mask before keeping MoGe object points.
+Per-sample files:
 
-Implementation:
+- input: `gpt_version/<sample>/depth.png`;
+- exact prompt: `gpt_version/<sample>/prompt.txt`;
+- accepted output: `gpt_version/<sample>/gpt_image.png`, 1254×1254;
+- optional user references:
+  `gpt_version/01184/product_reference.png` and
+  `gpt_version/05452/product_reference.png`.
 
-- `scripts/run_moge_to_raw_partial_from_camera.py`
+Prompt policy:
+
+1. Use the Redwood ID/category correspondence only to name the object.
+2. Treat the depth image as authoritative for pose, viewpoint, projected size,
+   silhouette, and observed parts.
+3. Complete only missing or occluded geometry.
+4. Keep one complete object on a pure white background.
+5. Forbid canonical-view rotation, recentering, zoom, extra parts, floor,
+   cast shadow, text, and watermark.
+6. User-supplied structural references may constrain genuine object structure,
+   such as the parallel two-wheel arrangement of `01184` and thin curved chair
+   profile of `05452`; they must not become registration case logic.
+
+The generator is OpenAI's built-in GPT image editor.  Exact serving checkpoint,
+seed, steps, guidance, scheduler, negative prompt, and backend are not exposed
+and are recorded as `UNKNOWN`.  Reproducibility is therefore based on frozen
+outputs and verbatim prompt files.  No crop or recenter is applied when saving
+`gpt_image.png`.
+
+## Stage 2 — Pixal3D Complete 3D Generation
+
+Implementation: `scripts/run_pixal3d_gpt_batch.py`.
+
+Model assets:
+
+- source: `models/Pixal3D`;
+- projection weights: `models/Pixal3D-weights`;
+- DINOv3: `models/dinov3-vitl16-pretrain-lvd1689m`;
+- internal camera/geometry model: `models/moge-2-vitl/model.pt`;
+- background removal: `models/RMBG-2.0`;
+- attention backend: `xformers`;
+- NAF: official release checkpoint in the Torch Hub cache.
+
+Preprocessing removes the white background, applies Pixal3D's official 1.1
+foreground crop, and saves the exact RGBA condition as
+`gpt_version/<sample>/pixal3d_input.png`.  Pixal3D then uses its internal MoGe-2
+camera estimate.  Because this geometry/camera reasoning already occurs inside
+Pixal3D, the old external partial→MoGe→complete transform composition is not
+part of the active route.
+
+Shared parameters for all samples:
+
+- seed 42;
+- `1024_cascade`, actual resolution 1024;
+- sparse structure: 12 steps, guidance 7.5, rescale 0.7, `rescale_t=5.0`;
+- shape: 12 steps, guidance 7.5, rescale 0.5, `rescale_t=3.0`;
+- texture: 12 steps, guidance 1.0, rescale 0.0, `rescale_t=3.0`;
+- remeshed GLB target 300000 faces and 2048 texture;
+- deterministic uniform surface sample of 100000 points with seed 42.
 
 Outputs:
 
-- `<sample>_moge_to_raw_partial_moge_object_only.ply`
-- `<sample>_moge_to_raw_partial_partial_to_moge_index.npy`
-- `<sample>_moge_to_raw_partial_moge_to_raw_partial_transform.npy`
-- `<sample>_moge_to_raw_partial_raw_partial_gray_moge_red_aligned.ply`
-- `<sample>_moge_to_raw_partial_info.json`
-- `<sample>_moge_to_raw_partial_object_mask.png`
+- `pixal3d_input.png`;
+- accepted `pixal3d.glb`;
+- accepted `pixal3d_sampled_100k.ply`;
+- exact `pixal3d_metadata.json`.
 
-This stage estimates `moge_to_raw_partial` using pixel correspondences between
-reprojected raw partial points and MoGe object pixels. Good runs usually have
-high partial-to-MoGe match ratio and high RANSAC inlier ratio.
+Registration transforms these frozen outputs.  It must never regenerate a
+different GLB to make a difficult case easier.
 
-## Stage 3: Image To Complete Point Cloud
+## Stage 3 — Visibility-Aware SO(3) + Sim(3) TTT
 
-Before Hunyuan3D generation, remove image background so the generated geometry
-does not include floor or scene background.
+Implementations:
 
-Outputs:
+- `scripts/run_pixal_pca_sim3_ttt_v2.py`;
+- `scripts/run_pixal_pca_depth_sim3_ttt_v3.py`;
+- `scripts/run_pixal_local_sim3_ttt_v4.py`;
+- `scripts/run_pixal_so3_lattice_sim3_ttt_v10.py`;
+- root launcher: `run_pixal_so3_lattice_sim3_ttt_v10.py`.
 
-- `img_sam.png`
-- `<sample>_hunyuan2.1.ply`
-
-The current main workflow keeps the final sampled `.ply`; GLB intermediates are
-not required for the registration method.
-
-## Stage 4: No-FreeReg Complete-To-MoGe Sim3 Registration
-
-Use render-to-MoGe Sim3 registration:
-
-- image/MoGe input: the same `img.png` used by Stage 2
-- MoGe object mask: `<sample>_moge_to_raw_partial_object_mask.png`
-- complete point cloud input: `<sample>_hunyuan2.1.ply`
-- object mask: `<sample>_moge_to_raw_partial_object_mask.png`
-
-Implementation:
-
-- `scripts/run_render_to_moge_sim3.py`
-- main pipeline integration: `ScaleAdapter.render_to_moge_sim3_reg`
-
-The current default variant does not use FreeReg or DepthPro:
-
-- Run MoGe on `img.png` and keep object-mask pixels.
-- Build candidate Sim3 transforms from axis-aligned rotations and scale
-  multipliers.
-- Score candidates by z-buffer rendering the complete point cloud into the MoGe
-  camera and comparing silhouette overlap, edge alignment, leakage, and depth
-  agreement. The score weights 2D silhouette/edge terms more heavily than
-  depth.
-- Refine the best candidate with coordinate search over translation, rotation,
-  and scale.
-- Run a differentiable 2D silhouette optimization from the coordinate-search
-  transform. It optimizes a small delta-Sim3 with soft point splatting against
-  the object mask, using silhouette Dice, leakage, missing-mask, distance,
-  area, center, and transform-regularization terms. The candidate is accepted
-  only if the full-resolution hard render score improves.
-- Run a differentiable visible-3D refinement from the current transform. It
-  builds nearest-neighbor correspondences between the complete cloud's visible
-  rendered surface and MoGe object points, optimizes a small delta-Sim3 with a
-  3D distance term plus a soft 2D silhouette guard, and accepts the result only
-  if the visible 3D distance improves while the full-resolution 2D render score
-  stays within the configured drop tolerance.
-- Optionally run visible trimmed ICP from rendered complete points to MoGe
-  object points. The ICP result is accepted only if it preserves or improves
-  the render-to-MoGe 2D score; otherwise the pipeline rolls back to the
-  coordinate-search transform.
-
-Outputs:
-
-- `<sample>_complete_registered_to_moge.ply`
-- `<sample>_moge_gray_complete_blue_fused.ply`
-- `<sample>_complete_to_moge_transform.npy`
-- `<sample>_render_to_moge_overlay.png`
-- `<sample>_render_to_moge_sim3_info.json`
-
-The resulting transform is `complete_to_moge`.
-
-## Stage 5: Compose Complete To Partial
-
-Before any final partial-space refinement runs, the MoGe-frame 2D render
-alignment must pass a hard acceptance gate. By default
-`registration_2d_acceptance` requires:
-
-- `final_score.iou >= 0.82`
-- `final_score.coverage >= 0.84`
-- `final_score.leakage <= 0.10`
-- `final_score.edge_iou >= 0.025`
-- `final_score.edge_chamfer_px <= 18.0`
-
-The edge terms are hard gates. A high coarse mask overlap is not enough if the
-rendered boundary is visibly off. If the 2D gate fails, the pipeline retries a
-top-K set of candidates ranked by a 2D-focused objective with wider scale
-multipliers. When the
-`partial_to_moge_index` bridge exists, retry candidates also record a
-MoGe-frame anchor distance to raw partial points and use a joint 2D+anchor
-objective for candidate selection.
-
-After retry, the pipeline can run a continuous bridge-anchor delta-Sim3
-optimization in the MoGe frame. This uses raw partial points mapped back
-through `moge_to_partial^-1` as bridge anchors, optimizes a trimmed anchor
-distance plus a soft 2D silhouette guard, and accepts the delta only when
-anchor distance improves without dropping the 2D objective beyond the
-configured tolerance. If the best result still fails the 2D gate, partial-space
-refinement is skipped so a poor image-frame alignment cannot be hidden by a
-later partial-distance improvement.
-
-The final transform is now:
+The only permitted transform is:
 
 ```text
-complete_to_partial =
-    moge_to_partial
-    @ complete_to_moge
+p_registered = s R p_pixal + t
 ```
 
-Because the MoGe-to-raw-partial bridge can still have a small residual offset,
-the final `complete_to_partial` transform may receive one more conservative
-partial-space refinement. This step optimizes a small delta-Sim3 from complete
-points to the raw partial point cloud using trimmed nearest-neighbor 3D
-distances. It updates only `complete_to_partial` and final fused/metric outputs;
-it does not change `complete_to_moge` or the MoGe-frame inspection outputs. The
-candidate is accepted only when the partial-space distance improves and the
-delta scale, rotation, and translation stay inside configured bounds.
+`R` must be a proper rotation, `s` one positive isotropic scale, and `t`
+translation.  Independent axis scales, affine shear, point deletion, non-rigid
+deformation, regenerated shapes, and GT-guided candidate selection are
+forbidden.
 
-Final outputs:
+### Visible partial-to-partial principle
 
-- `<sample>_complete_aligned_to_raw_partial.ply`
-- `<sample>_raw_partial_gray_complete_blue_aligned.ply`
-- `<sample>_complete_to_partial_transform.npy`
-- `<sample>_fused.ply`
+Ordinary complete-to-partial ICP or symmetric Chamfer incorrectly penalizes
+valid unseen complete geometry and can shrink long objects.  At each candidate
+pose, the method z-buffers the complete Pixal model through the saved camera
+and compares only its visible observation-supported subset with the raw
+partial.  The optimization behaves as visible-partial-to-raw-partial fitting,
+while all hidden Pixal points remain untouched.
 
-The fused visualization colors the raw partial point cloud gray and the aligned
-complete point cloud blue. `<sample>_fused.ply` is the metric prediction path.
+### v10 shared hypothesis schedule
 
-## Failure Signals
+Partial-view PCA may miss the correct orientation.  v10 composes 24 proper PCA
+rotations with the fixed Euler grid `{-45°, 0°, 45°}^3`, deduplicating to 648
+orientations for every category.
 
-Do not trust a fused result only because files exist. Check the metadata:
+Coarse stage:
 
-- Low `final_score.iou`, low `final_score.coverage`, or high
-  `final_score.leakage` in `<sample>_render_to_moge_sim3_info.json` means the
-  complete-to-MoGe render alignment is weak.
-- `registration_2d_acceptance.accepted = false` means the render alignment did
-  not pass the configured hard 2D gate, so the output should not be treated as a
-  good registration even if fused PLY files exist.
-- Low `final_score.edge_iou` or high `final_score.edge_chamfer_norm` means the
-  2D silhouette boundary is misaligned even if coarse mask overlap is nonzero.
-- `silhouette_optimization.accepted = false` means the soft differentiable
-  optimization ran but did not improve the full-resolution hard render score.
-- `visible_3d_optimization.accepted = false` means the visible 3D refinement
-  either could not find stable correspondences, did not reduce visible 3D
-  distance enough, or would have hurt the 2D render score too much.
-- `bridge_anchor_optimization.accepted = false` means the continuous
-  partial-to-MoGe anchor refinement either did not improve anchor distance or
-  would have hurt the 2D render objective too much.
-- `partial_refinement.accepted = false` means the final complete-to-partial
-  correction either did not improve trimmed partial distance enough or proposed
-  a delta that exceeded the configured small-motion limits.
-- Large visible ICP mean/p95 distances are suspicious even if final files
-  exist.
-- Very large `complete_to_partial` translation norm is usually a failed
-  registration result.
-- huge metric values, especially `CD-L1 x1e2` in the thousands, indicate a
-  transform-scale or translation failure.
+- render 64;
+- 2500 complete and 1500 partial points;
+- scales `0.6, 0.8, 1.0, 1.2, 1.4`;
+- median-centered translation;
+- retain 24 candidates.
 
-For the original 2026-07-13 Redwood batch, normal-scale samples were:
+Fine stage:
 
-- `01184`
-- `05117`
-- `05452`
-- `07306`
-- `09639`
+- render 128;
+- 10000 complete and 6000 partial points;
+- refine isotropic scale and translation;
+- locally refine the best eight rotations;
+- saved-camera padding 0.15.
 
-Problematic or suspicious samples were:
+The GT-free score combines silhouette IoU, observed coverage, generated
+leakage, robust partial-to-complete surface distance, same-camera visible depth,
+and bounded transform updates.  Hidden complete points receive no
+partial-distance loss.
 
-- `06127`: low DepthPro-to-MoGe inlier ratio and higher metric.
-- `06145`, `06188`, `06830`, `07136`: large complete-to-partial translation,
-  caused by unstable FreeReg results.
+Each run writes a registered full 100k PLY, transformed original GLB,
+gray-partial/red-Pixal comparison PLY, 4×4 Sim(3), projection PNG, and complete
+ranking/trace JSON.
 
-The adaptive FreeReg rerun fixed the random-transform failures:
+Accepted v10 scales:
 
-- `01184`, `05117`, `05452`, `06127`, `07306`, and `09639` selected `auto`.
-- `06145`, `06188`, `06830`, and `07136` selected `fallback_0.1`.
-- Sampled CPU Chamfer x1e2 mean improved from about `19899.46` to `14.00`.
-- `06188` improved from about `35297.93` to `10.70` sampled CPU Chamfer x1e2;
-  its DepthPro-to-MoGe inlier ratio is still low, so it remains a useful bridge
-  quality stress case even though the random FreeReg failure mode is fixed.
+- `06830`: `1.1975`;
+- `06145`: `0.73`.
 
-Batch summaries:
+Both preserve all 100000 source points and the complete model topology.
 
-- `workspace/redwood_stage1_qwen_refine_preview/redwood_complete_to_partial_registration_summary.csv`
-- `workspace/redwood_stage1_qwen_refine_preview/redwood_complete_to_partial_metrics.csv`
-- `workspace/redwood_stage1_qwen_refine_preview/freereg_adaptive_ir3d_cpu_cd_summary.csv`
+## Stage 4 — Completeness-Preserving Fusion
 
-The no-FreeReg render-to-MoGe Sim3 main-pipeline run on 2026-07-13 wrote
-`<sample>_fused.ply` for all default Redwood samples and saved metrics to:
+Fusion starts only after registration is accepted.  The registered full Pixal
+model is the completeness主体; the raw partial is immutable observed evidence.
 
-- `workspace/redwood_stage1_qwen_refine_preview/metrics_samples.csv`
-- `workspace/redwood_stage1_qwen_refine_preview/metrics_by_category.csv`
+Required fusion invariants:
 
-Its mean metrics were `CD-L1 x1e2 = 4.198972` and `EMD x1e2 = 4.746163`.
-Higher-error samples were `06127`, `09639`, `06188`, `07306`, and `07136`.
+1. Keep the registered full Pixal cloud/mesh as an untouched canonical output.
+2. Do not delete, crop, deform, or replace any accepted Pixal point.
+3. Match raw partial points only to the z-buffer-visible Pixal surface inside
+   observed foreground and a robust depth band.
+4. Store raw observations as a separate support layer or immutable prefix.
+5. Deduplicate only newly added observation points; never deduplicate away the
+   Pixal body.
+6. Smooth only the added observation/Pixal seam with local MLS or graph-
+   Laplacian displacement.  Far-field and unseen Pixal geometry stays fixed.
+7. SDS is optional only as a low-weight observation-clamped seam ablation; it
+   cannot update global pose, scale, or complete Pixal geometry.
+8. Save registered-unfused, direct-union, and seam-smoothed variants separately.
 
-After visual inspection showed weak overlays, the render-to-MoGe score was
-changed to emphasize silhouette/edge alignment and to reject visible ICP when
-it lowers the 2D render score. A rerun rejected visible ICP on all 10 Redwood
-samples. The updated overlays are more conservative with respect to the 2D
-score, but the mean metric worsened to `CD-L1 x1e2 = 6.427336` and
-`EMD x1e2 = 7.728549`; this is an overlay-protection setting, not yet a better
-3D metric setting.
+If evaluation requires a fixed point count, create a deterministic stratified
+metric derivative.  Do not overwrite or mislabel it as the canonical 100k
+Pixal body.
 
-## Runtime Notes
+The older GenPC-scaffold detail graft is retained only as an ablation.  It is
+not the active fusion route because the current requirement is for Pixal3D,
+not the scaffold, to preserve completeness.
 
-- Use `/opt/data/private/cr/miniconda3/envs/genpc/bin/python` for GenPC, MoGe,
-  Hunyuan, Qwen, RMBG, compose, and metric code.
-- Use `/opt/data/private/cr/miniconda3/envs/freereg/bin/python` only for
-  historical FreeReg experiments, because FreeReg requires MinkowskiEngine. The
-  default main pipeline no longer needs FreeReg.
-- `third_party/FreeReg` contains source only. Checkpoints are intentionally not
-  committed. By default the vendored FreeReg wrapper falls back to the existing
-  checkpoint paths under `/opt/data/private/cr/lab/FreeReg`. These can be
-  overridden with:
-  - `FREEREG_DEPTHPRO_CKPT`
-  - `FREEREG_FCGF_CKPT`
-  - `FREEREG_YOHO_CKPT`
+No v10 fusion output is accepted yet.  Do not present fusion as complete until
+visual approval and frozen full-ten metrics are available.
+
+## Stage 5 — Post-Freeze Evaluation
+
+GT is forbidden during image generation, 3D generation, registration,
+candidate selection, fallback routing, and fusion.  Load GT only after outputs
+are frozen.
+
+Protocol:
+
+- `utils.loss_util.Completionloss` CD-L1 and EMD;
+- deterministic FPS, 16384 points where possible;
+- current diagnostic seed 6145;
+- report every sample and full-ten mean beside GenPC paper rows;
+- never select candidates or per-sample parameters using CD/EMD.
+
+Accepted registration-only diagnostics, x1e2:
+
+| sample | previous CD / EMD | accepted v10 CD / EMD |
+| --- | ---: | ---: |
+| `06830` | `6.93099 / 11.29695` | `2.72791 / 4.92008` |
+| `06145` | `3.22053 / 2.99815` | `1.47280 / 1.75263` |
+
+These are not final fused full-ten paper results.
+
+## Zero-Shot and Generalization Contract
+
+- no training or fine-tuning on Redwood test geometry;
+- no GT geometry or metrics during inference/selection;
+- one shared orientation lattice, scale range, objective, and gates;
+- no sample-ID branches or category-specific pose rules;
+- category text may describe the object for image completion but cannot select
+  a 3D transform;
+- accepted GPT/Pixal inputs are frozen before registration;
+- failed cases are reported, not hidden by raw-partial substitution, GT,
+  regenerated GLBs, anisotropic scale, or non-rigid deformation.
+
+## Reproduction Order
+
+1. Verify frozen `depth.png`, `prompt.txt`, and `gpt_image.png`.  Regenerate an
+   image only after explicit rejection because exact server-side reproduction
+   is unavailable.
+2. Run `scripts/run_pixal3d_gpt_batch.py` only for missing/unaccepted Pixal
+   assets; never overwrite accepted outputs.
+3. Run registration from the project root:
+
+   ```bash
+   CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python \
+     run_pixal_so3_lattice_sim3_ttt_v10.py --samples 06145 06830
+   ```
+
+4. Inspect projection PNG and gray-partial/red-Pixal PLY before fusion.
+5. Run fusion into a new derivative root only after registration approval.
+6. Freeze all outputs, then compute per-sample and full-ten CD-L1/EMD.
+
+## Paper Ablations
+
+1. original GenPC Qwen→MoGe→Hunyuan route;
+2. GPT ImageGen + Pixal3D + PCA-24 Sim(3);
+3. + shared SO(3) lattice;
+4. + same-camera visible depth;
+5. + visible-partial-to-partial refinement;
+6. ordinary full-cloud ICP failure baseline;
+7. direct-union fusion;
+8. completeness-preserving observation fusion;
+9. + local seam smoothing, with SDS optional;
+10. full-ten generalization and category-wise failure analysis.
+
+The intended contribution is not only stronger image or 3D generation.  It is
+a zero-shot visibility-aware proper-Sim(3) registration and completeness-
+preserving observation-fusion framework that converts a strong single-image
+3D prior into a scan-aligned complete object without destroying unseen
+geometry.
+
+## Exact Records
+
+- accepted GPT ImageGen/Pixal ten-sample baseline: `PROJECT_STATE.md`, entry
+  `2026-08-22 01:07 CST`;
+- accepted v10 registration record:
+  `reproducibility/ACCEPTED_pixal_so3_lattice_v10_20260822.md`;
+- sample diagnostics:
+  `reproducibility/06830_so3_lattice_sim3_v10_20260822.md` and
+  `reproducibility/06145_so3_lattice_sim3_v10_20260822.md`;
+- detailed registration design: `docs/visibility_aware_pixel_sim3_ttt.md`.
