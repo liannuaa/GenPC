@@ -28,8 +28,8 @@ CANDIDATE_ROOT = (
 V15_ROOT = ROOT / "gpt_version/_pixal_guarded_unified_registration_v15_20260822"
 
 
-def candidate_path(root: Path, sample: str) -> Path:
-    return root / sample / f"{sample}_bidirectional_cycle_registered_100k.ply"
+def candidate_path(root: Path, sample: str, template: str) -> Path:
+    return root / sample / template.format(sample=sample)
 
 
 def v15_path(root: Path, sample: str) -> Path:
@@ -37,7 +37,8 @@ def v15_path(root: Path, sample: str) -> Path:
     return Path(f"{stem}_registered_100k.ply")
 
 
-def evaluate_variant(base_cfg, variant: str, paths: dict[str, Path], index_root: Path):
+def evaluate_variant(base_cfg, variant: str, paths: dict[str, Path], index_root: Path,
+                     samples):
     cfg = copy.deepcopy(base_cfg)
     cfg.metric_pred_paths = {key: str(value.resolve()) for key, value in paths.items()}
     # Prediction clouds may have different point order after resampling or
@@ -45,7 +46,7 @@ def evaluate_variant(base_cfg, variant: str, paths: dict[str, Path], index_root:
     # indices; the shared seed still makes GT FPS equivalent across variants.
     cfg.metric_indices_dir = str((index_root / variant).resolve())
     rows = []
-    for sample in SAMPLES:
+    for sample in samples:
         if not paths[sample].exists():
             raise FileNotFoundError(paths[sample])
         cd, emd = metric(sample, cfg)
@@ -66,6 +67,11 @@ def main(argv=None):
     parser.add_argument("--config", type=Path, default=ROOT / "configs/config.yaml")
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--metric-seed", type=int, default=6145)
+    parser.add_argument("--samples", nargs="+", default=list(SAMPLES))
+    parser.add_argument(
+        "--candidate-name-template",
+        default="{sample}_bidirectional_cycle_registered_100k.ply",
+        help="Per-sample prediction filename; supports the {sample} field.")
     args = parser.parse_args(argv)
     output_root = (args.output_root or
                    (args.candidate_root / "postfreeze_cd_emd_20260823"))
@@ -76,14 +82,18 @@ def main(argv=None):
     cfg.metric_seed_overrides = {}
     cfg.metric_save_indices = True
 
+    samples = tuple(map(str, args.samples))
     variants = {
         "bidirectional_forced": {
-            sample: candidate_path(args.candidate_root, sample) for sample in SAMPLES},
-        "v15": {sample: v15_path(args.v15_root, sample) for sample in SAMPLES},
+            sample: candidate_path(
+                args.candidate_root, sample, args.candidate_name_template)
+            for sample in samples},
+        "v15": {sample: v15_path(args.v15_root, sample) for sample in samples},
     }
     rows = []
     for variant, paths in variants.items():
-        rows.extend(evaluate_variant(cfg, variant, paths, output_root / "fps_indices"))
+        rows.extend(evaluate_variant(
+            cfg, variant, paths, output_root / "fps_indices", samples))
 
     sample_path = output_root / "metrics_samples.csv"
     with sample_path.open("w", newline="") as handle:
@@ -110,7 +120,8 @@ def main(argv=None):
         "shared_metric_seed": True,
         "equivalent_gt_fps_by_shared_seed": True,
         "metric_num_points": int(getattr(cfg, "metric_num_points", 16384)),
-        "samples": list(SAMPLES),
+        "candidate_name_template": args.candidate_name_template,
+        "samples": list(samples),
         "summary": summary,
     }
     (output_root / "protocol.json").write_text(

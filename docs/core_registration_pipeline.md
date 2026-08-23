@@ -1,219 +1,165 @@
-# Core Registration Pipeline
+# Qwen-GPT-Pixal Bidirectional Completion Pipeline
 
-## Canonical method
-
-The project is rolled back to the accepted Pixal guarded unified registration
-v15 baseline.  Hunyuan3D-MV, dual-depth semantic generation, non-rigid
-deformation, and post-v15 fusion are not part of the active pipeline.
+## Active zero-shot mainline
 
 ```text
 partial point cloud + saved Redwood camera
-  -> accepted saved-camera depth projection
-  -> frozen GPT ImageGen complete semantic image
-  -> frozen Pixal3D complete GLB and 100k surface PLY
-  -> two shared proper-Sim(3) candidates
-       (v8 GenPC/PCA fallback, v12 GPU SO(3)+visible TTT)
-  -> v15 observable-confidence gate
-  -> v15 full-resolution do-no-harm guard
-  -> registered full Pixal3D body
+  -> Redwood-compatible depth.png
+  -> Qwen semantic completion (img.png: geometry/pose anchor)
+  -> GPT ImageGen clarity-only edit
+  -> Pixal3D complete GLB + 100k surface PLY
+  -> frozen v15 coarse proper-Sim(3) initialization
+  -> independent partial→visible-prior and visible-prior→partial pairs
+  -> saved-camera 2D+3D bidirectional consensus TTO
+  -> strict inverse moves the complete Pixal body to the partial frame
+  -> observation-conditioned visible surface posterior
+  -> complete 100k prediction
 ```
 
-This remains recognizably descended from GenPC: it keeps the saved-camera
-depth projection and robust PCA registration fallback, while adding a complete
-Pixal3D prior and a GPU visibility-aware test-time registration candidate.
+This remains descended from GenPC: it retains the partial scan, saved camera,
+depth projection, and robust v15/GenPC coarse registration, while adding a
+Qwen-anchored GPT/Pixal complete prior and bidirectional test-time Sim(3).
 
-## Frozen assets
+## Geometry-preserving image contract
 
-For each of `01184`, `05117`, `05452`, `06127`, `06145`, `06188`,
-`06830`, `07136`, `07306`, and `09639`:
+The semantic source is
+`workspace/redwood_onestage_rawdepth_512_stage2_20260714/<sample>/img.png`.
+Qwen is the sole authority for camera pose, image-space position, projected
+size, silhouette, part layout, local articulation, and occlusion. GPT may only
+improve sharpness, boundaries, material coherence, and surfaces already
+implied by Qwen. It must not rotate, rescale, recenter, mirror, redesign,
+add/remove parts, or alter wheel, leg, armrest, leaf, or tabletop orientation.
+Each prompt is stored beside its output as `prompt.txt`.
 
-- raw partial: `data/<sample>.ply`;
-- saved camera: `workspace/redwood_onestage_rawdepth_512_stage2_20260714/<sample>/camera.pth`;
-- depth: `gpt_version/<sample>/depth.png`;
-- semantic image: `gpt_version/<sample>/gpt_image.png`;
-- complete mesh: `gpt_version/<sample>/pixal3d.glb`;
-- complete points: `gpt_version/<sample>/pixal3d_sampled_100k.ply`.
+## Pixal3D prior
 
-These inputs and the accepted v15 outputs are immutable unless the user
-explicitly asks to regenerate them.
+`scripts/run_pixal3d_gpt_batch.py` consumes `gpt_image.png` with one shared
+configuration: TencentARC/Pixal3D, local Pixal3D/DINOv3/MoGe-2/RMBG weights,
+seed 42, 1024 cascade, and the shared 12-step sampler. It writes
+`pixal3d_input.png`, `pixal3d.glb`, `pixal3d_sampled_100k.ply`, and metadata.
 
-## Candidate A: GenPC/PCA fallback
+## Bidirectional 2D+3D Sim(3) TTO
 
-The fallback root is `gpt_version/_pixal_scale_ttt_v8_20260822`.  It provides
-the robust GenPC/PCA-oriented proper-Sim(3) candidate used whenever visible
-evidence is weak or the GPU candidate fails the do-no-harm guard.
-
-## Candidate B: GPU SO(3) + visible Sim(3) TTT
-
-The fast candidate root is
-`gpt_version/_pixal_batched_adaptive_ttt_v12_20260822`.  Its coarse stage
-evaluates the shared 648 proper rotations and five isotropic scales with
-batched GPU z-buffer rendering.  Silhouette IoU, coverage, leakage, and robust
-visible-depth error rank candidates; expensive 3D surface evidence and local
-proper-Sim(3) TTT are applied only to a shortlist.
-
-The shared observable-confidence thresholds are:
-
-- low-resolution IoU at least `0.85`;
-- coverage at least `0.90`;
-- leakage at most `0.08`;
-- normalized visible-depth error at most `0.10`;
-- normalized trim-70 partial-to-complete surface error at most `0.012`.
-
-## v15 guarded routing
-
-Implementation: `scripts/select_pixal_guarded_unified_registration_v15.py`.
-
-For full-resolution projection metrics, define:
-
-```text
-render_score = IoU + 0.15 * coverage - 0.45 * leakage
-```
-
-The GPU candidate is selected only if it passes the observable-confidence
-gate and its full-resolution render score is no more than `0.005` below the
-fallback score.  Otherwise v15 selects the GenPC/PCA fallback.  The router has
-no access to sample IDs, categories, GT geometry, CD, or EMD.
-
-Accepted full-ten routing:
-
-| sample | v15 route |
-| --- | --- |
-| 01184 | GenPC/PCA fallback |
-| 05117 | GenPC/PCA fallback |
-| 05452 | GenPC/PCA fallback |
-| 06127 | GenPC/PCA fallback |
-| 06145 | GPU global SO(3) TTT |
-| 06188 | GenPC/PCA fallback |
-| 06830 | GPU global SO(3) TTT |
-| 07136 | GenPC/PCA fallback |
-| 07306 | GenPC/PCA fallback |
-| 09639 | GenPC/PCA fallback |
-
-Accepted output root:
-
-`gpt_version/_pixal_guarded_unified_registration_v15_20260822`
-
-The historical output stem contains `unified_registration_v14`; the outer
-router, method field, and root identify the accepted v15 method.
-
-## Completeness and geometry contract
-
-- Preserve all 100,000 frozen Pixal points.
-- Use only proper rotation, one isotropic global scale, and translation.
-- Do not use anisotropic scaling, non-rigid deformation, partial replacement,
-  generated-point deletion, or Hunyuan regeneration.
-- The registered Pixal body is the active complete prediction.  Registration
-  and any future fusion must remain separate ablations.
-- Low confidence invokes the robust fallback; it never authorizes shape edits.
-
-## Reproduction
-
-With v8 and v12 candidates already present:
-
-```bash
-/opt/data/private/cr/miniconda3/envs/genpc/bin/python \
-  -m scripts.select_pixal_guarded_unified_registration_v15
-```
-
-Do not run this command against the accepted output root unless overwrite is
-explicitly intended.  The frozen output files already exist and are the
-canonical predictions.
-
-For the complete design, timing audit, gates, and routing rationale, see
-`docs/fast_unified_registration_v15.md`.  Reproducibility and approval details
-are recorded in `PROJECT_STATE.md`.
-
-## Generalization and evaluation contract
-
-- Use one shared parameter set for all ten Redwood samples.
-- Freeze predictions before reading GT metrics.
-- Report every sample and the mean CD-L1/EMD.
-- The paper target remains mean CD-L1 x1e2 below `1.74` and EMD x1e2 below
-  `2.88`.
-- A future method may replace v15 only after full-ten visual review and
-  post-freeze metric improvement with no sample-specific tuning.
-
-## Post-v15 research candidate: guarded hierarchical residual TTO
-
-This section records an experimental derivative and does not change the
-canonical v15 pipeline above.
-
-The candidate alternates two levels at test time:
-
-1. a small, proper and isotropic residual Sim(3) update estimated from the
-   saved-camera visible correspondences;
-2. an optional intrinsic mesh residual solve on a compact screen-space error
-   component.
-
-The local field is propagated by mesh geodesic support so it cannot jump
-between nearby disconnected surfaces. Before application, translation,
-rotation, and isotropic-scale modes are explicitly projected from the field.
-This separates global pose/scale from local shape. Continuation line search,
-visible 2D+3D improvement, coverage preservation, edge-stretch bounds, and
-face-flip limits guard every local update. Original Pixal point identities and
-mesh topology remain; no generated region is deleted or replaced.
-
-For generalization, every sample receives the same geometry-derived candidate
-set: surface/curve handle budgets crossed with residual-mass/line-priority
-component routing. A pure global residual trajectory is evaluated in parallel.
-The lowest passing visible objective is selected, otherwise output is exactly
-v15. Sample IDs, semantic categories, GT geometry, CD, and EMD are unavailable
-to this router.
-
-The 2026-08-23 pilot uses `09639` and `07136` only as diagnostics. Its output
-is in
-`gpt_version/_pixal_hierarchical_residual_registration_multiscale_pilot_20260823`.
-It remains an ablation until frozen and validated on all ten samples.
-
-An independent bidirectional candidate in
-`src/bidirectional_cycle_registration.py` estimates partial-to-visible-prior
-Sim(3), applies the strict inverse to the complete prior, and checks an
-independently fitted reverse transform as a cycle witness. Its two-case pilot
-is in `gpt_version/_pixal_bidirectional_cycle_registration_pilot_20260823`.
-Current gains are smaller, so it is not yet part of the hierarchical method.
-The runner also provides `--force-candidate-output` solely for visual auditing:
-it records failed gates but exports the candidate instead of restoring v15.
-Outputs from this mode are not eligible for benchmark reporting or automatic
-promotion.
-
-The frozen full-ten forced audit was evaluated post hoc with shared 16,384
-point FPS indices and seed 6145. It obtained mean CD-L1/EMD x1e2
-`2.0648/3.0786`, versus `2.1096/3.0961` for v15 under exactly the same sampled
-points. This is a small baseline improvement but remains behind the GenPC
-paper mean `1.74/2.88`; therefore the bidirectional route is not promoted.
-
-## Metric-passing PAMI extension candidate
-
-The next bidirectional version fixes a conceptual weakness in the side pilot:
-the old reverse witness reused forward point pairs and therefore understated
-cycle disagreement. The new implementation builds two independent saved-camera
-visible correspondence sets:
+`scripts/prepare_pixal_v15_initialized_priors.py` applies the frozen v15
+transform only as a coarse initialization. Final registration uses independent
+saved-camera correspondence sets in both directions:
 
 ```text
 partial -> visible complete prior
 visible complete prior -> partial
 ```
 
-It evaluates forward-only, reverse-only, balanced bidirectional, and reciprocal
-pair proper-Sim(3) hypotheses. Every hypothesis is converted to the complete-
-to-partial direction by an analytic strict inverse, bounded by the shared trust
-region, and selected with the same GT-free visible 2D+3D objective. This is the
-global registration contribution of the proposed GenPC extension.
+Forward-only, reverse-only, balanced, and reciprocal hypotheses are fitted as
+proper isotropic Sim(3), bounded by one shared trust region, converted to the
+complete-to-partial direction through an analytic strict inverse, and selected
+with visible 2D silhouette/depth and 3D surface evidence. Sample IDs,
+categories, GT, CD, and EMD are unavailable to inference and routing.
 
-Because a generated prior cannot exactly reproduce observed local geometry,
-the posterior stage treats the partial scan as observed surface measure rather
-than concatenating arbitrary-density points. It FPS-samples the partial under a
-maximum 12% mass budget and removes exactly the same amount of generated mass
-nearest the observation. Thus total point count stays 100k, partial scan-line
-density is normalized, and the complete Pixal prior remains an 88% majority.
-Identity, smooth absorption, and 4/8/12% mass hypotheses are selected with a
-shared saved-camera objective and explicit prior-mass penalty. No GT or semantic
-category enters this selection.
+Shared parameters: pixel schedule `[8,5,3]`, final radius 5, per-step rotation
+cap 3 degrees, isotropic scale `[0.96,1.04]`, translation cap 0.03 partial-bbox
+diagonal, minimum 96 pairs, cycle cap 0.03.
 
-The strict post-freeze ten-sample result is CD-L1/EMD x1e2
-`1.6912/2.8026`, improving over both v15 (`2.1096/3.0973`) and the GenPC paper
-mean (`1.74/2.88`). Predictions are in
-`gpt_version/_pixal_bidirectional_consensus_surface_projection_20260823`.
-This is a metric-passing research candidate pending full visual acceptance; it
-does not overwrite the frozen v15 canonical assets.
+## Observation-conditioned surface posterior
+
+`src/observation_conditioned_surface_projection.py` compares identity, smooth
+absorption, and observed surface-mass budgets `[0.04,0.08,0.12]` with a shared
+saved-camera objective and prior-mass penalty. Partial points are FPS
+uniformized. Surface-mass projection exchanges the same number of nearest
+visible-prior points for observed points, preserving 100k total points and at
+least 88% of the complete generated body. Hidden/far geometry is not truncated.
+
+## Canonical outputs
+
+All ten inputs and outputs live under:
+
+`workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823`
+
+- `<sample>/`: depth, Qwen/GPT images, prompt, Pixal GLB/PLY/metadata;
+- `_v15_transform_initial/`: coarse initialized new priors;
+- `_bidirectional_consensus/`: registered PLY/GLB, transform, overlay and info;
+- `_surface_projection/`: final complete 100k prediction and diagnostics;
+- `postfreeze_cd_emd_strict/`: per-sample metrics, means and protocol.
+
+The frozen v15 baseline remains at
+`gpt_version/_pixal_guarded_unified_registration_v15_20260822`.
+
+## Strict full-ten result
+
+Predictions were frozen before GT evaluation. The protocol uses 16,384-point
+FPS, seed 6145, separate prediction FPS per geometry, and equivalent GT FPS by
+shared seed.
+
+| sample | new CD | new EMD | v15 CD | v15 EMD |
+| --- | ---: | ---: | ---: | ---: |
+| 01184 | 1.196 | 1.961 | 1.399 | 2.163 |
+| 05117 | 1.503 | 2.437 | 2.248 | 3.181 |
+| 05452 | 0.862 | 1.292 | 1.163 | 1.587 |
+| 06127 | 2.248 | 3.936 | 2.947 | 5.147 |
+| 06145 | 1.624 | 1.849 | 1.473 | 1.786 |
+| 06188 | 1.208 | 2.106 | 1.373 | 2.227 |
+| 06830 | 1.983 | 4.011 | 2.685 | 4.766 |
+| 07136 | 1.982 | 3.076 | 2.179 | 2.947 |
+| 07306 | 2.616 | 3.187 | 2.929 | 3.429 |
+| 09639 | 1.128 | 2.101 | 2.699 | 3.741 |
+| **mean** | **1.635** | **2.596** | **2.110** | **3.097** |
+
+The mean exceeds GenPC `1.74/2.88` by about 6.0% CD and 9.9% EMD. One shared
+zero-shot parameterization is used. Full-ten visual review remains required.
+
+## Cross-prior scale-consistency guard candidate
+
+Visual review found that the Qwen-GPT 07136 prior was shorter and thicker than
+the previous Pixal prior. Its registration shrank by `0.9632`, while the older
+prior expanded by `1.0347`; the older candidate also passed the registration
+guard and reduced the GT-free visible objective from `0.1034` to `0.0758`.
+
+`src/cross_prior_scale_guard.py` therefore defines a shared conservative
+fallback: the two priors must demand opposite scale directions, disagree by at
+least 6%, current must fail while fallback passes, and fallback must improve
+the visible objective by at least 20%. On all ten samples this selects fallback
+only for 07136. It uses no sample ID, category, GT, CD, or EMD.
+
+Guarded intermediate root:
+`workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/_cross_prior_scale_guard`.
+After freezing, strict mean CD/EMD is `1.5991/2.5410`, and 07136 improves from
+`1.9819/3.0755` to `1.6225/2.5098`. It is an accepted component of the final
+voxel-uniform mainline; the full-new-prior result remains an ablation.
+
+## Uniform voxel surface-measure candidate
+
+Direct 88% prior + 12% observed mass has visibly different local sampling
+density: across the nine exact-insertion cases, observed-point median nearest-
+neighbor spacing is typically about twice the prior spacing. The conservative
+uniformization in `src/voxel_surface_measure_resampling.py` performs two steps:
+
+1. remove an observed point only when it is both a robust kNN outlier within
+   the partial observation and farther than 2% object diagonal from prior
+   support;
+2. select one original point per adaptively sized voxel, preferring an observed
+   point when a voxel contains one, until approximately 32,768 representatives
+   remain.
+
+The output is strictly a subset of the fused input: it creates no points,
+interpolates no geometry, changes no pose/scale, and cannot warp the complete
+body. On all ten samples, mean point count is 32,771 and mean normalized kNN
+density CV drops from `0.498` to `0.292` (41.3% lower). The frozen strict mean
+CD/EMD is `1.5944/2.5296`, slightly improving over the cross-prior input
+`1.5991/2.5410` while remaining well above GenPC.
+
+Output root:
+`workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/_cross_prior_voxel_uniform_32k`.
+Metric root:
+`workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/postfreeze_cross_prior_voxel_uniform_32k_cd_emd`.
+The user accepted this complete route as the best-effect pipeline on
+2026-08-23. The 32k voxel-uniform root is the canonical final prediction root;
+the 100k cross-prior root remains its immutable pre-resampling ablation.
+
+## Reproduction order
+
+1. Generate Pixal assets with `scripts/run_pixal3d_gpt_batch.py`.
+2. Prepare coarse priors with `scripts/prepare_pixal_v15_initialized_priors.py`.
+3. Run `scripts/run_pixal_bidirectional_cycle_registration.py --step-mode consensus --force-candidate-output`.
+4. Run `scripts/run_observation_conditioned_surface_projection.py`.
+5. Freeze predictions, then run `scripts/evaluate_bidirectional_cycle_redwood.py`.
+
+Do not read GT metrics before the full prediction root is frozen.
