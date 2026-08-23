@@ -172,6 +172,7 @@ def bidirectional_cycle_step(
     max_rotation_deg=3.0, scale_bounds=(0.96, 1.04),
     max_translation_ratio=0.03, min_pairs=96,
     fractions=(0.25, 0.5, 0.75, 1.0), max_cycle_ratio=0.03,
+    return_best_candidate=False,
 ):
     """Fit partial->visible-Pixal, then move Pixal only by its strict inverse."""
     complete = np.asarray(complete, dtype=np.float64)
@@ -230,11 +231,13 @@ def bidirectional_cycle_step(
             <= float(max_cycle_ratio)
         and selected["cycle"]["exact_inverse_cycle_rms"] <= 1e-9
     )
+    expose_candidate = bool(accepted or return_best_candidate)
     return (
-        selected["moved"] if accepted else complete,
-        selected["inverse_step"] if accepted else np.eye(4),
+        selected["moved"] if expose_candidate else complete,
+        selected["inverse_step"] if expose_candidate else np.eye(4),
         {
             "accepted": accepted,
+            "candidate_exposed_for_audit": bool(return_best_candidate and not accepted),
             "reason": "accepted" if accepted else "do_no_harm_gate",
             "before": before,
             "after": selected["score"],

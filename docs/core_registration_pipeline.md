@@ -172,3 +172,7 @@ Sim(3), applies the strict inverse to the complete prior, and checks an
 independently fitted reverse transform as a cycle witness. Its two-case pilot
 is in `gpt_version/_pixal_bidirectional_cycle_registration_pilot_20260823`.
 Current gains are smaller, so it is not yet part of the hierarchical method.
+The runner also provides `--force-candidate-output` solely for visual auditing:
+it records failed gates but exports the candidate instead of restoring v15.
+Outputs from this mode are not eligible for benchmark reporting or automatic
+promotion.

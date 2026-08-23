@@ -122,3 +122,15 @@ witness. It improved the shared visible objective by 1.18% on `09639` and
 3.71% on `07136`, while preserving proper isotropic Sim(3) and all 100k points.
 It is currently weaker than the hierarchical residual route and should be
 treated as a fast initialization/candidate rather than a replacement.
+
+Full-ten forced-candidate audit requested on 2026-08-23:
+
+`gpt_version/_pixal_bidirectional_cycle_registration_forced_audit_20260823`
+
+This audit intentionally exports the best bidirectional candidate even when
+the normal do-no-harm gate rejects it. It is for visual diagnosis only and
+must not be used as the paper prediction root. With all parameters frozen, 5
+of 10 candidates pass the normal gate. Mean visible-objective improvement is
+1.25% and average runtime is 15.23 seconds per sample. The forced candidates
+for `01184`, `06127`, `06145`, and `06188` worsen the shared objective; `05452`
+improves the aggregate objective but still fails another safety condition.

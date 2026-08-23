@@ -83,18 +83,19 @@ def process(args, sample):
             scale_bounds=(args.min_step_scale, args.max_step_scale),
             max_translation_ratio=args.max_translation_ratio,
             min_pairs=args.min_pairs, max_cycle_ratio=args.max_cycle_ratio,
+            return_best_candidate=args.force_candidate_output,
         )
-        if info["accepted"]:
+        if info["accepted"] or info.get("candidate_exposed_for_audit", False):
             current = moved
             total_inverse = inverse_step @ total_inverse
-            last_cycle = info["cycle"]
+            last_cycle = info.get("cycle", last_cycle)
         trace.append({"iteration": iteration, "pixel_radius": pixel_radius, **info})
 
     final_score = visible_score(
         partial, current, projector, diagonal, args.final_pixel_radius)
     accepted = passes_final_guard(
         initial_score, final_score, last_cycle, args.final_improvement_ratio)
-    if not accepted:
+    if not accepted and not args.force_candidate_output:
         current = initial.copy()
         total_inverse = np.eye(4, dtype=np.float64)
         final_score = initial_score
@@ -104,7 +105,8 @@ def process(args, sample):
             "independent_reverse_cycle_rms": 0.0,
         }
     else:
-        route = "bidirectional_cycle_2d3d"
+        route = ("bidirectional_cycle_2d3d" if accepted else
+                 "bidirectional_cycle_2d3d_forced_audit")
         final_forward = invert_proper_sim3(total_inverse)
         exact = apply_transform(apply_transform(partial, final_forward), total_inverse)
         final_cycle = dict(last_cycle)
@@ -137,6 +139,7 @@ def process(args, sample):
         "sample_id": sample,
         "method": "bidirectional_cycle_consistent_saved_camera_2d3d_proper_sim3",
         "accepted": accepted,
+        "forced_candidate_output": bool(args.force_candidate_output),
         "selected_route": route,
         "strict_zero_shot": True,
         "ground_truth_cd_emd_used": False,
@@ -186,6 +189,9 @@ def main(argv=None):
     parser.add_argument("--min-pairs", type=int, default=96)
     parser.add_argument("--max-cycle-ratio", type=float, default=0.03)
     parser.add_argument("--final-improvement-ratio", type=float, default=0.995)
+    parser.add_argument(
+        "--force-candidate-output", action="store_true",
+        help="Export the best bidirectional candidate even when a gate rejects it.")
     parser.add_argument("--padding", type=float, default=0.15)
     args = parser.parse_args(argv)
     args.output_root.mkdir(parents=True, exist_ok=True)
