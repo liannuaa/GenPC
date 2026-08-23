@@ -6,6 +6,13 @@ PyTorch implementation of the CVPR 2025 paper:
 ## Overview
 GenPC completes real-world partial scans without task-specific training by leveraging strong 3D generative priors. It bridges partial point clouds to image-to-3D models with a depth-prompting module, then aligns generated shapes back to the input via geometric-preserving fusion for scale/pose consistency.
 
+> Research baseline (2026-08-23): the active Redwood pipeline is the frozen
+> GPT ImageGen + Pixal3D prior followed by guarded unified proper-Sim(3)
+> registration v15.  See `docs/core_registration_pipeline.md` and
+> `docs/fast_unified_registration_v15.md`.  Hunyuan3D-MV, dual-depth
+> multiview generation, non-rigid deformation, and post-v15 fusion are not
+> default methods.
+
 ## Status
 - [x] Base code released
 - [ ] SDS refinement code released
@@ -16,7 +23,10 @@ GenPC completes real-world partial scans without task-specific training by lever
 - PyTorch >= 2
 
 > Note
-> The current default pipeline uses `Qwen-Image-Edit-2511` with a Nunchaku edit transformer for single-stage depth-to-RGB completion, then `Hunyuan3D-2.1` for image-to-3D generation. The environment below focuses on that default path and does not try to keep every optional backend in the repo fully provisioned at the same time.
+> The active research baseline reuses the frozen GPT ImageGen completions and
+> Pixal3D assets, then runs guarded unified registration v15. The legacy
+> `main.py` Qwen/Hunyuan path remains available for the original pipeline but
+> is not the accepted Redwood-v15 method.
 
 ### Environment setup
 ```bash
@@ -66,14 +76,24 @@ cd loss_functions/Chamfer3D/ && python setup.py install && cd ../emd && python s
 # Hunyuan3D-2.1 code path (current default 3D backend)
 git clone --depth 1 https://github.com/Tencent-Hunyuan/Hunyuan3D-2.1 ../Hunyuan3D-2.1
 
-# Optional: TRELLIS.2 code and CUDA extensions
+# Optional: TRELLIS.2 code and CUDA extensions (installed in genpc)
+# The shared genpc environment has already been configured on this machine:
+#   source: models/TRELLIS.2
+#   extensions: nvdiffrec_render, cumesh, flex_gemm, o_voxel
+#   attention: xformers==0.0.29.post3, built from source for torch cu126
+# This environment should use its CUDA 12.6 toolkit and xformers backend:
+# export CUDA_HOME=/opt/data/private/cr/miniconda3/envs/genpc
+# export PATH="$CUDA_HOME/bin:$PATH"
+# export ATTN_BACKEND=xformers
+# export SPARSE_ATTN_BACKEND=xformers
+# For a fresh environment, install the upstream source and extensions with:
 # git clone -b main https://github.com/microsoft/TRELLIS.2.git --recursive models/TRELLIS.2
-# export CUDA_HOME=/usr/local/cuda
-# python -m pip install flash-attn==2.7.3 --no-build-isolation
-# python -m pip install git+https://github.com/JeffreyXiang/nvdiffrec.git@renderutils --no-build-isolation
-# python -m pip install git+https://github.com/JeffreyXiang/CuMesh.git --no-build-isolation
-# python -m pip install git+https://github.com/JeffreyXiang/FlexGEMM.git --no-build-isolation
+# python -m pip install --no-build-isolation git+https://github.com/JeffreyXiang/nvdiffrec.git@renderutils
+# python -m pip install --no-build-isolation git+https://github.com/JeffreyXiang/CuMesh.git
+# python -m pip install --no-build-isolation git+https://github.com/JeffreyXiang/FlexGEMM.git
 # python -m pip install models/TRELLIS.2/o-voxel --no-build-isolation
+# Build xformers from source when the installed torch CUDA ABI is cu126:
+# python -m pip install --no-build-isolation --no-binary xformers xformers==0.0.29.post3
 ```
 
 ### Model downloads
@@ -132,13 +152,13 @@ snapshot_download(
 )
 PY
 
-# Optional: TRELLIS.2 main weights
+# TRELLIS.2 main weights (downloaded; required for generative_model: trellis_2)
 # MODELSCOPE_CACHE=/root/autodl-tmp/modelscope-cache python - <<'PY'
 # from modelscope.hub.snapshot_download import snapshot_download
 # snapshot_download('microsoft/TRELLIS.2-4B', local_dir='models/TRELLIS.2-4B', max_workers=4)
 # PY
 
-# Optional: TRELLIS.2 image encoder dependency
+# TRELLIS.2 image encoder dependency (downloaded)
 # MODELSCOPE_CACHE=/root/autodl-tmp/modelscope-cache python - <<'PY'
 # from modelscope.hub.snapshot_download import snapshot_download
 # snapshot_download(
@@ -153,6 +173,9 @@ PY
 # - Qwen edit pipeline: models/Qwen-Image-Edit-2511
 # - Hunyuan3D-2.1: models/Hunyuan3D-2.1
 # - RMBG-2.0: models/RMBG-2.0
+# - TRELLIS.2 source: models/TRELLIS.2
+# - TRELLIS.2 main weights: models/TRELLIS.2-4B
+# - TRELLIS.2 sparse decoder: models/TRELLIS-image-large/ckpts/ss_dec_conv3d_16l8_fp16.safetensors
 ```
 
 ## Usage
@@ -164,6 +187,10 @@ CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python mai
 # Checked-in default path:
 # Stage 1 uses Qwen-Image-Edit-2511, then Stage 2 uses Hunyuan3D-2.1.
 # The default config has run_stage1/run_stage2/run_metric all set to true.
+
+# To use TRELLIS.2 for Stage 2, set generative_model to trellis_2 and provide
+# models/TRELLIS.2-4B, then run with the backend variables above:
+# CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python main.py --config configs/config_kitti_car.yaml
 ```
 
 The main runtime input is a YAML config file:
@@ -295,7 +322,8 @@ CUDA_VISIBLE_DEVICES=0 /opt/data/private/cr/miniconda3/envs/genpc/bin/python mai
 
 For quick single-sample validation, use `--sample_ids 07136`.
 
-The checked-in default is Qwen Image ControlNet plus `Hunyuan3D-2.1`.
+The checked-in legacy `main.py` default is Qwen Image ControlNet plus
+`Hunyuan3D-2.1`; the accepted Redwood research baseline is Pixal-v15.
 
 ## Citation
 ```bibtex
