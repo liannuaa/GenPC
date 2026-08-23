@@ -133,3 +133,42 @@ are recorded in `PROJECT_STATE.md`.
   `2.88`.
 - A future method may replace v15 only after full-ten visual review and
   post-freeze metric improvement with no sample-specific tuning.
+
+## Post-v15 research candidate: guarded hierarchical residual TTO
+
+This section records an experimental derivative and does not change the
+canonical v15 pipeline above.
+
+The candidate alternates two levels at test time:
+
+1. a small, proper and isotropic residual Sim(3) update estimated from the
+   saved-camera visible correspondences;
+2. an optional intrinsic mesh residual solve on a compact screen-space error
+   component.
+
+The local field is propagated by mesh geodesic support so it cannot jump
+between nearby disconnected surfaces. Before application, translation,
+rotation, and isotropic-scale modes are explicitly projected from the field.
+This separates global pose/scale from local shape. Continuation line search,
+visible 2D+3D improvement, coverage preservation, edge-stretch bounds, and
+face-flip limits guard every local update. Original Pixal point identities and
+mesh topology remain; no generated region is deleted or replaced.
+
+For generalization, every sample receives the same geometry-derived candidate
+set: surface/curve handle budgets crossed with residual-mass/line-priority
+component routing. A pure global residual trajectory is evaluated in parallel.
+The lowest passing visible objective is selected, otherwise output is exactly
+v15. Sample IDs, semantic categories, GT geometry, CD, and EMD are unavailable
+to this router.
+
+The 2026-08-23 pilot uses `09639` and `07136` only as diagnostics. Its output
+is in
+`gpt_version/_pixal_hierarchical_residual_registration_multiscale_pilot_20260823`.
+It remains an ablation until frozen and validated on all ten samples.
+
+An independent bidirectional candidate in
+`src/bidirectional_cycle_registration.py` estimates partial-to-visible-prior
+Sim(3), applies the strict inverse to the complete prior, and checks an
+independently fitted reverse transform as a cycle witness. Its two-case pilot
+is in `gpt_version/_pixal_bidirectional_cycle_registration_pilot_20260823`.
+Current gains are smaller, so it is not yet part of the hierarchical method.
