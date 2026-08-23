@@ -134,3 +134,14 @@ of 10 candidates pass the normal gate. Mean visible-objective improvement is
 1.25% and average runtime is 15.23 seconds per sample. The forced candidates
 for `01184`, `06127`, `06145`, and `06188` worsen the shared objective; `05452`
 improves the aggregate objective but still fails another safety condition.
+
+Post-freeze official metric audit:
+
+`gpt_version/_pixal_bidirectional_cycle_registration_forced_audit_20260823/postfreeze_cd_emd_20260823`
+
+The ten predictions were frozen before GT evaluation. Both the forced
+bidirectional candidates and v15 use the same 16,384-point FPS indices with
+metric seed 6145. Mean CD-L1/EMD x1e2 is `2.0648/3.0786` for the forced
+candidate and `2.1096/3.0961` for v15. Thus the audit candidate improves over
+v15 slightly but does not beat the GenPC paper mean `1.74/2.88`. GT metrics
+remain unavailable to inference and routing.

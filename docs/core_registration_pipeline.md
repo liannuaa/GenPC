@@ -176,3 +176,9 @@ The runner also provides `--force-candidate-output` solely for visual auditing:
 it records failed gates but exports the candidate instead of restoring v15.
 Outputs from this mode are not eligible for benchmark reporting or automatic
 promotion.
+
+The frozen full-ten forced audit was evaluated post hoc with shared 16,384
+point FPS indices and seed 6145. It obtained mean CD-L1/EMD x1e2
+`2.0648/3.0786`, versus `2.1096/3.0961` for v15 under exactly the same sampled
+points. This is a small baseline improvement but remains behind the GenPC
+paper mean `1.74/2.88`; therefore the bidirectional route is not promoted.
