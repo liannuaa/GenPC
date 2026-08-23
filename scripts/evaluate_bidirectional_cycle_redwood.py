@@ -37,9 +37,13 @@ def v15_path(root: Path, sample: str) -> Path:
     return Path(f"{stem}_registered_100k.ply")
 
 
-def evaluate_variant(base_cfg, variant: str, paths: dict[str, Path]):
+def evaluate_variant(base_cfg, variant: str, paths: dict[str, Path], index_root: Path):
     cfg = copy.deepcopy(base_cfg)
     cfg.metric_pred_paths = {key: str(value.resolve()) for key, value in paths.items()}
+    # Prediction clouds may have different point order after resampling or
+    # surface-mass projection.  Each geometry therefore needs its own FPS
+    # indices; the shared seed still makes GT FPS equivalent across variants.
+    cfg.metric_indices_dir = str((index_root / variant).resolve())
     rows = []
     for sample in SAMPLES:
         if not paths[sample].exists():
@@ -70,7 +74,6 @@ def main(argv=None):
     cfg = load_config(str(args.config), "cuda")
     cfg.metric_seed = int(args.metric_seed)
     cfg.metric_seed_overrides = {}
-    cfg.metric_indices_dir = str((output_root / "fps_indices").resolve())
     cfg.metric_save_indices = True
 
     variants = {
@@ -80,7 +83,7 @@ def main(argv=None):
     }
     rows = []
     for variant, paths in variants.items():
-        rows.extend(evaluate_variant(cfg, variant, paths))
+        rows.extend(evaluate_variant(cfg, variant, paths, output_root / "fps_indices"))
 
     sample_path = output_root / "metrics_samples.csv"
     with sample_path.open("w", newline="") as handle:
@@ -103,7 +106,9 @@ def main(argv=None):
         "post_freeze": True,
         "metrics_used_for_registration_or_routing": False,
         "metric_seed": int(args.metric_seed),
-        "shared_fps_indices": True,
+        "shared_prediction_fps_indices": False,
+        "shared_metric_seed": True,
+        "equivalent_gt_fps_by_shared_seed": True,
         "metric_num_points": int(getattr(cfg, "metric_num_points", 16384)),
         "samples": list(SAMPLES),
         "summary": summary,

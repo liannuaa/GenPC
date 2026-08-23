@@ -24,6 +24,7 @@ from src.bidirectional_cycle_registration import (
     sim3_parts,
     visible_score,
 )
+from src.bidirectional_consensus_registration import bidirectional_consensus_step
 from src.ray_consistent_registration import apply_transform
 
 
@@ -76,7 +77,9 @@ def process(args, sample):
         "independent_reverse_cycle_rms": 0.0,
     }
     for iteration, pixel_radius in enumerate(args.pixel_schedule):
-        moved, inverse_step, info = bidirectional_cycle_step(
+        step_function = (bidirectional_consensus_step if args.step_mode == "consensus"
+                         else bidirectional_cycle_step)
+        moved, inverse_step, info = step_function(
             current, partial, projector, diagonal=diagonal,
             pixel_radius=float(pixel_radius),
             max_rotation_deg=args.max_rotation_deg,
@@ -137,7 +140,10 @@ def process(args, sample):
     elapsed = float(time.perf_counter() - started)
     record = {
         "sample_id": sample,
-        "method": "bidirectional_cycle_consistent_saved_camera_2d3d_proper_sim3",
+        "method": (
+            "true_bidirectional_consensus_saved_camera_2d3d_proper_sim3"
+            if args.step_mode == "consensus" else
+            "bidirectional_cycle_consistent_saved_camera_2d3d_proper_sim3"),
         "accepted": accepted,
         "forced_candidate_output": bool(args.force_candidate_output),
         "selected_route": route,
@@ -181,6 +187,8 @@ def main(argv=None):
     parser.add_argument("--samples", nargs="+", default=list(DEFAULT_SAMPLES))
     parser.add_argument("--pixel-schedule", nargs="+", type=float,
                         default=[8.0, 5.0, 3.0])
+    parser.add_argument("--step-mode", choices=["cycle", "consensus"],
+                        default="cycle")
     parser.add_argument("--final-pixel-radius", type=float, default=5.0)
     parser.add_argument("--max-rotation-deg", type=float, default=3.0)
     parser.add_argument("--min-step-scale", type=float, default=0.96)

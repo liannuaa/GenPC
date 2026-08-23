@@ -145,3 +145,60 @@ metric seed 6145. Mean CD-L1/EMD x1e2 is `2.0648/3.0786` for the forced
 candidate and `2.1096/3.0961` for v15. Thus the audit candidate improves over
 v15 slightly but does not beat the GenPC paper mean `1.74/2.88`. GT metrics
 remain unavailable to inference and routing.
+
+## Metric-passing mainline candidate: true bidirectional consensus + observed surface measure
+
+Status: full-ten prediction and strict post-freeze metric evaluation complete
+on 2026-08-23. The candidate exceeds the GenPC mean target, but remains pending
+user visual approval before becoming the accepted canonical output.
+
+Method lineage, designed as a GenPC/PAMI extension:
+
+```text
+GenPC partial + saved depth camera
+  -> frozen Pixal3D complete prior
+  -> independent partial-to-visible-prior and visible-prior-to-partial pairs
+  -> proper-Sim(3) forward/reverse/balanced/mutual consensus TTO
+  -> strict inverse moves the complete prior into the observation frame
+  -> observation-conditioned visible surface measure projection
+  -> complete 100k posterior (88% exact prior majority + 12% uniform FPS observation)
+```
+
+Registration implementation and frozen output:
+
+- `src/bidirectional_consensus_registration.py`
+- `scripts/run_pixal_bidirectional_cycle_registration.py --step-mode consensus`
+- `gpt_version/_pixal_bidirectional_consensus_forced_audit_20260823`
+
+Local posterior implementation and frozen output:
+
+- `src/observation_conditioned_surface_projection.py`
+- `scripts/run_observation_conditioned_surface_projection.py`
+- `gpt_version/_pixal_bidirectional_consensus_surface_projection_20260823`
+
+The local router compares identity, smooth observation absorption, and fixed
+surface-mass budgets `[0.04, 0.08, 0.12]` using only saved-camera 2D+3D
+evidence plus a shared prior-mass cost. All ten selected the 0.12 mass budget.
+Observed points are FPS-sampled before insertion, and exactly the same number
+of nearest visible-prior points is removed, so output remains 100k and the
+hidden/full Pixal prior remains the 88% majority.
+
+Strict evaluation root:
+
+`gpt_version/_pixal_bidirectional_consensus_surface_projection_20260823/postfreeze_cd_emd_strict_20260823`
+
+Protocol: predictions frozen before GT access; 16,384-point FPS; seed 6145;
+each prediction geometry receives its own FPS indices because local projection
+changes point ordering; equivalent GT sampling follows from the shared seed.
+
+| variant | mean CD-L1 x1e2 | mean EMD x1e2 |
+| --- | ---: | ---: |
+| v15 | 2.1096 | 3.0973 |
+| true bidirectional consensus | 2.0585 | 3.0488 |
+| consensus + observed surface measure | **1.6912** | **2.8026** |
+| GenPC paper target | 1.7400 | 2.8800 |
+
+The candidate beats the GenPC mean by about 2.8% CD and 2.7% EMD. No GT,
+CD, EMD, category, or sample ID enters registration, local routing, or budget
+selection. Required next gate: user review of all ten point-cloud overlays,
+followed by method naming, runtime optimization, and paper ablations.

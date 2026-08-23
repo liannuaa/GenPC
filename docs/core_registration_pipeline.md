@@ -182,3 +182,38 @@ point FPS indices and seed 6145. It obtained mean CD-L1/EMD x1e2
 `2.0648/3.0786`, versus `2.1096/3.0961` for v15 under exactly the same sampled
 points. This is a small baseline improvement but remains behind the GenPC
 paper mean `1.74/2.88`; therefore the bidirectional route is not promoted.
+
+## Metric-passing PAMI extension candidate
+
+The next bidirectional version fixes a conceptual weakness in the side pilot:
+the old reverse witness reused forward point pairs and therefore understated
+cycle disagreement. The new implementation builds two independent saved-camera
+visible correspondence sets:
+
+```text
+partial -> visible complete prior
+visible complete prior -> partial
+```
+
+It evaluates forward-only, reverse-only, balanced bidirectional, and reciprocal
+pair proper-Sim(3) hypotheses. Every hypothesis is converted to the complete-
+to-partial direction by an analytic strict inverse, bounded by the shared trust
+region, and selected with the same GT-free visible 2D+3D objective. This is the
+global registration contribution of the proposed GenPC extension.
+
+Because a generated prior cannot exactly reproduce observed local geometry,
+the posterior stage treats the partial scan as observed surface measure rather
+than concatenating arbitrary-density points. It FPS-samples the partial under a
+maximum 12% mass budget and removes exactly the same amount of generated mass
+nearest the observation. Thus total point count stays 100k, partial scan-line
+density is normalized, and the complete Pixal prior remains an 88% majority.
+Identity, smooth absorption, and 4/8/12% mass hypotheses are selected with a
+shared saved-camera objective and explicit prior-mass penalty. No GT or semantic
+category enters this selection.
+
+The strict post-freeze ten-sample result is CD-L1/EMD x1e2
+`1.6912/2.8026`, improving over both v15 (`2.1096/3.0973`) and the GenPC paper
+mean (`1.74/2.88`). Predictions are in
+`gpt_version/_pixal_bidirectional_consensus_surface_projection_20260823`.
+This is a metric-passing research candidate pending full visual acceptance; it
+does not overwrite the frozen v15 canonical assets.
