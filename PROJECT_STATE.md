@@ -1338,3 +1338,40 @@ What must not change without asking:
 - Shared route: v8 GenPC/PCA fallback versus v12 GPU SO(3)+visible Sim(3) TTT, selected by the shared observable-confidence gate and full-resolution render-score do-no-harm guard. `06145` and `06830` use the GPU route; the other eight use fallback. No GT, category rule, sample-specific threshold, deformation, fusion, or point deletion is used.
 - Cleanup authorized by the user: post-v15 Hunyuan3D-MV, dual-depth/multiview, v18+ deformation/fusion, and Omni experimental output roots were permanently removed after v15 verification, releasing approximately 8.8GB. Historical records remain in this file, but their referenced post-v15 output paths may no longer exist.
 - Do not overwrite the accepted v15 assets. Any future method must branch into a new derivative root and exceed v15 on full-ten visual review and post-freeze metrics before promotion.
+
+## 2026-08-23 CST — accepted bidirectional partial-to-Pixal cycle route as new research mainline
+
+Status and approval boundary:
+- User feedback: “我感觉这个方案效果更好，作为主线来改进吧，目标是超过genpc”. The bidirectional saved-camera 2D+3D route is now the active research direction to improve; v15 remains an immutable baseline and fallback asset.
+- This accepts the route and retains the full-ten forced-candidate audit for comparison. It does not claim that the current metrics already beat GenPC, and it does not authorize sample-specific tuning.
+- Samples: `01184`, `05117`, `05452`, `06127`, `06145`, `06188`, `06830`, `07136`, `07306`, `09639`.
+
+Exact inputs and retained outputs:
+- Raw partials: `data/<sample>.ply`.
+- Saved cameras: `workspace/redwood_onestage_rawdepth_512_stage2_20260714/<sample>/camera.pth`.
+- Frozen complete inputs: `gpt_version/_pixal_guarded_unified_registration_v15_20260822/<sample>/<sample>_unified_registration_v14_registered_100k.ply` and matching `registered_mesh.glb`.
+- Retained full-ten audit root: `gpt_version/_pixal_bidirectional_cycle_registration_forced_audit_20260823`.
+- Per-sample outputs: `<sample>/<sample>_bidirectional_cycle_{registered_100k.ply,partial_gray_pixal_red.ply,projection.png,registered_mesh.glb,npy,info.json}`.
+- Post-freeze metric root: `gpt_version/_pixal_bidirectional_cycle_registration_forced_audit_20260823/postfreeze_cd_emd_20260823`.
+- Implementation: `src/bidirectional_cycle_registration.py`, `scripts/run_pixal_bidirectional_cycle_registration.py`, and `scripts/evaluate_bidirectional_cycle_redwood.py`.
+
+Method and exact shared parameters:
+- Fit a robust proper Sim(3) from partial points to the saved-camera-visible Pixal surface; apply only its strict analytic inverse to move the complete Pixal body toward the partial; use a separately fitted reverse map as a cycle-consistency witness.
+- Pixel schedule `[8.0, 5.0, 3.0]`; final pixel radius `5.0`; maximum rotation per step `3.0` degrees; per-step isotropic scale bounds `[0.96, 1.04]`; maximum translation `0.03` partial-bbox diagonal; minimum pairs `96`; maximum independent cycle ratio `0.03`; final improvement ratio `0.995`; camera padding `0.15`.
+- Audit option `force_candidate_output=true` exported candidates even when the normal guard rejected them. Future mainline experiments must write new derivative roots and retain whether each candidate passed the guard.
+- No anisotropic scale, reflection, non-rigid deformation, point deletion, category rule, sample ID rule, GT geometry, CD, or EMD is used during registration or routing.
+
+Models, prompts, and generation parameters:
+- Registration makes no generative call; prompt and negative prompt are not applicable.
+- It reuses the accepted frozen GPT ImageGen/Pixal3D assets. Exact semantic prompts, `UNKNOWN` GPT serving checkpoint/seed/backend, TencentARC/Pixal3D model paths, Pixal seed `42`, 1024 cascade, and shared 12-step sampler parameters are recorded verbatim in the accepted `2026-08-22 01:07 CST` entry above.
+- No RMBG, MoGe, GPT image, Pixal GLB, or Pixal PLY is regenerated in this route.
+
+Postprocessing, metrics, and current limitation:
+- Proper Sim(3) is applied to all original 100,000 Pixal points and the complete mesh; no fusion, resampling, local deformation, or partial replacement is performed.
+- Frozen post-hoc evaluation uses 16,384-point FPS, seed `6145`, and identical saved FPS indices for the audit candidate and v15.
+- Forced-audit mean CD-L1/EMD x1e2: `2.0647596/3.0785815`; v15 under the same indices: `2.1095980/3.0960672`; GenPC paper target: `1.74/2.88`.
+- The current route is better than v15 on mean CD and EMD but does not yet beat GenPC. `06830`, `09639`, and `05117` expose the largest general failure modes and may be used for diagnosis only, not special-case parameters.
+
+What must not change without asking:
+- Do not overwrite the retained full-ten audit root, post-freeze metric files, frozen v15 outputs, GPT semantic images, or Pixal3D complete assets.
+- Keep one shared zero-shot parameterization. Freeze each new full-ten prediction set before reading GT metrics, and use GT only for post-freeze reporting.
