@@ -13,6 +13,8 @@ final Camera-1 alignment target.
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
@@ -186,6 +188,7 @@ def local_camera1_visible_refine(
     *,
     diagonal: float,
     search_points: int = 32_000,
+    candidate_workers: int = 8,
     levels: tuple[tuple[float, float, float], ...] = (
         (.003, .15, .003), (.001, .06, .001), (.0005, .025, .0005),
     ),
@@ -195,8 +198,10 @@ def local_camera1_visible_refine(
     Pixel-indexed 3-D fitting supplies the meaningful basin.  This final
     deterministic coordinate descent optimizes the same no-GT Camera-1
     visible score on fixed subsamples, then the caller rechecks its selected
-    step with the full point sets.  It does not add correspondences, points,
-    or local deformation degrees of freedom.
+    step with the full point sets. Candidate scores are independent, so they
+    may be evaluated concurrently; results are consumed in proposal order and
+    the candidate set/selection rule remains unchanged. It does not add
+    correspondences, points, or local deformation degrees of freedom.
     """
     partial, registered_prior = (np.asarray(value, dtype=np.float64)
                                  for value in (partial, registered_prior))
@@ -213,14 +218,25 @@ def local_camera1_visible_refine(
     before = visible_score(target, current, projector, float(diagonal), pixel_radius=5., target_cache=target_cache)
     trace = []
     for scale_delta, degrees, translation_ratio in levels:
-        scored = []
-        for action, step in _small_residual_proposals(
+        proposals = _small_residual_proposals(
             scale_delta=float(scale_delta), rotation_deg=float(degrees),
             translation=float(translation_ratio) * float(diagonal), centre=centre,
-        ):
+        )
+
+        def score_proposal(proposal: tuple[str, np.ndarray]):
+            action, step = proposal
             candidate = apply_transform(current, step)
             score = visible_score(target, candidate, projector, float(diagonal), pixel_radius=5., target_cache=target_cache)
-            scored.append((score["objective"], action, step, candidate, score))
+            return score["objective"], action, step, candidate, score
+
+        workers = min(max(int(candidate_workers), 1), len(proposals))
+        if workers == 1:
+            scored = [score_proposal(proposal) for proposal in proposals]
+        else:
+            # ``map`` preserves proposal order. This retains the sequential
+            # ``min`` tie rule while releasing CPU-bound raster/KNN work.
+            with ThreadPoolExecutor(max_workers=workers) as executor:
+                scored = list(executor.map(score_proposal, proposals))
         _, action, step, current, score = min(scored, key=lambda item: item[0])
         total = step @ total
         trace.append({
@@ -236,6 +252,7 @@ def local_camera1_visible_refine(
     return total, {
         "method": "subpercent_camera1_visible_sim3_coordinate_refinement",
         "search_points": {"partial": int(len(target)), "prior": int(len(current))},
+        "candidate_workers": int(max(candidate_workers, 1)),
         "levels": [{"scale_delta": float(item[0]), "rotation_deg": float(item[1]),
                     "translation_ratio": float(item[2])} for item in levels],
         "before": float(before["objective"]), "after": float(after["objective"]), "trace": trace,

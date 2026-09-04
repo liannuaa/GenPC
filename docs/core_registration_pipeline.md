@@ -52,6 +52,9 @@ the native MoGe evidence, bridge matches, partial surface, and saved-view
 render. The final continuation applies the fixed three-level Camera-1 update,
 followed by a 1-degree wide tilt and a final 0.5-degree continuation. Every
 stage is applied; diagnostic scores never reject or route samples.
+Within a level, the fixed independent candidate scores may run concurrently,
+but they are consumed in their original proposal order and use the same
+deterministic minimum rule.
 
 The final registered complete body is
 `registration/<sample>/final/camera1_amplified_registered_100k.ply`.

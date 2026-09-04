@@ -64,3 +64,8 @@
   `01184`, direct and cached native target/registered PLYs were byte-identical;
   the full fixed registration was also byte-identical when both paths consumed
   the current `data/redwood/partial` input. Test suite: 40 passed.
+- [x] Parallelize only the independent Camera-1 candidate scores (default:
+  eight workers), keeping proposal order and the sequential minimum tie rule.
+  On the current `01184` Redwood input the full fixed registration decreased
+  from `103.50 s` to `94.54 s`; every emitted registration PLY was
+  byte-identical. Test suite: 41 passed.

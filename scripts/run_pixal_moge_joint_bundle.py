@@ -67,6 +67,8 @@ def main() -> None:
                         help="Maximum mutual Camera-1 visible pairs for the final MoGe-style 3-D residual.")
     parser.add_argument("--pixel-pair-trials", type=int, default=64)
     parser.add_argument("--camera1-fine-search-points", type=int, default=32_000)
+    parser.add_argument("--candidate-workers", type=int, default=8,
+                        help="Independent visible-score evaluations per local-search level.")
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
 
@@ -145,7 +147,7 @@ def main() -> None:
     fine_before = final_partial
     fine_step, fine_search = local_camera1_visible_refine(
         partial, result, partial_projector, diagonal=diagonal,
-        search_points=args.camera1_fine_search_points,
+        search_points=args.camera1_fine_search_points, candidate_workers=args.candidate_workers,
     )
     fine_candidate = apply_transform(result, fine_step)
     fine_partial = visible_score(partial, fine_candidate, partial_projector, diagonal, pixel_radius=5.)

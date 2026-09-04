@@ -45,6 +45,8 @@ def main() -> None:
     parser.add_argument("--semantic", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--search-points", type=int, default=32_000)
+    parser.add_argument("--candidate-workers", type=int, default=8,
+                        help="Independent visible-score evaluations per local-search level.")
     parser.add_argument("--wide-tilt-search", action=argparse.BooleanOptionalAction, default=False,
                         help="Use the shared 1-degree global tilt trust region before fine steps.")
     parser.add_argument("--max-tilt-degrees", type=float, default=1.0,
@@ -69,7 +71,7 @@ def main() -> None:
     before = visible_score(partial, prior, projector, diagonal, pixel_radius=5., target_cache=target_cache)
     step, search = local_camera1_visible_refine(
         partial, prior, projector, diagonal=diagonal, search_points=args.search_points,
-        levels=levels,
+        candidate_workers=args.candidate_workers, levels=levels,
     )
     candidate = apply_transform(prior, step)
     after = visible_score(partial, candidate, projector, diagonal, pixel_radius=5., target_cache=target_cache)

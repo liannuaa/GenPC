@@ -59,3 +59,23 @@ def test_local_camera1_refine_recovers_a_small_visible_translation():
     after = visible_score(partial, apply_transform(prior, step), projector, diagonal, pixel_radius=5.)
     assert info["trace"][0]["action"] == "trans_x_-1"
     assert after["objective"] < before["objective"]
+
+
+def test_local_camera1_parallel_candidate_scores_match_serial_selection():
+    y, x = np.mgrid[-5:6, -5:6]
+    partial = np.c_[x.ravel() / 12., y.ravel() / 12., 1. + .01 * x.ravel() * y.ravel()]
+    prior = partial.copy()
+    prior[:, 0] += .025
+    diagonal = float(np.linalg.norm(np.ptp(partial, axis=0)))
+    kwargs = {
+        "diagonal": diagonal, "search_points": 1000,
+        "levels": ((.001, .05, .03), (.0005, .025, .01)),
+    }
+    serial_step, serial = local_camera1_visible_refine(
+        partial, prior, _OrthographicProjector(), candidate_workers=1, **kwargs,
+    )
+    parallel_step, parallel = local_camera1_visible_refine(
+        partial, prior, _OrthographicProjector(), candidate_workers=4, **kwargs,
+    )
+    assert np.array_equal(serial_step, parallel_step)
+    assert serial["trace"] == parallel["trace"]
