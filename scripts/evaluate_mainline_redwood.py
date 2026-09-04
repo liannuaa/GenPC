@@ -24,7 +24,7 @@ SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--prediction-root", type=Path, required=True)
-    parser.add_argument("--ground-truth-root", type=Path, default=ROOT / "data" / "GT")
+    parser.add_argument("--ground-truth-root", type=Path, default=ROOT / "data" / "redwood" / "gt")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--samples", nargs="+", choices=SAMPLES, default=list(SAMPLES))
     parser.add_argument("--count", type=int, default=16384)

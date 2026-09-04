@@ -251,11 +251,28 @@ def main() -> None:
     if not moge_checkpoint.exists():
         raise FileNotFoundError(moge_checkpoint)
 
+    # Resume must be cheap.  Loading Pixal, DINO and MoGe only to discover
+    # that every requested GLB/PLY already exists wastes several GPU-minutes
+    # without changing an output.  ``--overwrite`` remains the explicit way
+    # to regenerate a completed prior after changing its image or parameters.
+    pending_ids = []
+    for sample_id in args.ids:
+        output_dir = output_root / sample_id
+        glb_path = output_dir / "pixal3d.glb"
+        ply_path = output_dir / "pixal3d_sampled_100k.ply"
+        if glb_path.exists() and ply_path.exists() and not args.overwrite:
+            print(f"[Skip] {sample_id}: outputs already exist", flush=True)
+        else:
+            pending_ids.append(sample_id)
+    if not pending_ids:
+        print("[Done] No Pixal3D priors require generation.", flush=True)
+        return
+
     pipeline = init_pipeline(args.model, args.dino, args.rmbg)
 
     prepared: dict[str, tuple[Path, dict[str, float]]] = {}
     preprocessed_paths: dict[str, Path] = {}
-    for sample_id in args.ids:
+    for sample_id in pending_ids:
         input_dir = input_root / sample_id
         output_dir = output_root / sample_id
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -277,16 +294,12 @@ def main() -> None:
     gc.collect()
     torch.cuda.empty_cache()
 
-    for sample_id in args.ids:
+    for sample_id in pending_ids:
         input_dir = input_root / sample_id
         sample_dir = output_root / sample_id
         glb_path = sample_dir / "pixal3d.glb"
         ply_path = sample_dir / "pixal3d_sampled_100k.ply"
         metadata_path = sample_dir / "pixal3d_metadata.json"
-        if glb_path.exists() and ply_path.exists() and not args.overwrite:
-            print(f"[Skip] {sample_id}: outputs already exist", flush=True)
-            continue
-
         processed_path, camera = prepared[sample_id]
         image = Image.open(processed_path).convert("RGBA")
         started = time.time()

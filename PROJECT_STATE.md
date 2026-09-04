@@ -59,3 +59,43 @@ audit with seed `6145` reported mean CD-L1/EMD `1.58197163 / 2.51144224`
 (×10²). Per-sample results and protocol are under
 `postfreeze_cd_emd/{metrics_samples.csv,metrics_summary.json,protocol.json}`.
 These values are reporting-only and must not become a test-time selection gate.
+
+## 2026-09-04 CST — `01184` scratch Qwen → GPT → Pixal end-to-end validation
+
+**User approval.** “现在流程已经没问题了.” This confirms the scratch
+upstream path is valid. Preserve its saved-view geometry and the fixed
+registration/Gaussian parameters; do not replace them with a replay asset or a
+metric-selected variant.
+
+**Inputs and outputs.** Partial and GT are respectively
+`data/redwood/partial/01184.ply` and `data/redwood/gt/01184.ply`. The complete
+run is `workspace/mainline_upstream_smoke_20260904`: Qwen depth/semantic and
+Camera-1 assets are in `semantic/01184`; GPT input and prompt are in
+`pixal_input/01184`; Pixal GLB/100k prior/metadata are in `pixal/01184`;
+registration ends at
+`registration/01184/final/camera1_amplified_registered_100k.ply`; and the
+approved complete prediction is
+`gaussian/01184/decoded/partial_anchored_gaussian_decoded_100k.ply`.
+
+**Models and exact generation record.** Qwen pipeline is
+`models/Qwen-Image-Edit-2511`, transformer is
+`models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`;
+input is `raw_depth.png`, output is 512 px, true CFG `4.0`, steps `40`, and
+negative prompt is exactly ` `. The exact Qwen prompt is
+`生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的rubbish bin，纯白背景`.
+Qwen seed, scheduler and backend are `UNKNOWN`. The GPT asset is
+`pixal_input/01184/gpt_image.png`; its full prompt is recorded verbatim in
+`gpt_refinement_prompt.txt`; model/version, seed, scheduler, CFG and negative
+prompt are `UNKNOWN`. Pixal uses `models/Pixal3D-weights`, DINOv3
+`models/dinov3-vitl16-pretrain-lvd1689m`, MoGe-2
+`models/moge-2-vitl/model.pt`, and RMBG-2.0 `models/RMBG-2.0`, with seed `42`,
+1024 cascade, 12 sparse/shape/texture steps, guidance `7.5/7.5/1.0`, 300k
+decimation, 2048 texture and 100k surface points.
+
+**Post-processing and reporting.** The run uses deterministic 256-view
+saved-camera selection, grayscale depth + OpenCV fill, Qwen completion, GPT
+clarity edit, Pixal preprocessing, native Pixal--MoGe alignment, two-camera
+bridge, Camera-1 continuation, and the fixed partial-anchored Gaussian edit
+and decode. No GT is read before the final prediction. The offline 16,384-point
+audit (seed `6145`) reported CD-L1×100 `1.16162859` and EMD×100 `1.80500858`;
+these are reporting-only.

@@ -21,7 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.bidirectional_cycle_registration import visible_score
+from src.bidirectional_cycle_registration import prepare_visible_target, visible_score
 from src.pointcloud_io import jsonable, load_points, write_compare, write_points
 from src.ray_consistent_registration import apply_transform
 from src.saved_camera import SavedCameraProjector, draw_projection_overlay
@@ -65,13 +65,14 @@ def main() -> None:
     levels = ((.010, tilt, .010), (.004, .35 * tilt, .004), (.001, .10 * tilt, .001)) if args.wide_tilt_search else (
         (.006, .30, .006), (.002, .10, .002), (.0005, .025, .0005)
     )
-    before = visible_score(partial, prior, projector, diagonal, pixel_radius=5.)
+    target_cache = prepare_visible_target(partial, projector)
+    before = visible_score(partial, prior, projector, diagonal, pixel_radius=5., target_cache=target_cache)
     step, search = local_camera1_visible_refine(
         partial, prior, projector, diagonal=diagonal, search_points=args.search_points,
         levels=levels,
     )
     candidate = apply_transform(prior, step)
-    after = visible_score(partial, candidate, projector, diagonal, pixel_radius=5.)
+    after = visible_score(partial, candidate, projector, diagonal, pixel_radius=5., target_cache=target_cache)
     # The fixed coordinate-descent lattice contains identity, so this is an
     # optimization step rather than a proposal that can be rejected.
     result = candidate

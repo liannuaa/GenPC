@@ -8,27 +8,13 @@ import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
+from src.zbuffer import frontmost_pixel_indices
+
 
 def zbuffer_indices(pixel_xy, depth, image_shape, splat_radius=0):
-    pixel_xy = np.asarray(pixel_xy, dtype=np.float64)
-    depth = np.asarray(depth, dtype=np.float64)
-    height, width = map(int, image_shape)
-    zbuffer = np.full((height, width), np.inf, dtype=np.float64)
-    indices = np.full((height, width), -1, dtype=np.int64)
-    rounded = np.rint(pixel_xy).astype(np.int64)
-    finite = np.isfinite(pixel_xy).all(axis=1) & np.isfinite(depth) & (depth > 1e-8)
-    for source_id in np.flatnonzero(finite):
-        x, y = rounded[source_id]
-        for offset_y in range(-int(splat_radius), int(splat_radius) + 1):
-            yy = y + offset_y
-            if yy < 0 or yy >= height:
-                continue
-            for offset_x in range(-int(splat_radius), int(splat_radius) + 1):
-                xx = x + offset_x
-                if 0 <= xx < width and depth[source_id] < zbuffer[yy, xx]:
-                    zbuffer[yy, xx] = depth[source_id]
-                    indices[yy, xx] = source_id
-    return zbuffer, indices >= 0, indices
+    return frontmost_pixel_indices(
+        pixel_xy, depth, image_shape, splat_radius=splat_radius, circular_splat=False,
+    )
 
 
 def _grid_coverage(pixel_xy, matched, image_shape, grid_size=8):
@@ -45,18 +31,27 @@ def _grid_coverage(pixel_xy, matched, image_shape, grid_size=8):
 def soft_ray_correspondences(partial_points, generated_points, projector, *,
                              pixel_radius=10.0, splat_radius=1,
                              trim_quantile=.70, max_distance_ratio=.20,
-                             bbox_diagonal=None):
+                             bbox_diagonal=None, partial_cache=None):
     """Match z-buffer-visible points by saved-image rays and robust 3-D distance."""
     partial_points = np.asarray(partial_points, dtype=np.float64)
     generated_points = np.asarray(generated_points, dtype=np.float64)
-    partial_uv, partial_depth = projector.project(partial_points)
     generated_uv, generated_depth = projector.project(generated_points)
-    _, partial_mask, partial_index = zbuffer_indices(partial_uv, partial_depth, projector.image_shape)
+    if partial_cache is None:
+        partial_uv, partial_depth = projector.project(partial_points)
+        _, partial_mask, partial_index = zbuffer_indices(
+            partial_uv, partial_depth, projector.image_shape,
+        )
+        py, px = np.where(partial_mask)
+        partial_tree = cKDTree(np.c_[px, py]) if len(px) else None
+    else:
+        partial_depth = partial_cache.correspondence_point_depth
+        partial_index = partial_cache.correspondence_index
+        py, px = partial_cache.correspondence_y, partial_cache.correspondence_x
+        partial_tree = partial_cache.correspondence_tree
     _, generated_mask, generated_index = zbuffer_indices(
         generated_uv, generated_depth, projector.image_shape, splat_radius=splat_radius)
-    py, px = np.where(partial_mask)
     gy, gx = np.where(generated_mask)
-    if not len(px) or not len(gx):
+    if not len(px) or not len(gx) or partial_tree is None:
         return {"partial_ids": np.empty(0, dtype=np.int64),
                 "generated_ids": np.empty(0, dtype=np.int64),
                 "pixel_coverage": 0., "grid_coverage": 0., "matched_coverage": 0.,

@@ -307,16 +307,17 @@ def local_pixal_partial_refine(
     neither is used as an accept/reject gate.  It never redoes a global
     orientation search.
     """
-    from src.bidirectional_cycle_registration import visible_score
+    from src.bidirectional_cycle_registration import prepare_visible_target, visible_score
 
     current = np.asarray(prior_native_moge, dtype=np.float64).copy()
     total = np.eye(4, dtype=np.float64)
+    partial_cache = prepare_visible_target(partial, partial_projector)
     native_before = pixal_moge_render_score(
         moge, current, moge_projector, moge_colors=moge_colors, prior_colors=prior_colors
     )
     partial_before_raw = visible_score(
         partial, apply_transform(current, native_moge_to_partial), partial_projector,
-        partial_diagonal, pixel_radius=5.,
+        partial_diagonal, pixel_radius=5., target_cache=partial_cache,
     )
     partial_before = _compact_partial_score(partial_before_raw)
     native_reference = max(float(native_before["objective"]), 1e-8)
@@ -343,7 +344,7 @@ def local_pixal_partial_refine(
             )
             partial_raw = visible_score(
                 partial, apply_transform(moved, native_moge_to_partial), partial_projector,
-                partial_diagonal, pixel_radius=5.,
+                partial_diagonal, pixel_radius=5., target_cache=partial_cache,
             )
             partial_score = _compact_partial_score(partial_raw)
             # Camera-1 evidence remains primary, while the native rendering
@@ -366,7 +367,7 @@ def local_pixal_partial_refine(
     )
     partial_after = _compact_partial_score(visible_score(
         partial, apply_transform(current, native_moge_to_partial), partial_projector,
-        partial_diagonal, pixel_radius=5.,
+        partial_diagonal, pixel_radius=5., target_cache=partial_cache,
     ))
     return current, total, {
         "method": "pixal_moge_style_local_camera_residual_for_two_camera_partial_bridge",

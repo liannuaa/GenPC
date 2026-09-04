@@ -47,7 +47,7 @@ under `models/Pixal3D`.
 ```bash
 CUDA_VISIBLE_DEVICES=0 $PY scripts/run_semantic_stage.py \
   --output-root workspace/new_run/semantic \
-  --partial-root data --samples 01184
+  --partial-root data/redwood/partial --samples 01184
 ```
 
 2. Apply the GPT clarity-only edit outside this repository. Save each result

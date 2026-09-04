@@ -37,3 +37,23 @@
   asset; 38 tests pass. Final offline result: CD-L1×100 `1.1616`, EMD×100
   `1.8050` (16,384 points, seed 6145). The metric was evaluated only after the
   prediction was frozen.
+
+## Mainline performance preservation — 2026-09-04
+
+- [x] Move Redwood defaults to `data/redwood/partial` and `data/redwood/gt`
+  across semantic generation, fixed registration, input materialisation, and
+  offline evaluation.
+- [x] Replace point-by-point Python z-buffer loops with a vectorised
+  deterministic rasteriser that preserves the former depth and offset-order
+  tie rule exactly. Cache immutable partial-camera projections during each
+  local Sim(3) candidate sweep.
+- [x] Run the six fixed registration stages in one Python process by default,
+  retaining `--no-in-process` as a diagnostic subprocess fallback. A full
+  `01184` registration produced a byte-identical final PLY.
+- [x] Make Pixal resume check completed GLB/PLY pairs before initialising
+  Pixal/DINO/MoGe. A completed `01184` now resumes in 5.8 seconds.
+- [x] Profile and regression-check `01184`: the final Camera-1 stage decreased
+  from 26.78 s to 13.48 s, while its 100k PLY remained byte-identical. The
+  complete registration and decoded Gaussian PLY also remained byte-identical;
+  final offline CD-L1×100 was unchanged at `1.1616` (EMD is CUDA-nondeterministic
+  at the fourth decimal on an identical PLY). Test suite: 40 passed.

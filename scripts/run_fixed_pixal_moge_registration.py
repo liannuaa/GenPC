@@ -15,8 +15,11 @@ than proposal gates.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
+import os
 from pathlib import Path
+import runpy
 import subprocess
 import sys
 from typing import Iterable
@@ -56,11 +59,30 @@ def _require(paths: dict[str, Path], keys: Iterable[str]) -> None:
         raise FileNotFoundError("missing required retained input(s): " + ", ".join(missing))
 
 
-def _run(command: list[str], *, cwd: Path, log: Path, dry_run: bool) -> None:
+def _run(command: list[str], *, cwd: Path, log: Path, dry_run: bool,
+         in_process: bool) -> None:
     print(" ".join(command), flush=True)
     if dry_run:
         return
     log.parent.mkdir(parents=True, exist_ok=True)
+    if in_process:
+        script = Path(command[1])
+        if command[0] != sys.executable or script.suffix != ".py":
+            raise ValueError("in-process registration requires a Python script command")
+        previous_argv, previous_cwd = sys.argv[:], Path.cwd()
+        try:
+            os.chdir(cwd)
+            with log.open("w", encoding="utf-8") as handle, \
+                    contextlib.redirect_stdout(handle), contextlib.redirect_stderr(handle):
+                sys.argv = command[1:]
+                runpy.run_path(str((cwd / script).resolve()), run_name="__main__")
+        except SystemExit as error:
+            if error.code not in (None, 0):
+                raise RuntimeError(f"stage failed (see {log})") from error
+        finally:
+            sys.argv = previous_argv
+            os.chdir(previous_cwd)
+        return
     with log.open("w", encoding="utf-8") as handle:
         completed = subprocess.run(command, cwd=cwd, stdout=handle, stderr=subprocess.STDOUT, text=True)
     if completed.returncode != 0:
@@ -78,12 +100,14 @@ def main() -> None:
                         default=SHARED_ROOT / "workspace" / "redwood_qwen_gpt_pixal_bidirectional_mainline_20260823")
     parser.add_argument("--camera-root", type=Path,
                         default=SHARED_ROOT / "workspace" / "redwood_onestage_rawdepth_512_stage2_20260714")
-    parser.add_argument("--partial-root", type=Path, default=ROOT / "data")
+    parser.add_argument("--partial-root", type=Path, default=ROOT / "data" / "redwood" / "partial")
     parser.add_argument("--output-root", type=Path,
                         default=ROOT / "workspace" / "pixal_moge_full9_rebuilt_20260904")
     parser.add_argument("--moge-model", type=Path, default=SHARED_ROOT / "models" / "moge-2-vitl" / "model.pt")
     parser.add_argument("--rmbg-model", type=Path, default=SHARED_ROOT / "models" / "RMBG-2.0")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--in-process", action=argparse.BooleanOptionalAction, default=True,
+                        help="Reuse imports between fixed stages; --no-in-process restores subprocess execution.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -115,7 +139,8 @@ def main() -> None:
                     "--pixal-input", str(paths["pixal_input"]), "--moge-model", str(args.moge_model),
                     "--rmbg-model", str(args.rmbg_model), "--output-dir", str(paths["native"]),
                     "--device", "cuda", "--fp16",
-                ], cwd=ROOT, log=paths["native"] / "stage.log", dry_run=args.dry_run)
+                ], cwd=ROOT, log=paths["native"] / "stage.log", dry_run=args.dry_run,
+                     in_process=args.in_process)
             target_mask = paths["native"] / "pixal_input_object_mask.png"
             bridge_transform = paths["bridge"] / "two_camera_pixal_moge_native_moge_to_partial.npy"
             pixel_matches = paths["bridge"] / "two_camera_pixal_moge_partial_to_native_moge_matches.npy"
@@ -130,7 +155,8 @@ def main() -> None:
                     "--pixal-prior", str(paths["prior"]), "--partial-camera", str(paths["camera"]),
                     "--saved-view-image", str(paths["semantic"]), "--output-dir", str(paths["bridge"]),
                     "--device", "cpu",
-                ], cwd=ROOT, log=paths["bridge"] / "stage.log", dry_run=args.dry_run)
+                ], cwd=ROOT, log=paths["bridge"] / "stage.log", dry_run=args.dry_run,
+                     in_process=args.in_process)
             joint_prior = paths["joint"] / "two_camera_joint_registered_100k.ply"
             if not _exists(joint_prior, resume=args.resume):
                 _run([
@@ -140,7 +166,8 @@ def main() -> None:
                     "--bridge-transform", str(bridge_transform), "--pixel-matches", str(pixel_matches),
                     "--partial-camera", str(paths["camera"]), "--semantic", str(paths["semantic"]),
                     "--output-dir", str(paths["joint"]), "--device", "cpu",
-                ], cwd=ROOT, log=paths["joint"] / "stage.log", dry_run=args.dry_run)
+                ], cwd=ROOT, log=paths["joint"] / "stage.log", dry_run=args.dry_run,
+                     in_process=args.in_process)
             amplified_prior = paths["amplified"] / "camera1_amplified_registered_100k.ply"
             if not _exists(amplified_prior, resume=args.resume):
                 _run([
@@ -148,7 +175,8 @@ def main() -> None:
                     "--partial", str(paths["partial"]), "--registered-prior", str(joint_prior),
                     "--camera", str(paths["camera"]), "--semantic", str(paths["semantic"]),
                     "--output-dir", str(paths["amplified"]), "--device", "cpu",
-                ], cwd=ROOT, log=paths["amplified"] / "stage.log", dry_run=args.dry_run)
+                ], cwd=ROOT, log=paths["amplified"] / "stage.log", dry_run=args.dry_run,
+                     in_process=args.in_process)
             wide_prior = paths["wide_tilt"] / "camera1_amplified_registered_100k.ply"
             if not _exists(wide_prior, resume=args.resume):
                 _run([
@@ -156,7 +184,8 @@ def main() -> None:
                     "--partial", str(paths["partial"]), "--registered-prior", str(amplified_prior),
                     "--camera", str(paths["camera"]), "--semantic", str(paths["semantic"]),
                     "--output-dir", str(paths["wide_tilt"]), "--wide-tilt-search", "--device", "cpu",
-                ], cwd=ROOT, log=paths["wide_tilt"] / "stage.log", dry_run=args.dry_run)
+                ], cwd=ROOT, log=paths["wide_tilt"] / "stage.log", dry_run=args.dry_run,
+                     in_process=args.in_process)
             final_prior = paths["final"] / "camera1_amplified_registered_100k.ply"
             if not _exists(final_prior, resume=args.resume):
                 _run([
@@ -165,7 +194,8 @@ def main() -> None:
                     "--camera", str(paths["camera"]), "--semantic", str(paths["semantic"]),
                     "--output-dir", str(paths["final"]), "--wide-tilt-search", "--max-tilt-degrees", ".5",
                     "--device", "cpu",
-                ], cwd=ROOT, log=paths["final"] / "stage.log", dry_run=args.dry_run)
+                ], cwd=ROOT, log=paths["final"] / "stage.log", dry_run=args.dry_run,
+                     in_process=args.in_process)
             manifest["status"][sample] = {"state": "complete", "final": str(final_prior.resolve())}
         except Exception as exc:  # keep the remaining shared samples running
             manifest["status"][sample] = {"state": "failed", "error": str(exc)}

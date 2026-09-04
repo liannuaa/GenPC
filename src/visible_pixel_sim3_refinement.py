@@ -17,7 +17,7 @@ import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
-from src.bidirectional_cycle_registration import interpolate_sim3, visible_score
+from src.bidirectional_cycle_registration import interpolate_sim3, prepare_visible_target, visible_score
 from src.indexed_pixel_sim3 import robust_indexed_sim3, unique_pixel_matches
 from src.ray_consistent_registration import apply_transform, bounded_delta_sim3
 from src.zbuffer import zbuffer_depth_with_indices
@@ -207,9 +207,10 @@ def local_camera1_visible_refine(
     q_ids = (np.arange(len(registered_prior), dtype=np.int64) if len(registered_prior) <= int(search_points)
              else np.linspace(0, len(registered_prior) - 1, int(search_points), dtype=np.int64))
     target, current = partial[p_ids], registered_prior[q_ids].copy()
+    target_cache = prepare_visible_target(target, projector)
     centre = np.median(partial, axis=0)
     total = np.eye(4, dtype=np.float64)
-    before = visible_score(target, current, projector, float(diagonal), pixel_radius=5.)
+    before = visible_score(target, current, projector, float(diagonal), pixel_radius=5., target_cache=target_cache)
     trace = []
     for scale_delta, degrees, translation_ratio in levels:
         scored = []
@@ -218,7 +219,7 @@ def local_camera1_visible_refine(
             translation=float(translation_ratio) * float(diagonal), centre=centre,
         ):
             candidate = apply_transform(current, step)
-            score = visible_score(target, candidate, projector, float(diagonal), pixel_radius=5.)
+            score = visible_score(target, candidate, projector, float(diagonal), pixel_radius=5., target_cache=target_cache)
             scored.append((score["objective"], action, step, candidate, score))
         _, action, step, current, score = min(scored, key=lambda item: item[0])
         total = step @ total
@@ -231,7 +232,7 @@ def local_camera1_visible_refine(
                 "projection": {key: float(value) for key, value in score["projection"].items()},
             },
         })
-    after = visible_score(target, current, projector, float(diagonal), pixel_radius=5.)
+    after = visible_score(target, current, projector, float(diagonal), pixel_radius=5., target_cache=target_cache)
     return total, {
         "method": "subpercent_camera1_visible_sim3_coordinate_refinement",
         "search_points": {"partial": int(len(target)), "prior": int(len(current))},

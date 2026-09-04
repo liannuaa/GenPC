@@ -72,7 +72,7 @@ def main() -> None:
         _copy(mask, camera_target / mask.name); copied.append(f"camera/{mask.name}")
         for name in PIXAL_FILES:
             _copy(pixal_source / name, pixal_target / name); copied.append(f"pixal/{name}")
-        _copy(ROOT / "data" / f"{sample}.ply", partial_target); copied.append("partial")
+        _copy(ROOT / "data" / "redwood" / "partial" / f"{sample}.ply", partial_target); copied.append("partial")
         manifest["samples"][sample] = {"state": "materialized", "files": copied}
     (root / "input_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps({"output_root": str(root), "samples": list(SAMPLES)}, indent=2))

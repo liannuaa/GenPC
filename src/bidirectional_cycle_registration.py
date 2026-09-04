@@ -10,9 +10,11 @@ as the applied transform.
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 
 import numpy as np
 from scipy.ndimage import binary_dilation
+from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
 from src.ray_consistent_registration import (
@@ -20,7 +22,57 @@ from src.ray_consistent_registration import (
     bounded_delta_sim3,
     fit_similarity_umeyama,
     soft_ray_correspondences,
+    zbuffer_indices,
 )
+
+
+@dataclass(frozen=True)
+class VisibleTargetCache:
+    """Saved-camera quantities that are invariant across Sim(3) candidates."""
+
+    correspondence_depth: np.ndarray
+    correspondence_point_depth: np.ndarray
+    correspondence_index: np.ndarray
+    correspondence_y: np.ndarray
+    correspondence_x: np.ndarray
+    correspondence_tree: object | None
+    projection_depth: np.ndarray
+    projection_raw_mask: np.ndarray
+    projection_mask: np.ndarray
+    dilation: int
+
+
+def prepare_visible_target(partial, projector, *, dilation: int = 1) -> VisibleTargetCache:
+    """Render/build the fixed partial-side evidence once for a candidate sweep."""
+    partial = np.asarray(partial, dtype=np.float64)
+    partial_uv, partial_depth = projector.project(partial)
+    correspondence_depth, correspondence_mask, correspondence_index = zbuffer_indices(
+        partial_uv, partial_depth, projector.image_shape,
+    )
+    correspondence_y, correspondence_x = np.where(correspondence_mask)
+    correspondence_tree = (
+        cKDTree(np.c_[correspondence_x, correspondence_y])
+        if len(correspondence_x) else None
+    )
+    projection_depth = _zbuffer(projector, partial)
+    projection_raw_mask = np.isfinite(projection_depth)
+    if int(dilation) > 0:
+        structure = np.ones((2 * int(dilation) + 1,) * 2, dtype=bool)
+        projection_mask = binary_dilation(projection_raw_mask, structure=structure)
+    else:
+        projection_mask = projection_raw_mask
+    return VisibleTargetCache(
+        correspondence_depth=correspondence_depth,
+        correspondence_point_depth=partial_depth,
+        correspondence_index=correspondence_index,
+        correspondence_y=correspondence_y,
+        correspondence_x=correspondence_x,
+        correspondence_tree=correspondence_tree,
+        projection_depth=projection_depth,
+        projection_raw_mask=projection_raw_mask,
+        projection_mask=projection_mask,
+        dilation=int(dilation),
+    )
 
 
 def sim3_parts(transform):
@@ -102,18 +154,23 @@ def _zbuffer(projector, points):
     return zbuffer.reshape(height, width)
 
 
-def projection_metrics(partial, complete, projector, diagonal, dilation=1):
+def projection_metrics(partial, complete, projector, diagonal, dilation=1, *,
+                       target_cache: VisibleTargetCache | None = None):
     """Saved-camera silhouette overlap and visible depth agreement."""
-    partial_depth = _zbuffer(projector, partial)
+    if target_cache is None:
+        target_cache = prepare_visible_target(partial, projector, dilation=int(dilation))
+    elif target_cache.dilation != int(dilation):
+        raise ValueError("visible target cache dilation does not match the score")
+    partial_depth = target_cache.projection_depth
     complete_depth = _zbuffer(projector, complete)
-    partial_raw = np.isfinite(partial_depth)
+    partial_raw = target_cache.projection_raw_mask
     complete_raw = np.isfinite(complete_depth)
+    partial_mask = target_cache.projection_mask
     if int(dilation) > 0:
         structure = np.ones((2 * int(dilation) + 1,) * 2, dtype=bool)
-        partial_mask = binary_dilation(partial_raw, structure=structure)
         complete_mask = binary_dilation(complete_raw, structure=structure)
     else:
-        partial_mask, complete_mask = partial_raw, complete_raw
+        complete_mask = complete_raw
     intersection = int(np.count_nonzero(partial_mask & complete_mask))
     union = int(np.count_nonzero(partial_mask | complete_mask))
     partial_count = int(np.count_nonzero(partial_mask))
@@ -133,14 +190,19 @@ def projection_metrics(partial, complete, projector, diagonal, dilation=1):
     }
 
 
-def visible_score(partial, complete, projector, diagonal, pixel_radius=5.0):
+def visible_score(partial, complete, projector, diagonal, pixel_radius=5.0, *,
+                  target_cache: VisibleTargetCache | None = None):
     """One dimensionless GT-free objective joining visible 2D and 3D cues."""
+    if target_cache is None:
+        target_cache = prepare_visible_target(partial, projector)
     pairs = soft_ray_correspondences(
         partial, complete, projector, pixel_radius=float(pixel_radius),
-        trim_quantile=0.75, max_distance_ratio=0.14,
+        trim_quantile=0.75, max_distance_ratio=0.14, partial_cache=target_cache,
         bbox_diagonal=float(diagonal),
     )
-    projection = projection_metrics(partial, complete, projector, diagonal)
+    projection = projection_metrics(
+        partial, complete, projector, diagonal, target_cache=target_cache,
+    )
     geometric = float(pairs["objective"] / max(diagonal, 1e-8))
     objective = (
         geometric
@@ -177,7 +239,8 @@ def bidirectional_cycle_step(
     """Fit partial->visible-Pixal, then move Pixal only by its strict inverse."""
     complete = np.asarray(complete, dtype=np.float64)
     partial = np.asarray(partial, dtype=np.float64)
-    before = visible_score(partial, complete, projector, diagonal, pixel_radius)
+    target_cache = prepare_visible_target(partial, projector)
+    before = visible_score(partial, complete, projector, diagonal, pixel_radius, target_cache=target_cache)
     pairs = before["geometric"]
     if len(pairs["partial_ids"]) < int(min_pairs):
         return complete, np.eye(4), {
@@ -208,7 +271,7 @@ def bidirectional_cycle_step(
         forward_step = invert_proper_sim3(inverse_step)
         reverse_witness = interpolate_sim3(independent_reverse, fraction)
         moved = apply_transform(complete, inverse_step)
-        score = visible_score(partial, moved, projector, diagonal, pixel_radius)
+        score = visible_score(partial, moved, projector, diagonal, pixel_radius, target_cache=target_cache)
         cycle = cycle_errors(
             forward_step, inverse_step, reverse_witness, observed, diagonal)
         objective = score["objective"] + 0.20 * cycle["independent_reverse_cycle_rms"]
@@ -269,7 +332,8 @@ def partial_to_prior_inverse_step(
     """Fit partial→visible prior and move the prior only by its exact inverse."""
     complete = np.asarray(complete, dtype=np.float64)
     partial = np.asarray(partial, dtype=np.float64)
-    before = visible_score(partial, complete, projector, diagonal, pixel_radius)
+    target_cache = prepare_visible_target(partial, projector)
+    before = visible_score(partial, complete, projector, diagonal, pixel_radius, target_cache=target_cache)
     pairs = before["geometric"]
     if len(pairs["partial_ids"]) < int(min_pairs):
         return complete, np.eye(4), {"accepted": False,
@@ -288,7 +352,8 @@ def partial_to_prior_inverse_step(
         moved = apply_transform(complete, step)
         candidates.append({"fraction": float(fraction), "inverse_step": step,
                            "moved": moved,
-                           "score": visible_score(partial, moved, projector, diagonal, pixel_radius)})
+                           "score": visible_score(partial, moved, projector, diagonal, pixel_radius,
+                                                  target_cache=target_cache)})
     selected = min(candidates, key=lambda item: item["score"]["objective"])
     projection_before = before["projection"]
     projection_after = selected["score"]["projection"]

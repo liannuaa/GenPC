@@ -1,5 +1,5 @@
 paths:
-  data_dir: "data"
+  data_dir: "data/redwood/partial"
   output_dir: "workspace/mainline_semantic"
   models_dir: "models"
 

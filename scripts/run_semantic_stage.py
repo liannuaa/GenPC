@@ -47,7 +47,7 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "mainline_redwood.yaml")
     parser.add_argument("--output-root", type=Path, required=True)
-    parser.add_argument("--partial-root", type=Path, default=ROOT / "data")
+    parser.add_argument("--partial-root", type=Path, default=ROOT / "data" / "redwood" / "partial")
     parser.add_argument("--models-root", type=Path, default=SHARED_ROOT / "models")
     parser.add_argument("--samples", nargs="+", choices=SAMPLES, default=list(SAMPLES))
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)

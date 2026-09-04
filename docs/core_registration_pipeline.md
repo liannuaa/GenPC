@@ -7,7 +7,8 @@ available to registration or editing.
 
 ## Inputs
 
-For a partial point cloud \(P\), Camera-1 \(C_1\) is selected deterministically
+For a partial point cloud \(P\) under `data/redwood/partial` (with offline
+ground truth under `data/redwood/gt`), Camera-1 \(C_1\) is selected deterministically
 from a 256-view Fibonacci sphere: hidden-point-removal coverage is evaluated on
 10k FPS points, and a partial-depth front/back tie-break resolves the selected
 direction. The visible partial points are rasterised as a normalized **grayscale
