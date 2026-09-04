@@ -15,7 +15,14 @@ import sys
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639")
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.mainline_paths import (
+    GAUSSIAN_PREDICTION_FILENAME,
+    REDWOOD10_SAMPLE_IDS,
+    locate_registered_prior,
+)
 
 
 def _run(command: list[str], *, log: Path, dry_run: bool) -> None:
@@ -39,7 +46,7 @@ def main() -> None:
                         default=ROOT / "workspace" / "single_view_boundary_gaussian_redwood10_20260904")
     parser.add_argument("--registration-root", type=Path,
                         help="Optional frozen registration root. Defaults to <root>/registration.")
-    parser.add_argument("--samples", nargs="+", default=list(SAMPLES),
+    parser.add_argument("--samples", nargs="+", default=list(REDWOOD10_SAMPLE_IDS),
                         help="Sample identifiers with materialized partial, camera, Pixal, and registration assets.")
     parser.add_argument("--max-pixel-distance", type=float, default=2.0)
     parser.add_argument("--virtual-positive-views", type=int, default=6)
@@ -105,16 +112,14 @@ def main() -> None:
             )
         manifest["samples"] = dict(prior_manifest.get("samples", {}))
     for sample in args.samples:
-        registered = registration_root / sample / "camera1_amplified_registered_100k.ply"
-        if not registered.is_file():
-            registered = registration_root / sample / "final" / "camera1_amplified_registered_100k.ply"
+        registered = locate_registered_prior(registration_root, sample)
         partial = root / "inputs" / "partial" / f"{sample}.ply"
         camera = root / "inputs" / "camera" / sample / "camera.pth"
         semantic = root / "inputs" / "camera" / sample / "img.png"
         edit_root = root / "gaussian" / sample / "edit"
         decode_root = root / "gaussian" / sample / "decoded"
         edited = edit_root / "partial_anchored_gaussian_edit_editable_prior_100k.ply"
-        prediction = decode_root / "partial_anchored_gaussian_decoded_100k.ply"
+        prediction = decode_root / GAUSSIAN_PREDICTION_FILENAME
         try:
             required = (registered, partial, camera, semantic)
             missing = [str(path) for path in required if not _complete(path)]

@@ -20,11 +20,8 @@ if str(ROOT) not in sys.path:
 
 from DepthPrompting import DepthPrompting
 from src.mainline_data import load_partial
-from src.mainline_paths import redwood_partial_root, sample_file
+from src.mainline_paths import REDWOOD10_SAMPLE_IDS, redwood_partial_root, sample_file
 from src.moge_pixel_bridge import run_rmbg_mask, save_mask_png
-
-
-SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639")
 
 
 def _load_config(path: Path, *, output_root: Path, partial_root: Path, models_root: Path) -> Munch:
@@ -49,7 +46,7 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--partial-root", type=Path, default=redwood_partial_root(ROOT))
     parser.add_argument("--models-root", type=Path, default=SHARED_ROOT / "models")
-    parser.add_argument("--samples", nargs="+", default=list(SAMPLES),
+    parser.add_argument("--samples", nargs="+", default=list(REDWOOD10_SAMPLE_IDS),
                         help="Sample identifiers; add prompt_overrides in the config for new objects.")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()

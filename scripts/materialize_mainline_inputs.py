@@ -22,9 +22,7 @@ SHARED_ROOT = ROOT.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.mainline_paths import redwood_partial_root
-
-SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639")
+from src.mainline_paths import REDWOOD10_SAMPLE_IDS, redwood_partial_root
 
 CAMERA_FILES = (
     "depth.png", "raw_depth.png", "img.png", "img_sam.png", "camera.pth", "point_uv.npy",
@@ -62,7 +60,7 @@ def main() -> None:
         "pixal_source": str(args.pixal_source.resolve()),
         "samples": {},
     }
-    for sample in SAMPLES:
+    for sample in REDWOOD10_SAMPLE_IDS:
         camera_source = args.camera_source / sample
         pixal_source = args.pixal_source / sample
         camera_target = root / "inputs" / "camera" / sample
@@ -82,7 +80,7 @@ def main() -> None:
         _copy(redwood_partial_root(ROOT) / f"{sample}.ply", partial_target); copied.append("partial")
         manifest["samples"][sample] = {"state": "materialized", "files": copied}
     (root / "input_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
-    print(json.dumps({"output_root": str(root), "samples": list(SAMPLES)}, indent=2))
+    print(json.dumps({"output_root": str(root), "samples": list(REDWOOD10_SAMPLE_IDS)}, indent=2))
 
 
 if __name__ == "__main__":

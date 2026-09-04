@@ -15,11 +15,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.mainline_paths import redwood_ground_truth_root
+from src.mainline_paths import (
+    REDWOOD10_SAMPLE_IDS,
+    locate_gaussian_prediction,
+    redwood_ground_truth_root,
+)
 from src.offline_metrics import evaluate_cd_emd
-
-
-SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639")
 
 
 def main() -> None:
@@ -27,7 +28,7 @@ def main() -> None:
     parser.add_argument("--prediction-root", type=Path, required=True)
     parser.add_argument("--ground-truth-root", type=Path, default=redwood_ground_truth_root(ROOT))
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--samples", nargs="+", default=list(SAMPLES),
+    parser.add_argument("--samples", nargs="+", default=list(REDWOOD10_SAMPLE_IDS),
                         help="Prediction/ground-truth identifiers to evaluate offline.")
     parser.add_argument("--count", type=int, default=16384)
     parser.add_argument("--seed", type=int, default=6145)
@@ -35,9 +36,7 @@ def main() -> None:
 
     rows = []
     for sample in args.samples:
-        prediction = args.prediction_root / sample / "decoded" / "partial_anchored_gaussian_decoded_100k.ply"
-        if not prediction.is_file():
-            prediction = args.prediction_root / sample / "partial_anchored_gaussian_decoded_100k.ply"
+        prediction = locate_gaussian_prediction(args.prediction_root, sample)
         cd, emd = evaluate_cd_emd(prediction, args.ground_truth_root / f"{sample}.ply", count=args.count, seed=args.seed)
         rows.append({"sample_id": sample, "cd_l1_x1e2": 100.0 * cd, "emd_x1e2": 100.0 * emd})
     summary = {

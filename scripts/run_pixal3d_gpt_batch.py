@@ -27,6 +27,8 @@ import trimesh
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SHARED_ROOT = PROJECT_ROOT.parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 # A worktree intentionally does not duplicate multi-GB source checkouts.  The
 # external source is read-only; generated assets still belong to ``--root``.
 PIXAL3D_ROOT = Path(os.environ.get(
@@ -43,20 +45,7 @@ from pixal3d.pipelines import Pixal3DImageTo3DPipeline
 from pixal3d.trainers.flow_matching.mixins.image_conditioned_proj import (
     DinoV3ProjFeatureExtractor,
 )
-
-
-DEFAULT_IDS = (
-    "01184",
-    "05117",
-    "05452",
-    "06127",
-    "06145",
-    "06188",
-    "06830",
-    "07136",
-    "07306",
-    "09639",
-)
+from src.mainline_paths import REDWOOD10_SAMPLE_IDS
 
 SAMPLER_PARAMS = {
     "sparse_structure": {
@@ -277,7 +266,7 @@ def main() -> None:
     parser.add_argument("--dino", type=Path, default=SHARED_ROOT / "models" / "dinov3-vitl16-pretrain-lvd1689m")
     parser.add_argument("--moge", type=Path, default=SHARED_ROOT / "models" / "moge-2-vitl")
     parser.add_argument("--rmbg", type=Path, default=SHARED_ROOT / "models" / "RMBG-2.0")
-    parser.add_argument("--ids", nargs="+", default=list(DEFAULT_IDS))
+    parser.add_argument("--ids", nargs="+", default=list(REDWOOD10_SAMPLE_IDS))
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--resolution", type=int, choices=(1024, 1536), default=1024)
     parser.add_argument("--point-count", type=int, default=100_000)

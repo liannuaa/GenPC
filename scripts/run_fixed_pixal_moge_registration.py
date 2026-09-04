@@ -30,9 +30,11 @@ SHARED_ROOT = ROOT.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.mainline_paths import redwood_partial_root
-
-SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639")
+from src.mainline_paths import (
+    REDWOOD10_SAMPLE_IDS,
+    REGISTERED_PRIOR_FILENAME,
+    redwood_partial_root,
+)
 
 
 def _paths(sample: str, *, pixal_root: Path, camera_root: Path, partial_root: Path,
@@ -101,7 +103,7 @@ def _exists(path: Path, *, resume: bool) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--samples", nargs="+", default=list(SAMPLES),
+    parser.add_argument("--samples", nargs="+", default=list(REDWOOD10_SAMPLE_IDS),
                         help="Sample identifiers with matching partial, camera, and Pixal assets.")
     parser.add_argument("--pixal-root", type=Path,
                         default=SHARED_ROOT / "workspace" / "redwood_qwen_gpt_pixal_bidirectional_mainline_20260823")
@@ -179,7 +181,7 @@ def main() -> None:
                     "--output-dir", str(paths["joint"]), "--device", "cpu",
                 ], cwd=ROOT, log=paths["joint"] / "stage.log", dry_run=args.dry_run,
                      in_process=args.in_process)
-            amplified_prior = paths["amplified"] / "camera1_amplified_registered_100k.ply"
+            amplified_prior = paths["amplified"] / REGISTERED_PRIOR_FILENAME
             if not _exists(amplified_prior, resume=args.resume):
                 _run([
                     python, "scripts/run_camera1_amplified_sim3_refine.py",
@@ -188,7 +190,7 @@ def main() -> None:
                     "--output-dir", str(paths["amplified"]), "--device", "cpu",
                 ], cwd=ROOT, log=paths["amplified"] / "stage.log", dry_run=args.dry_run,
                      in_process=args.in_process)
-            wide_prior = paths["wide_tilt"] / "camera1_amplified_registered_100k.ply"
+            wide_prior = paths["wide_tilt"] / REGISTERED_PRIOR_FILENAME
             if not _exists(wide_prior, resume=args.resume):
                 _run([
                     python, "scripts/run_camera1_amplified_sim3_refine.py",
@@ -197,7 +199,7 @@ def main() -> None:
                     "--output-dir", str(paths["wide_tilt"]), "--wide-tilt-search", "--device", "cpu",
                 ], cwd=ROOT, log=paths["wide_tilt"] / "stage.log", dry_run=args.dry_run,
                      in_process=args.in_process)
-            final_prior = paths["final"] / "camera1_amplified_registered_100k.ply"
+            final_prior = paths["final"] / REGISTERED_PRIOR_FILENAME
             if not _exists(final_prior, resume=args.resume):
                 _run([
                     python, "scripts/run_camera1_amplified_sim3_refine.py",

@@ -86,3 +86,18 @@
   inference outputs; retain `PROJECT_STATE.md` only as the internal record of
   accepted mainline runs. `pip install --no-deps -e .`, local-link validation,
   py-compile, and the 41-test suite all pass.
+
+## Mainline code-structure stabilization — 2026-09-05
+
+- [x] Centralize the fixed Redwood sample set and the registration/Gaussian
+  artifact contract in one importable module, while retaining the current
+  legacy-path fallbacks for existing experiment folders.
+- [x] Make `src` an explicit package and replace duplicated constants in the
+  six public stage runners without changing any CLI defaults or frozen
+  numerical parameters.
+- [x] Add path-contract unit tests and run a one-sample byte-level registration
+  regression against the accepted `01184` output before committing.
+  - `workspace/structure_cleanup_regression_20260905/01184/final/`
+    reproduced the accepted final PLY byte-for-byte (SHA-256
+    `8625684013a23b8266872a4a5dd6813fbb63ae6ba800b0a9fa4525e677c6c4e6`).
+    `pytest -q` passed `44/44` after adding the path-contract coverage.
