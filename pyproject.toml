@@ -1,0 +1,71 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "genpc-plus"
+version = "1.0.0"
+description = "Zero-shot complete point-cloud recovery from a partial scan"
+readme = "README.md"
+requires-python = ">=3.10,<3.11"
+license = {text = "MIT"}
+keywords = ["point-cloud", "completion", "zero-shot", "image-to-3d", "registration"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+  "numpy==2.2.6",
+  "scipy==1.15.3",
+  "open3d==0.19.0",
+  "opencv-python==4.13.0.92",
+  "Pillow==12.2.0",
+  "PyYAML==6.0.3",
+  "munch==4.0.0",
+  "trimesh==4.12.2",
+  "torch==2.6.0+cu126",
+  "torchvision==0.21.0+cu126",
+  "kaolin==0.18.0",
+  "diffusers==0.36.0",
+  "transformers==4.57.6",
+  "accelerate==1.13.0",
+  "bitsandbytes==0.49.2",
+  "nunchaku @ git+https://github.com/Nunchaku-AI/Nunchaku@8f41840596bd516d434a1f88ac16c86fdb64e74f",
+  "einops==0.8.2",
+  "timm==1.0.27",
+  "rembg==2.0.69",
+  "onnxruntime==1.23.2",
+  "pygltflib==1.16.5",
+  "fpsample==1.0.2",
+]
+
+[project.optional-dependencies]
+pixal = [
+  "easydict==1.13",
+  "imageio==2.37.3",
+  "imageio-ffmpeg==0.6.0",
+  "kornia==0.8.2",
+  "natten==0.21.0",
+  "plyfile==1.1.4",
+  "tqdm==4.67.3",
+  "utils3d==1.3",
+  "zstandard==0.25.0",
+]
+metrics = ["ninja==1.13.0"]
+download = ["huggingface-hub==0.36.2", "modelscope==1.37.1"]
+dev = ["pytest==9.1.1"]
+
+[project.urls]
+Repository = "https://github.com/liannuaa/GenPC"
+Documentation = "https://github.com/liannuaa/GenPC#readme"
+
+[tool.setuptools.packages.find]
+include = ["src*", "tools*", "utils*", "loss_functions*"]
+namespaces = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

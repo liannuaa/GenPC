@@ -1,106 +1,196 @@
-# GenPC+: zero-shot complete point clouds from a partial scan
+# GenPC+: zero-shot complete point clouds from partial scans
 
-This repository contains one compact, fixed mainline.  It retains GenPC's
-saved-view depth construction, replaces its 3-D prior with Pixal3D, and uses
-the partial only for test-time registration and a bounded Gaussian edit.  It
-does not train, use GT during inference, or route samples through alternative
-methods.
+GenPC+ recovers a complete 100k-point object from a single partial point
+cloud, without training or test-time ground truth. It keeps GenPC's
+deterministic saved-view depth construction, uses a Pixal3D image-conditioned
+prior, aligns it through a fixed two-camera 2D+3D Sim(3) procedure, and uses
+the partial only as anchored evidence for a smooth Gaussian edit.
 
 ```text
-partial scan
-  -> deterministic saved-view grayscale depth + Qwen semantic image
-  -> GPT clarity-only image edit (external; prompt recorded with the asset)
-  -> Pixal3D GLB + 100k sampled complete prior
-  -> native Pixal--MoGe alignment -> two-camera bridge -> small partial refinement
-  -> fixed complete-to-partial Sim(3)
-  -> partial-anchored multiview Gaussian edit -> 100k complete point cloud
+partial point cloud
+  → saved-view grayscale depth + Qwen semantic image
+  → external GPT clarity edit
+  → Pixal3D textured GLB + complete 100k-point prior
+  → native Pixal–MoGe alignment + two-camera bridge + Camera-1 Sim(3)
+  → partial-anchored multiview Gaussian edit/decode
+  → complete 100k-point prediction
 ```
 
-The canonical method and frozen parameters are in
-[`docs/core_registration_pipeline.md`](docs/core_registration_pipeline.md).
-The accepted Redwood-10 output record is in `PROJECT_STATE.md`.
+The method is one fixed route: it has no training stage, GT/CD/EMD-guided
+selection, category-specific parameter sets, or per-sample fallback branch.
 
-## Environment and model paths
+## Documentation
 
-Run commands with:
+- [Installation](docs/installation.md)
+- [External model assets](docs/models.md)
+- [Fixed method and frozen parameters](docs/core_registration_pipeline.md)
+- [Documentation index](docs/README.md)
+
+## Repository layout
+
+```text
+configs/mainline_redwood.yaml       fixed saved-view and Qwen configuration
+data/redwood/partial/               inference partial scans
+data/redwood/gt/                    offline-only ground truth
+scripts/run_semantic_stage.py       partial → depth/Qwen/camera assets
+scripts/run_pixal3d_gpt_batch.py    GPT image → Pixal GLB/100k prior
+scripts/run_fixed_pixal_moge_registration.py
+                                    fixed Pixal–MoGe–partial registration
+scripts/run_mainline_gaussian.py    partial-anchored edit and 100k decode
+scripts/evaluate_mainline_redwood.py offline CD-L1/EMD only
+```
+
+## Data contract
+
+For a Redwood sample ID `<id>`, inference reads:
+
+```text
+data/redwood/partial/<id>.ply
+```
+
+Ground truth has the parallel path below, but is read exclusively by the
+offline evaluator after a prediction is frozen:
+
+```text
+data/redwood/gt/<id>.ply
+```
+
+The released fixed batch contains:
+
+```text
+01184  05117  05452  06127  06145
+06188  06830  07136  07306  09639
+```
+
+Other datasets may be run by arranging one partial PLY plus the same workspace
+artifact contract. Copy `configs/mainline_redwood.yaml`, add a semantic
+`prompt_overrides` label for each new sample ID, and pass that config to the
+semantic stage. The registration and Gaussian parameters remain shared; the
+pipeline never reads a category label during those stages.
+
+## End-to-end run
+
+Set the interpreter after following [Installation](docs/installation.md):
 
 ```bash
-PY=/opt/data/private/cr/miniconda3/envs/genpc/bin/python
+PY=python
+RUN=workspace/example_01184
+ID=01184
 ```
 
-The following local assets are required:
-
-- `models/Qwen-Image-Edit-2511`
-- `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`
-- `models/Pixal3D-weights`
-- `models/dinov3-vitl16-pretrain-lvd1689m`
-- `models/moge-2-vitl/model.pt`
-- `models/RMBG-2.0`
-
-`PIXAL3D_SOURCE` should point to the local Pixal3D source tree if it is not
-under `models/Pixal3D`.
-
-## Run the mainline
-
-1. Generate Qwen semantic images and saved-camera files from partial scans:
+### 1. Saved-view depth and Qwen semantic image
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 $PY scripts/run_semantic_stage.py \
-  --output-root workspace/new_run/semantic \
-  --partial-root data/redwood/partial --samples 01184
+  --output-root "$RUN/inputs/camera" \
+  --partial-root data/redwood/partial \
+  --samples "$ID"
 ```
 
-2. Apply the GPT clarity-only edit outside this repository. Save each result
-as `gpt_image.png` under `workspace/new_run/pixal/<sample>/` and save the exact
-prompt beside it. The Qwen image is the geometry authority: preserve camera,
-pose, silhouette and local part layout. The fixed downstream Sim(3) does not
-assume the edit retained an absolute image scale.
+This saves `depth.png`, `raw_depth.png`, `img.png`, `camera.pth`,
+`point_uv.npy`, and the Camera-1 foreground mask under
+`$RUN/inputs/camera/$ID/`.
 
-3. Create Pixal3D priors:
+### 2. External GPT clarity edit
+
+Create the Pixal input directory and save the GPT result there:
+
+```bash
+mkdir -p "$RUN/inputs/pixal/$ID"
+# Save the geometry-preserving GPT edit as:
+#   $RUN/inputs/pixal/$ID/gpt_image.png
+# Save its exact prompt as:
+#   $RUN/inputs/pixal/$ID/prompt.txt
+```
+
+`img.png` is the geometry authority. GPT may clarify material/detail but must
+not rotate, mirror, recrop, rescale, recenter, add/remove parts, or change an
+articulated local pose. See [Model assets](docs/models.md#qwen-and-gpt-image-inputs).
+
+### 3. Pixal3D complete prior
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 $PY scripts/run_pixal3d_gpt_batch.py \
-  --input-root workspace/new_run/pixal \
-  --output-root workspace/new_run/pixal --ids 01184
+  --input-root "$RUN/inputs/pixal" \
+  --output-root "$RUN/inputs/pixal" \
+  --ids "$ID"
 ```
 
-4. Put `camera.pth`, `point_uv.npy`, `img.png`, and
-`<sample>_moge_to_raw_partial_object_mask.png` from Stage 1 under
-`workspace/new_run/inputs/camera/<sample>/`; put partial scans under
-`workspace/new_run/inputs/partial/`. Then run the fixed registration:
+Outputs include `pixal3d.glb`, `pixal3d_sampled_100k.ply`, camera metadata,
+the preprocessed input, and a hash-checked native FP16 MoGe observation.
+
+### 4. Fixed two-camera registration
+
+The Gaussian stage keeps a self-contained copy of the partial scan:
 
 ```bash
+mkdir -p "$RUN/inputs/partial"
+cp "data/redwood/partial/$ID.ply" "$RUN/inputs/partial/$ID.ply"
+
 CUDA_VISIBLE_DEVICES=0 $PY scripts/run_fixed_pixal_moge_registration.py \
-  --samples 01184 \
-  --pixal-root workspace/new_run/pixal \
-  --camera-root workspace/new_run/inputs/camera \
-  --partial-root workspace/new_run/inputs/partial \
-  --output-root workspace/new_run/registration
+  --samples "$ID" \
+  --pixal-root "$RUN/inputs/pixal" \
+  --camera-root "$RUN/inputs/camera" \
+  --partial-root "$RUN/inputs/partial" \
+  --output-root "$RUN/registration"
 ```
 
-5. Use the same `workspace/new_run` root for the fixed Gaussian edit and
-decode.  Its input contract is `inputs/{camera,pixal,partial}`; use
-`scripts/materialize_mainline_inputs.py` to reproduce the accepted Redwood
-layout, or arrange an equivalent layout yourself.
+The registered complete prior is:
+
+```text
+$RUN/registration/<id>/final/camera1_amplified_registered_100k.ply
+```
+
+### 5. Partial-anchored Gaussian edit and decode
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 $PY scripts/run_mainline_gaussian.py \
-  --root workspace/new_run --registration-root workspace/new_run/registration \
-  --samples 01184 \
-  --max-anchor-residual-ratio .075 --max-displacement-ratio .075 \
-  --graph-screening .0015 --prior-protection-weight .01 \
-  --protection-exclusion-ratio .10
+  --root "$RUN" \
+  --registration-root "$RUN/registration" \
+  --samples "$ID"
 ```
 
-The final cloud is
-`gaussian/<sample>/decoded/partial_anchored_gaussian_decoded_100k.ply`.
+The final prediction is:
+
+```text
+$RUN/gaussian/<id>/decoded/partial_anchored_gaussian_decoded_100k.ply
+```
+
+It always contains 100,000 slots. The unobserved Pixal body is retained rather
+than discarded or naively concatenated with the partial scan.
 
 ## Offline evaluation
 
-Metrics are explicitly separate from inference:
+Compile the optional CUDA metric extensions first, as described in
+[Installation](docs/installation.md#optional-offline-cdemd-extensions). Then
+evaluate only after predictions are frozen:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 $PY scripts/evaluate_mainline_redwood.py \
-  --prediction-root workspace/new_run/gaussian \
-  --output workspace/new_run/metrics
+  --prediction-root "$RUN/gaussian" \
+  --ground-truth-root data/redwood/gt \
+  --samples "$ID" \
+  --output "$RUN/metrics"
 ```
+
+The evaluator is never called by inference and cannot affect image generation,
+Pixal3D, registration, or Gaussian-edit parameters.
+
+## Reproducibility and scope
+
+- The Qwen stage uses the frozen configuration in
+  `configs/mainline_redwood.yaml`.
+- Pixal3D uses seed 42, the 1024 cascade, 12 sampling steps per stage, and a
+  100k surface sampling target.
+- Registration uses only proper isotropic Sim(3); its Camera-1 candidate set
+  and continuation schedule are fixed for every sample.
+- Gaussian edit uses the shared parameters documented in
+  [the method specification](docs/core_registration_pipeline.md).
+- `PROJECT_STATE.md` records accepted internal experiment assets. It is not an
+  inference branch and should not be used for test-time selection.
+
+## Licence
+
+GenPC+ code is released under the [MIT License](LICENSE). External models,
+checkpoints, CUDA extensions, and datasets retain their own licences; see
+[Model assets](docs/models.md#licences-and-redistribution).

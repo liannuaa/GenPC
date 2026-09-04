@@ -101,7 +101,8 @@ def _exists(path: Path, *, resume: bool) -> bool:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--samples", nargs="+", choices=SAMPLES, default=list(SAMPLES))
+    parser.add_argument("--samples", nargs="+", default=list(SAMPLES),
+                        help="Sample identifiers with matching partial, camera, and Pixal assets.")
     parser.add_argument("--pixal-root", type=Path,
                         default=SHARED_ROOT / "workspace" / "redwood_qwen_gpt_pixal_bidirectional_mainline_20260823")
     parser.add_argument("--camera-root", type=Path,

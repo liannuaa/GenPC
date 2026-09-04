@@ -73,20 +73,22 @@
   in code and add tests for prompt text when feasible.
 
 ## Model Download Notes
-- The old Qwen ControlNet path is no longer part of the main pipeline.
-- Qwen edit pipeline files must exist at `models/Qwen-Image-Edit-2511`.
-- Nunchaku Qwen edit transformer weights should exist at
+- The public mainline is Qwen semantic completion → external GPT clarity edit
+  → Pixal3D → fixed Pixal--MoGe--partial registration → partial-anchored
+  Gaussian edit. Hunyuan, FreeReg, PCA/ICP routing, and historical agent
+  branches are not part of this route.
+- Qwen edit pipeline files must exist at `models/Qwen-Image-Edit-2511`; the
+  Nunchaku transformer must exist at
   `models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`.
-- Stage 1 uses Qwen-Image-Edit-2511 in one edit stage: incomplete depth image
-  to completed realistic RGB/semantic image. The input image must be converted
-  to RGB before calling the pipeline, and the prompt must use the object
-  parameter instead of hard-coding a category.
-- The default Hunyuan3D path is shape-only and uses `Hunyuan3D-2.1`.
-  Download `AI-ModelScope/Hunyuan3D-2.1` into `models/Hunyuan3D-2.1`,
-  including the `hunyuan3d-dit-v2-1` subfolder. The loader uses the `fp16`
-  variant for this checkpoint.
-- Hunyuan3D uses the regular 50-step path by default, with FlashVDM disabled.
-  `hunyuan_seed: null` means the shape generator uses a random seed; set an
-  integer only when reproducibility is needed.
-- RMBG-2.0 should be downloaded from ModelScope repo `AI-ModelScope/RMBG-2.0`
-  into `models/RMBG-2.0`.
+  Stage 1 converts the depth input to RGB and uses the configurable object
+  label in its prompt.
+- Pixal3D source must be available at `models/Pixal3D` or via
+  `PIXAL3D_SOURCE`; the tested source commit and its supplementary TRELLIS.2
+  dependencies are recorded in `docs/models.md`. Its model files live under
+  `models/Pixal3D-weights`; DINOv3 lives under
+  `models/dinov3-vitl16-pretrain-lvd1689m`.
+- Native Pixal--MoGe registration uses `models/moge-2-vitl/model.pt` and
+  RMBG-2.0 under `models/RMBG-2.0`. The source image, saved MoGe cache, and
+  Pixal camera metadata must all describe the same preprocessed Pixal input.
+- Model weights are external assets: use the current links and licence notes in
+  `docs/models.md`, rather than adding checkpoint binaries to the repository.

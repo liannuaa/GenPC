@@ -39,7 +39,8 @@ def main() -> None:
                         default=ROOT / "workspace" / "single_view_boundary_gaussian_redwood10_20260904")
     parser.add_argument("--registration-root", type=Path,
                         help="Optional frozen registration root. Defaults to <root>/registration.")
-    parser.add_argument("--samples", nargs="+", choices=SAMPLES, default=list(SAMPLES))
+    parser.add_argument("--samples", nargs="+", default=list(SAMPLES),
+                        help="Sample identifiers with materialized partial, camera, Pixal, and registration assets.")
     parser.add_argument("--max-pixel-distance", type=float, default=2.0)
     parser.add_argument("--virtual-positive-views", type=int, default=6)
     parser.add_argument("--virtual-render-size", type=int, default=384)

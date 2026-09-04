@@ -27,7 +27,8 @@ def main() -> None:
     parser.add_argument("--prediction-root", type=Path, required=True)
     parser.add_argument("--ground-truth-root", type=Path, default=redwood_ground_truth_root(ROOT))
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--samples", nargs="+", choices=SAMPLES, default=list(SAMPLES))
+    parser.add_argument("--samples", nargs="+", default=list(SAMPLES),
+                        help="Prediction/ground-truth identifiers to evaluate offline.")
     parser.add_argument("--count", type=int, default=16384)
     parser.add_argument("--seed", type=int, default=6145)
     args = parser.parse_args()

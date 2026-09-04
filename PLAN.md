@@ -69,3 +69,20 @@
   On the current `01184` Redwood input the full fixed registration decreased
   from `103.50 s` to `94.54 s`; every emitted registration PLY was
   byte-identical. Test suite: 41 passed.
+
+## Open-source mainline documentation and packaging — 2026-09-05
+
+- [x] Replace public documentation with one concise description of the fixed
+  Qwen/GPT/Pixal → registration → Gaussian mainline and its reproducible run
+  contract. The retained public set is root README plus `docs/{README,
+  installation,models,core_registration_pipeline}.md`.
+- [x] Add an installable `pyproject.toml` with the tested Python/CUDA runtime
+  constraints and a development test extra; remove superseded packaging files.
+- [x] Document external model/source dependencies, required local layout,
+  checkpoint provenance, licences, and the separate model download step.
+  The Pixal source commit is fixed in `docs/models.md`; checkpoints remain
+  external and are never redistributed with the code.
+- [x] Validate package metadata and documentation commands without changing
+  inference outputs; retain `PROJECT_STATE.md` only as the internal record of
+  accepted mainline runs. `pip install --no-deps -e .`, local-link validation,
+  py-compile, and the 41-test suite all pass.

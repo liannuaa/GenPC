@@ -49,7 +49,8 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--partial-root", type=Path, default=redwood_partial_root(ROOT))
     parser.add_argument("--models-root", type=Path, default=SHARED_ROOT / "models")
-    parser.add_argument("--samples", nargs="+", choices=SAMPLES, default=list(SAMPLES))
+    parser.add_argument("--samples", nargs="+", default=list(SAMPLES),
+                        help="Sample identifiers; add prompt_overrides in the config for new objects.")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
 

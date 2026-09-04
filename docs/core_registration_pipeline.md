@@ -1,9 +1,19 @@
 # Fixed Pixal--MoGe--partial registration and Gaussian completion
 
-This document is the canonical method description for the compact GenPC+
-mainline. All parameters below are shared across the Redwood-10 batch. No
-ground truth, CD, EMD, category-specific path, or sample-specific router is
-available to registration or editing.
+This is the canonical method specification for the public GenPC+ mainline.
+Installation and upstream checkpoints are documented in
+[Installation](installation.md) and [Model assets](models.md). All parameters
+below are shared across every input; Redwood-10 is only the released evaluation
+layout. No ground truth, CD, EMD, category-specific path, or sample-specific
+router is available to registration or editing.
+
+## Scope and notation
+
+Let \(P\) be an observed partial point cloud, \(X\) the 100k-point Pixal
+prior, \(C_1\) the saved partial-camera view, and \(C_2\) the Pixal-input
+camera. The method estimates only proper isotropic Sim(3) transforms during
+registration. Local scan/prior disagreement is handled later by the bounded
+Gaussian edit; it is not hidden inside a non-rigid registration module.
 
 ## Inputs
 
@@ -28,6 +38,10 @@ Pixal input is materialized with the Pixal assets and verified against the
 input-image hash before native registration.  This is an implementation cache:
 it uses the same MoGe tensor contract and does not alter the camera estimate,
 registration objective, or any data-dependent decision.
+
+For another dataset, the only semantic-stage metadata is an object description
+in the copied YAML configuration's `prompt_overrides` map. Registration and
+Gaussian editing do not consume it; their parameters and route remain fixed.
 
 ## Registration
 
@@ -58,6 +72,17 @@ deterministic minimum rule.
 
 The final registered complete body is
 `registration/<sample>/final/camera1_amplified_registered_100k.ply`.
+
+Frozen registration search settings:
+
+| Stage | Shared setting |
+| --- | --- |
+| Camera-1 ↔ Camera-2 bridge | 3 px transfer radius; 30,000 deterministic fit matches; 32,000-point local subset |
+| Coupled two-camera residual | 32,000 points; at most 10,000 Camera-1 visible pairs; 64 robust-fit trials |
+| Camera-1 continuation | 32,000 points; three standard levels: \((.006,.30^\circ,.006)\), \((.002,.10^\circ,.002)\), \((.0005,.025^\circ,.0005)\) |
+| Wide tilt continuation | \((.010,1.0^\circ,.010)\), \((.004,.35^\circ,.004)\), \((.001,.10^\circ,.001)\) |
+| Final tilt continuation | \((.010,.5^\circ,.010)\), \((.004,.175^\circ,.004)\), \((.001,.05^\circ,.001)\) |
+| Candidate scoring | 8 independent CPU workers; proposal order and deterministic minimum selection are preserved |
 
 ## Partial-anchored Gaussian edit
 
