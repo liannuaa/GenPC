@@ -5,6 +5,24 @@ from __future__ import annotations
 import numpy as np
 
 
+def validate_proper_sim3(transform: np.ndarray, *, atol: float = 1e-5) -> float:
+    """Validate a finite proper isotropic Sim(3) and return its scale."""
+    transform = np.asarray(transform, dtype=np.float64)
+    if transform.shape != (4, 4) or not np.all(np.isfinite(transform)):
+        raise ValueError("transform must be a finite 4x4 matrix")
+    linear = transform[:3, :3]
+    determinant = float(np.linalg.det(linear))
+    if determinant <= 0.0:
+        raise ValueError("transform must preserve orientation")
+    scale = float(np.cbrt(determinant))
+    rotation = linear / scale
+    if not np.allclose(rotation.T @ rotation, np.eye(3), atol=atol):
+        raise ValueError("transform may not contain anisotropic scale or shear")
+    if not np.isclose(np.linalg.det(rotation), 1.0, atol=atol):
+        raise ValueError("transform must contain a proper rotation")
+    return scale
+
+
 def weighted_umeyama(source: np.ndarray, target: np.ndarray, weights: np.ndarray) -> np.ndarray:
     """Estimate a weighted proper isotropic similarity from source to target."""
     source, target, weights = (np.asarray(source, dtype=np.float64), np.asarray(target, dtype=np.float64),

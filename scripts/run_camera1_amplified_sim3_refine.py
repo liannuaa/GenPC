@@ -21,10 +21,10 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import scripts.run_pixal_pca_sim3_ttt_v2 as base
-from scripts.run_registration_deformation_fusion_ablation import SavedCameraProjector
 from src.bidirectional_cycle_registration import visible_score
+from src.pointcloud_io import jsonable, load_points, write_compare, write_points
 from src.ray_consistent_registration import apply_transform
+from src.saved_camera import SavedCameraProjector, draw_projection_overlay
 from src.visible_pixel_sim3_refinement import local_camera1_visible_refine
 
 
@@ -53,8 +53,8 @@ def main() -> None:
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
 
-    partial = base.load_points(args.partial)
-    prior = base.load_points(args.registered_prior)
+    partial = load_points(args.partial)
+    prior = load_points(args.registered_prior)
     diagonal = max(float(np.linalg.norm(np.ptp(partial, axis=0))), 1e-8)
     projector = SavedCameraProjector.from_partial(
         partial, args.camera, padding=args.padding, image_shape=(512, 512), device=args.device,
@@ -79,9 +79,9 @@ def main() -> None:
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     stem = args.output_dir / "camera1_amplified"
-    base.write_points(Path(f"{stem}_registered_100k.ply"), result)
-    base.write_compare(Path(f"{stem}_partial_gray_pixal_red.ply"), partial, result)
-    base.draw_projection_overlay(Path(f"{stem}_saved_view_projection.png"), args.semantic, partial, result, projector)
+    write_points(Path(f"{stem}_registered_100k.ply"), result)
+    write_compare(Path(f"{stem}_partial_gray_pixal_red.ply"), partial, result)
+    draw_projection_overlay(Path(f"{stem}_saved_view_projection.png"), args.semantic, partial, result, projector)
     np.save(Path(f"{stem}_residual.npy"), step)
     record = {
         "method": "camera1_amplified_global_proper_sim3_recovery",
@@ -99,7 +99,7 @@ def main() -> None:
         "search": search, "before": _compact(before), "after": _compact(after), "final": _compact(final),
         "all_prior_points_preserved": bool(len(result) == len(prior)),
     }
-    Path(f"{stem}_info.json").write_text(json.dumps(base.jsonable(record), indent=2), encoding="utf-8")
+    Path(f"{stem}_info.json").write_text(json.dumps(jsonable(record), indent=2), encoding="utf-8")
     print(json.dumps({"applied": True, "before": before["objective"], "after": final["objective"],
                       "output_dir": str(args.output_dir)}, indent=2))
 

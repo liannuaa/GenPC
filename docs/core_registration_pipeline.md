@@ -1,251 +1,84 @@
-# Qwen-GPT-Pixal Bidirectional Completion Pipeline
+# Fixed Pixal--MoGe--partial registration and Gaussian completion
 
-## Active zero-shot mainline
+This document is the canonical method description for the compact GenPC+
+mainline. All parameters below are shared across the Redwood-10 batch. No
+ground truth, CD, EMD, category-specific path, or sample-specific router is
+available to registration or editing.
 
-```text
-partial point cloud + saved Redwood camera
-  -> Redwood-compatible depth.png
-  -> Qwen semantic completion (img.png: geometry/pose anchor)
-  -> GPT ImageGen clarity-only edit
-  -> Pixal3D complete GLB + 100k surface PLY
-  -> frozen v15 coarse proper-Sim(3) initialization
-  -> independent partial→visible-prior and visible-prior→partial pairs
-  -> saved-camera 2D+3D bidirectional consensus TTO
-  -> strict inverse moves the complete Pixal body to the partial frame
-  -> observation-conditioned visible surface posterior
-  -> complete 100k prediction
-```
+## Inputs
 
-This remains descended from GenPC: it retains the partial scan, saved camera,
-depth projection, and robust v15/GenPC coarse registration, while adding a
-Qwen-anchored GPT/Pixal complete prior and bidirectional test-time Sim(3).
+For a partial point cloud \(P\), the fixed saved view produces a depth image,
+camera \(C_1\), per-point image coordinates \(u_P\), and a Qwen semantic image
+\(I\). A GPT clarity-only edit provides the Pixal input image without changing
+the image geometry. Pixal3D outputs a textured complete mesh and a 100k-point
+prior \(X\); its own input image also gives a MoGe reconstruction \(M_2\) in
+the Pixal camera frame \(C_2\).
 
-## Geometry-preserving image contract
+## Registration
 
-The semantic source is
-`workspace/redwood_onestage_rawdepth_512_stage2_20260714/<sample>/img.png`.
-Qwen is the sole authority for camera pose, image-space position, projected
-size, silhouette, part layout, local articulation, and occlusion. GPT may only
-improve sharpness, boundaries, material coherence, and surfaces already
-implied by Qwen. It must not rotate, rescale, recenter, mirror, redesign,
-add/remove parts, or alter wheel, leg, armrest, leaf, or tabletop orientation.
-Each prompt is stored beside its output as `prompt.txt`.
+The registration is deliberately staged so that global pose and local
+partial-scan correction do not compete.
 
-## Pixal3D prior
+1. **Native Pixal--MoGe alignment.** Pixal export metadata supplies its camera
+convention and a deterministic analytic initial transform. A small proper
+Sim(3) refinement optimizes rendered silhouette, visible depth, boundary and
+3-D agreement between \(X\) and the MoGe cloud \(M_2\). It produces the
+native Pixal-frame observation and avoids an unconstrained global PCA search.
 
-`scripts/run_pixal3d_gpt_batch.py` consumes `gpt_image.png` with one shared
-configuration: TencentARC/Pixal3D, local Pixal3D/DINOv3/MoGe-2/RMBG weights,
-seed 42, 1024 cascade, and the shared 12-step sampler. It writes
-`pixal3d_input.png`, `pixal3d.glb`, `pixal3d_sampled_100k.ply`, and metadata.
+2. **Two-camera bridge.** The same semantic image is used to form a MoGe cloud
+in the saved partial camera. Pixel-indexed correspondences connect
+\(u_P\) to this cloud. The bridge estimates a proper isotropic Sim(3), carries
+the native Pixal prior into Camera-1 coordinates, and refines only the
+remaining camera-chain error using saved-view silhouette/depth and visible
+3-D pairs.
 
-## Bidirectional 2D+3D Sim(3) TTO
+3. **Coupled residual and Camera-1 continuation.** A joint residual aligns
+the native MoGe evidence, bridge matches, partial surface, and saved-view
+render. The final continuation applies the fixed three-level Camera-1 update,
+followed by a 1-degree wide tilt and a final 0.5-degree continuation. Every
+stage is applied; diagnostic scores never reject or route samples.
 
-`scripts/prepare_pixal_v15_initialized_priors.py` applies the frozen v15
-transform only as a coarse initialization. Final registration uses independent
-saved-camera correspondence sets in both directions:
+The final registered complete body is
+`registration/<sample>/final/camera1_amplified_registered_100k.ply`.
 
-```text
-partial -> visible complete prior
-visible complete prior -> partial
-```
+## Partial-anchored Gaussian edit
 
-Forward-only, reverse-only, balanced, and reciprocal hypotheses are fitted as
-proper isotropic Sim(3), bounded by one shared trust region, converted to the
-complete-to-partial direction through an analytic strict inverse, and selected
-with visible 2D silhouette/depth and 3D surface evidence. Sample IDs,
-categories, GT, CD, and EMD are unavailable to inference and routing.
+Registration cannot remove genuine prior/scan shape disagreement. The final
+stage interprets the 100k registered Pixal samples as Gaussian means. It does
+not concatenate point clouds or discard unobserved Pixal support.
 
-Shared parameters: pixel schedule `[8,5,3]`, final radius 5, per-step rotation
-cap 3 degrees, isotropic scale `[0.96,1.04]`, translation cap 0.03 partial-bbox
-diagonal, minimum 96 pairs, cycle cap 0.03.
+- Saved Camera-1 and six signed-PCA virtual views supply only positive,
+  mutual pixel-overlap correspondences. Missing partial pixels are not treated
+  as empty space.
+- Collision-free partial matches are fixed Dirichlet controls on a kNN graph
+  over the Pixal means. A screened harmonic solve propagates their displacement
+  along local surface structure.
+- Six self-renders of the original Pixal prior softly protect unobserved
+  geometry. Components without controls remain unchanged.
+- The decoder replaces at most one Pixal slot per partial anchor, so every
+  final cloud retains exactly 100,000 slots and the complete prior remains the
+  body carrier.
 
-## Fixed Pixal--MoGe registration audit
+Frozen shared edit parameters:
 
-The current registration-only audit keeps the original complete Pixal prior
-and applies one fixed, zero-shot sequence without proposal rejection:
+| Parameter | Value |
+| --- | ---: |
+| saved/virtual match radius | 2 px |
+| virtual views / resolution | 6 / 384 |
+| anchor residual cap | 0.075 partial-bbox diagonal |
+| displacement cap | 0.075 partial-bbox diagonal |
+| graph neighbors / edge ratio | 8 / 1.8 |
+| graph screening | 0.0015 |
+| self-protection views / weight | 6 / 0.01 |
+| protection exclusion radius | 0.10 partial-bbox diagonal |
+| remote gain | 1.0 |
+| CG tolerance / iterations | 1e-5 / 240 |
 
-```text
-Pixal input -> native MoGe -> analytic Pixal--MoGe Sim(3)
-  -> Camera-1/Camera-2 pixel bridge -> coupled two-edge Sim(3)
-  -> Camera-1 visible pixel-indexed 3-D Sim(3)
-  -> small, wide-tilt, and final Camera-1 global Sim(3) continuations
-```
+The final prediction is
+`gaussian/<sample>/decoded/partial_anchored_gaussian_decoded_100k.ply`.
 
-Every local search chooses the minimum of its fixed bounded candidate lattice,
-which includes identity.  Native MoGe evidence, bridged correspondence error,
-and full-resolution Camera-1 2D+3D scores are logged for analysis but never
-gate, reject, or revert a stage.  All transforms are proper rotation +
-isotropic scale + translation; no non-rigid deformation, fusion, GT, CD/EMD,
-or category-specific branch is used.  The full-nine rebuild is being written
-to `workspace/pixal_moge_fixed_route_full9_20260904`.
+## Evaluation firewall
 
-## Single-view boundary-conditioned Gaussian edit and decode
-
-After fixed registration, the complete Pixal population and the real scan are
-kept as separate Gaussian populations in the same partial frame. Pixal
-Gaussian means are editable; real partial Gaussian means and local scales are
-immutable. Collision-free mutually visible saved-camera partial/Pixal matches
-form hard 2-D-neighbourhood controls. Their measured 3-D offsets are imposed
-as Dirichlet boundary values on a local kNN surface graph over the registered
-Pixal means:
-
-\[
-\min_{d}\; \sum_{(i,j)\in E} w_{ij}\|d_i-d_j\|_2^2
-+ \lambda\sum_{i\notin C}\|d_i\|_2^2,
-\qquad d_c=\Delta_c\;(c\in C).
-\]
-
-Graph edges are pruned using local sampling scale, preventing propagation
-across large structural gaps. The weak screened term keeps disconnected or
-unsupported hidden components fixed. Hence the observed neighbourhood matches
-the partial exactly, while remote geometry follows only when it is connected
-through the same generated surface. This is a zero-shot geometric edit: it
-uses no GT/CD/EMD, category, or sample-specific decision.
-
-The partial scan is incomplete in every synthesized novel view, so its empty
-pixels are never used as negative evidence. Yet each virtual projection still
-has useful **positive** evidence: mutually z-buffered partial/Pixal pixels are
-added as cross-view controls, so side/back overlap resolves ambiguities that
-cannot be seen in the saved camera alone. The initial complete Pixal field is
-also self-rendered in fixed signed-PCA orthographic views. Front-most means
-outside a neighbourhood of the actual observations receive a small
-zero-displacement penalty. These are prior-protection views: they preserve
-hidden global shape while allowing the observed component to follow its hard
-partial anchors. They do not invent extra observations, treat missing scan
-pixels as background, or change the output point count.
-
-For review, every edit and decoded output also writes a six-panel virtual-view
-board (partial in gray, current Pixal field in red). The board is diagnostic;
-it is never used to route samples or select against GT.
-
-An optional ablation-only remote gain multiplies only **non-control** harmonic
-displacements by a continuous function of their distance from the hard
-observed controls. The controls themselves remain exact, and a separate cap
-limits remote movement. This distinguishes stronger structural propagation
-from accepting looser partial/Pixal matches.
-
-The point-cloud decoder does **not** concatenate the two point clouds.  It
-starts from all 100k edited Pixal means, finds mutually visible saved-camera
-partial/Pixal pixel pairs, and lets each reliable partial anchor replace at
-most one corresponding Pixal Gaussian centre.  Thus the hard observation is
-represented exactly where a prior support exists, while all unmatched Pixal
-means remain and preserve the full object.  The output retains the prior's
-100k count and sampling distribution.  CD/EMD, if requested, are evaluated
-only afterwards as an offline report.
-
-### Current shared Gaussian-edit configuration
-
-The current cross-sample candidate uses the same relaxed-positive-control
-limits for every object: maximum control residual and maximum displacement
-are both `0.075` of the partial bounding-box diagonal.  The graph uses eight
-neighbours, edge ratio `1.8`, screening `0.0015`, six 384-px signed-PCA
-positive-overlap views, six prior-protection views with weight `0.01`, and a
-protection-exclusion radius of `0.10` diagonal.  It has no remote gain
-(`1.0`).  This choice was frozen before its offline tests on 01184 and 06830;
-the metrics establish a batch-level candidate but are not available to any
-test-time decision.
-
-## Observation-conditioned surface posterior
-
-`src/observation_conditioned_surface_projection.py` compares identity, smooth
-absorption, and observed surface-mass budgets `[0.04,0.08,0.12]` with a shared
-saved-camera objective and prior-mass penalty. Partial points are FPS
-uniformized. Surface-mass projection exchanges the same number of nearest
-visible-prior points for observed points, preserving 100k total points and at
-least 88% of the complete generated body. Hidden/far geometry is not truncated.
-
-## Canonical outputs
-
-All ten inputs and outputs live under:
-
-`workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823`
-
-- `<sample>/`: depth, Qwen/GPT images, prompt, Pixal GLB/PLY/metadata;
-- `_v15_transform_initial/`: coarse initialized new priors;
-- `_bidirectional_consensus/`: registered PLY/GLB, transform, overlay and info;
-- `_surface_projection/`: final complete 100k prediction and diagnostics;
-- `postfreeze_cd_emd_strict/`: per-sample metrics, means and protocol.
-
-The frozen v15 baseline remains at
-`gpt_version/_pixal_guarded_unified_registration_v15_20260822`.
-
-## Strict full-ten result
-
-Predictions were frozen before GT evaluation. The protocol uses 16,384-point
-FPS, seed 6145, separate prediction FPS per geometry, and equivalent GT FPS by
-shared seed.
-
-| sample | new CD | new EMD | v15 CD | v15 EMD |
-| --- | ---: | ---: | ---: | ---: |
-| 01184 | 1.196 | 1.961 | 1.399 | 2.163 |
-| 05117 | 1.503 | 2.437 | 2.248 | 3.181 |
-| 05452 | 0.862 | 1.292 | 1.163 | 1.587 |
-| 06127 | 2.248 | 3.936 | 2.947 | 5.147 |
-| 06145 | 1.624 | 1.849 | 1.473 | 1.786 |
-| 06188 | 1.208 | 2.106 | 1.373 | 2.227 |
-| 06830 | 1.983 | 4.011 | 2.685 | 4.766 |
-| 07136 | 1.982 | 3.076 | 2.179 | 2.947 |
-| 07306 | 2.616 | 3.187 | 2.929 | 3.429 |
-| 09639 | 1.128 | 2.101 | 2.699 | 3.741 |
-| **mean** | **1.635** | **2.596** | **2.110** | **3.097** |
-
-The mean exceeds GenPC `1.74/2.88` by about 6.0% CD and 9.9% EMD. One shared
-zero-shot parameterization is used. Full-ten visual review remains required.
-
-## Cross-prior scale-consistency guard candidate
-
-Visual review found that the Qwen-GPT 07136 prior was shorter and thicker than
-the previous Pixal prior. Its registration shrank by `0.9632`, while the older
-prior expanded by `1.0347`; the older candidate also passed the registration
-guard and reduced the GT-free visible objective from `0.1034` to `0.0758`.
-
-`src/cross_prior_scale_guard.py` therefore defines a shared conservative
-fallback: the two priors must demand opposite scale directions, disagree by at
-least 6%, current must fail while fallback passes, and fallback must improve
-the visible objective by at least 20%. On all ten samples this selects fallback
-only for 07136. It uses no sample ID, category, GT, CD, or EMD.
-
-Guarded intermediate root:
-`workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/_cross_prior_scale_guard`.
-After freezing, strict mean CD/EMD is `1.5991/2.5410`, and 07136 improves from
-`1.9819/3.0755` to `1.6225/2.5098`. It is an accepted component of the final
-voxel-uniform mainline; the full-new-prior result remains an ablation.
-
-## Uniform voxel surface-measure candidate
-
-Direct 88% prior + 12% observed mass has visibly different local sampling
-density: across the nine exact-insertion cases, observed-point median nearest-
-neighbor spacing is typically about twice the prior spacing. The conservative
-uniformization in `src/voxel_surface_measure_resampling.py` performs two steps:
-
-1. remove an observed point only when it is both a robust kNN outlier within
-   the partial observation and farther than 2% object diagonal from prior
-   support;
-2. select one original point per adaptively sized voxel, preferring an observed
-   point when a voxel contains one, until approximately 32,768 representatives
-   remain.
-
-The output is strictly a subset of the fused input: it creates no points,
-interpolates no geometry, changes no pose/scale, and cannot warp the complete
-body. On all ten samples, mean point count is 32,771 and mean normalized kNN
-density CV drops from `0.498` to `0.292` (41.3% lower). The frozen strict mean
-CD/EMD is `1.5944/2.5296`, slightly improving over the cross-prior input
-`1.5991/2.5410` while remaining well above GenPC.
-
-Output root:
-`workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/_cross_prior_voxel_uniform_32k`.
-Metric root:
-`workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/postfreeze_cross_prior_voxel_uniform_32k_cd_emd`.
-The user accepted this complete route as the best-effect pipeline on
-2026-08-23. The 32k voxel-uniform root is the canonical final prediction root;
-the 100k cross-prior root remains its immutable pre-resampling ablation.
-
-## Reproduction order
-
-1. Generate Pixal assets with `scripts/run_pixal3d_gpt_batch.py`.
-2. Prepare coarse priors with `scripts/prepare_pixal_v15_initialized_priors.py`.
-3. Run `scripts/run_pixal_bidirectional_cycle_registration.py --step-mode consensus --force-candidate-output`.
-4. Run `scripts/run_observation_conditioned_surface_projection.py`.
-5. Freeze predictions, then run `scripts/evaluate_bidirectional_cycle_redwood.py`.
-
-Do not read GT metrics before the full prediction root is frozen.
+`scripts/evaluate_mainline_redwood.py` is an offline utility. It may read
+ground truth only after predictions are frozen. Its CD-L1/EMD values must not
+change registration, edit parameters, candidate selection, or routing.

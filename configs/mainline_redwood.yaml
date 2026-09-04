@@ -1,0 +1,45 @@
+paths:
+  data_dir: "data"
+  output_dir: "workspace/mainline_semantic"
+  models_dir: "models"
+
+models:
+  qwen_edit_transformer_path: "nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors"
+  qwen_edit_pipeline_path: "Qwen-Image-Edit-2511"
+  rmbg_model_path: "RMBG-2.0"
+
+dataset: "redwood"
+device: "cuda"
+sample_ids: ["01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639"]
+prompt_overrides:
+  "05117": "red chair"
+  "06127": "terracotta flower pot with leafy plant"
+  "06188": "red motorcyle"
+  "07136": "leather sofa"
+  "07306": "red office trash can"
+  "09639": "Ergonomic Chair"
+
+# Frozen saved-view depth setup.
+depth_projection: "reference_view"
+reference_eye_direction: [-0.14270581, -0.75454755, -0.64054122]
+reference_camera_up: [0.39445910, -0.63690607, 0.66238408]
+distance: 1.6
+fovy: 49.1
+cam_res: 512
+res: 512
+rescale: true
+padding: 0.15
+point_size: 1
+mask_pixel_rate: 3
+save_depth_view_point_cloud: false
+
+# Fixed Qwen depth-to-semantic completion setup.
+inpainter: "cv2"
+control_model: "qwen_edit"
+generate_res: 512
+depth_image_input_res: 512
+qwen_edit_depth_input_name: "raw_depth.png"
+qwen_edit_steps: 40
+qwen_edit_generate_res: 1024
+qwen_edit_true_cfg_scale: 4.0
+qwen_edit_negative_prompt: " "

@@ -17,10 +17,10 @@ import numpy as np
 from scipy.spatial import cKDTree
 from scipy.spatial.transform import Rotation
 
-from scripts.run_render_to_moge_sim3 import zbuffer_depth_with_indices
 from src.bidirectional_cycle_registration import interpolate_sim3, visible_score
 from src.indexed_pixel_sim3 import robust_indexed_sim3, unique_pixel_matches
 from src.ray_consistent_registration import apply_transform, bounded_delta_sim3
+from src.zbuffer import zbuffer_depth_with_indices
 
 
 def visible_pixel_pairs(

@@ -14,6 +14,8 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.spatial import cKDTree
 
+from src.robust_similarity import validate_proper_sim3
+
 
 @dataclass(frozen=True)
 class DualGaussianField:
@@ -84,8 +86,6 @@ def make_dual_gaussian_field(
 
 def apply_prior_sim3(field: DualGaussianField, transform: np.ndarray) -> DualGaussianField:
     """Move only editable prior Gaussians with a validated proper Sim(3)."""
-    from src.prior_backend_contract import validate_proper_sim3
-
     transform = np.asarray(transform, dtype=np.float64)
     scale = validate_proper_sim3(transform)
     means = field.means.copy()

@@ -14,8 +14,6 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-import scripts.run_pixal_pca_sim3_ttt_v2 as base
-from scripts.run_registration_deformation_fusion_ablation import SavedCameraProjector
 from src.dual_gaussian_fields import make_dual_gaussian_field
 from src.multiview_partial_correspondence import (
     concatenate_positive_pairs,
@@ -26,6 +24,8 @@ from src.partial_anchored_gaussian_edit import (
     boundary_conditioned_graph_displacement,
     compact_anchor_displacement,
 )
+from src.pointcloud_io import jsonable, load_points, write_compare, write_points
+from src.saved_camera import SavedCameraProjector, draw_projection_overlay
 from src.visible_pixel_sim3_refinement import visible_pixel_pairs
 
 
@@ -63,7 +63,7 @@ def main() -> None:
     args = parser.parse_args()
     if min(args.max_anchor_residual_ratio, args.support_radius_ratio, args.max_displacement_ratio) <= 0.:
         raise ValueError("all shared metric ratios must be positive")
-    prior, partial = base.load_points(args.prior), base.load_points(args.partial)
+    prior, partial = load_points(args.prior), load_points(args.partial)
     diagonal = max(float(np.linalg.norm(np.ptp(partial, axis=0))), 1e-8)
     projector = SavedCameraProjector.from_partial(
         partial, args.camera, padding=float(args.padding),
@@ -108,9 +108,9 @@ def main() -> None:
         )
     args.output_dir.mkdir(parents=True, exist_ok=True)
     stem = args.output_dir / "partial_anchored_gaussian_edit"
-    base.write_points(Path(f"{stem}_editable_prior_100k.ply"), edited)
-    base.write_compare(Path(f"{stem}_partial_gray_prior_red.ply"), partial, edited)
-    base.draw_projection_overlay(Path(f"{stem}_saved_view_projection.png"), args.semantic, partial, edited, projector)
+    write_points(Path(f"{stem}_editable_prior_100k.ply"), edited)
+    write_compare(Path(f"{stem}_partial_gray_prior_red.ply"), partial, edited)
+    draw_projection_overlay(Path(f"{stem}_saved_view_projection.png"), args.semantic, partial, edited, projector)
     virtual_board = Path(f"{stem}_virtual_view_board.png")
     save_virtual_overlay_board(virtual_board, partial, edited, views=int(args.virtual_positive_views))
     np.save(Path(f"{stem}_anchor_pairs.npy"), anchors)
@@ -164,7 +164,7 @@ def main() -> None:
                     "positive_pairs": str(Path(f"{stem}_positive_pixel_pairs.npy").resolve()),
                     "field": str(field_output.resolve())},
     }
-    Path(f"{stem}_info.json").write_text(json.dumps(base.jsonable(record), indent=2), encoding="utf-8")
+    Path(f"{stem}_info.json").write_text(json.dumps(jsonable(record), indent=2), encoding="utf-8")
     print(json.dumps({"pairing": pairing, "edit": edit, "output_dir": str(args.output_dir.resolve())}, indent=2))
 
 

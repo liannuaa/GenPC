@@ -15,8 +15,8 @@ import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
 
-from scripts.run_render_to_moge_sim3 import zbuffer_depth_with_indices
 from src.ray_consistent_registration import apply_transform
+from src.zbuffer import zbuffer_depth_with_indices
 
 
 def pixal_export_to_camera(distance: float) -> np.ndarray:

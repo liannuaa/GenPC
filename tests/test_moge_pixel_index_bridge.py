@@ -2,7 +2,7 @@ import unittest
 
 import numpy as np
 
-from scripts.run_moge_pixel_index_bridge import (
+from src.moge_pixel_bridge import (
     build_partial_to_moge_index,
     colors_for_moge_hits,
     filter_moge_points_by_object_mask,
