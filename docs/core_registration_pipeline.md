@@ -118,6 +118,12 @@ For review, every edit and decoded output also writes a six-panel virtual-view
 board (partial in gray, current Pixal field in red). The board is diagnostic;
 it is never used to route samples or select against GT.
 
+An optional ablation-only remote gain multiplies only **non-control** harmonic
+displacements by a continuous function of their distance from the hard
+observed controls. The controls themselves remain exact, and a separate cap
+limits remote movement. This distinguishes stronger structural propagation
+from accepting looser partial/Pixal matches.
+
 The point-cloud decoder does **not** concatenate the two point clouds.  It
 starts from all 100k edited Pixal means, finds mutually visible saved-camera
 partial/Pixal pixel pairs, and lets each reliable partial anchor replace at
@@ -126,6 +132,18 @@ represented exactly where a prior support exists, while all unmatched Pixal
 means remain and preserve the full object.  The output retains the prior's
 100k count and sampling distribution.  CD/EMD, if requested, are evaluated
 only afterwards as an offline report.
+
+### Current shared Gaussian-edit configuration
+
+The current cross-sample candidate uses the same relaxed-positive-control
+limits for every object: maximum control residual and maximum displacement
+are both `0.075` of the partial bounding-box diagonal.  The graph uses eight
+neighbours, edge ratio `1.8`, screening `0.0015`, six 384-px signed-PCA
+positive-overlap views, six prior-protection views with weight `0.01`, and a
+protection-exclusion radius of `0.10` diagonal.  It has no remote gain
+(`1.0`).  This choice was frozen before its offline tests on 01184 and 06830;
+the metrics establish a batch-level candidate but are not available to any
+test-time decision.
 
 ## Observation-conditioned surface posterior
 

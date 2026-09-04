@@ -92,6 +92,9 @@ def boundary_conditioned_graph_displacement(
     prior_protection_views: int = 6,
     prior_protection_weight: float = .02,
     protection_exclusion_ratio: float = .08,
+    remote_gain: float = 1.,
+    remote_gain_radius_ratio: float = .08,
+    remote_displacement_cap_multiplier: float = 1.,
     cg_tolerance: float = 1e-5,
     cg_max_iterations: int = 240,
 ) -> tuple[np.ndarray, np.ndarray, dict]:
@@ -116,7 +119,8 @@ def boundary_conditioned_graph_displacement(
     if len(prior) < 3:
         raise ValueError("at least three prior points are required")
     if min(max_anchor_residual, max_displacement, edge_ratio, screening, cg_tolerance,
-           protection_exclusion_ratio) <= 0. or prior_protection_weight < 0.:
+           protection_exclusion_ratio, remote_gain, remote_gain_radius_ratio,
+           remote_displacement_cap_multiplier) <= 0. or prior_protection_weight < 0.:
         raise ValueError("metric bounds, graph bounds, screening, and tolerance must be positive")
     if neighbours < 2 or cg_max_iterations <= 0:
         raise ValueError("neighbours must be at least two and cg_max_iterations positive")
@@ -198,7 +202,18 @@ def boundary_conditioned_graph_displacement(
             system, np.asarray(rhs), tolerance=float(cg_tolerance),
             max_iterations=int(cg_max_iterations),
         )
-        displacement[unknown_ids] = _clip_vectors(solution, float(max_displacement))
+        # Controls remain exact.  Only non-controls may receive a continuous
+        # distance-monotone gain, allowing remote structure to follow a local
+        # edit more strongly without loosening any observed correspondence.
+        gain_radius = float(remote_gain_radius_ratio) * max(
+            float(np.linalg.norm(np.ptp(prior, axis=0))), 1e-9,
+        )
+        gain = 1. + (float(remote_gain) - 1.) * (1. - np.exp(-nearest_control[unknown_ids] / gain_radius))
+        remote_solution = solution * gain[:, None]
+        displacement[unknown_ids] = _clip_vectors(
+            remote_solution,
+            float(max_displacement) * float(remote_displacement_cap_multiplier),
+        )
     else:
         cg_status = [0, 0, 0]
 
@@ -220,6 +235,9 @@ def boundary_conditioned_graph_displacement(
         "prior_protection_weight": float(prior_protection_weight),
         "protection_exclusion_radius": float(protection_radius),
         "prior_protection_gaussians": int(protection_mask.sum()),
+        "remote_gain": float(remote_gain),
+        "remote_gain_radius": float(gain_radius) if len(unknown_ids) else 0.,
+        "remote_displacement_cap": float(max_displacement) * float(remote_displacement_cap_multiplier),
         "graph_edges": int(len(source)),
         "graph_components": int(components),
         "control_components": int(component_has_control.sum()),
@@ -229,6 +247,7 @@ def boundary_conditioned_graph_displacement(
         "mean_displacement": float(magnitude.mean()),
         "p95_displacement": float(np.quantile(magnitude, .95)),
         "max_observed_displacement": float(magnitude.max(initial=0.)),
+        "mean_noncontrol_displacement": float(magnitude[~is_control].mean()) if np.any(~is_control) else 0.,
         "cg_status": cg_status,
         "field": "boundary_conditioned_surface_graph_with_multiview_prior_protection",
     }

@@ -40,3 +40,22 @@ def test_boundary_graph_keeps_controls_exact_and_disconnected_body_fixed():
     assert info["control_components"] == 1
     assert info["prior_protection_gaussians"] >= 0
     assert info["field"] == "boundary_conditioned_surface_graph_with_multiview_prior_protection"
+
+
+def test_boundary_graph_remote_gain_leaves_observed_controls_fixed():
+    prior = np.array(tuple((.1 * index, 0., 0.) for index in range(12)))
+    partial = prior[:6] + np.array((0., .12, 0.))
+    pairs = np.array(tuple((index, index, index, 0.) for index in range(6)))
+    base, anchors, _ = boundary_conditioned_graph_displacement(
+        prior, partial, pairs, max_anchor_residual=.2, max_displacement=.2,
+        neighbours=3, edge_ratio=1.8, screening=.01,
+    )
+    gained, gained_anchors, info = boundary_conditioned_graph_displacement(
+        prior, partial, pairs, max_anchor_residual=.2, max_displacement=.2,
+        neighbours=3, edge_ratio=1.8, screening=.01, remote_gain=1.5,
+        remote_gain_radius_ratio=.1, remote_displacement_cap_multiplier=1.5,
+    )
+    assert np.array_equal(anchors, gained_anchors)
+    assert np.allclose(gained[gained_anchors[:, 1]], partial[gained_anchors[:, 0]])
+    assert np.linalg.norm(gained[-1] - prior[-1]) > np.linalg.norm(base[-1] - prior[-1])
+    assert info["remote_gain"] == 1.5

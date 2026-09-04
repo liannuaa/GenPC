@@ -1709,3 +1709,107 @@ What must not change without asking:
   `git diff --check` pass. Final Camera-1 objective after the last continuation
   is respectively `0.078404, 0.029222, 0.045875, 0.077912, 0.047739,
   0.094383, 0.115850, 0.051641, 0.074690` in the sample-id order above.
+
+## 2026-09-04 CST — user-approved 01184 multi-view Gaussian edit baseline
+
+- User approval: “01184 效果确实不错”. Preserve this as the approved visual
+  baseline for stronger-edit ablations; do not overwrite its output directory.
+  The user requested a somewhat stronger shared edit, not a sample-specific
+  redesign.
+- Exact outputs: `workspace/single_view_boundary_gaussian_redwood10_20260904/gaussian/01184/{edit/partial_anchored_gaussian_edit_editable_prior_100k.ply,edit/partial_anchored_gaussian_edit_partial_gray_prior_red.ply,edit/partial_anchored_gaussian_edit_saved_view_projection.png,edit/partial_anchored_gaussian_edit_virtual_view_board.png,decoded/partial_anchored_gaussian_decoded_100k.ply,decoded/partial_anchored_gaussian_partial_gray_decoded_red.ply,decoded/partial_anchored_gaussian_saved_view_projection.png,decoded/partial_anchored_gaussian_virtual_view_board.png}`. The decoded cloud has exactly 100,000 Pixal slots; red is edited/decoded Pixal and gray is the fixed partial.
+- Inputs: registered complete prior `workspace/best_register_redwood10_20260904/01184/camera1_amplified_registered_100k.ply`; partial `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/partial/01184.ply`; saved camera `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/camera/01184/camera.pth`; depth `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/camera/01184/depth.png`; Qwen semantic `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/camera/01184/img.png`; GPT clarity image `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/pixal/01184/gpt_image.png`; Pixal input/GLB `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/pixal/01184/{pixal3d_input.png,pixal3d.glb}`.
+- Models / generation: inherited Qwen-Image-Edit-2511 stage: exact prompt `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的rubbish bin，纯白背景`; negative prompt ` `; true CFG `4.0`; 40 steps; raw-depth input; seed/scheduler/backend `UNKNOWN`. Inherited GPT clarity-only prompt is `UNKNOWN`; the retained contract is “clarity-only edit of qwen_img.png; preserve the wheelie-bin camera pose, image-space position, projected size, body silhouette, lid, handle and two parallel wheels; do not rotate, rescale, recenter, mirror, add/remove parts, or alter wheel placement.” GPT checkpoint, seed, scheduler, CFG, and backend are `UNKNOWN`. Inherited Pixal3D is TencentARC/Pixal3D with weights `/opt/data/private/cr/lab/GenPC/models/Pixal3D-weights`, DINOv3 `/opt/data/private/cr/lab/GenPC/models/dinov3-vitl16-pretrain-lvd1689m`, MoGe-2 `/opt/data/private/cr/lab/GenPC/models/moge-2-vitl/model.pt`, RMBG-2.0 `/opt/data/private/cr/lab/GenPC/models/RMBG-2.0`, seed `42`, 1024 cascade, 12 sparse/shape/texture steps, and 100k surface samples.
+- Frozen edit setup: six signed-PCA positive-overlap virtual views at 384 px plus saved Camera-1 mutual pairs; missing partial pixels are unconstrained. Boundary-conditioned kNN Gaussian graph: 8 neighbours, edge ratio `1.8`, saved/virtual pixel radius `2`, anchor-residual and maximum displacement `0.06` partial-bbox diagonal, screening `.003`, six Pixal self-protection views, protection weight `.02`, protection exclusion `.08` diagonal, CG tolerance `1e-5`, max 240 iterations. Decoder uses one-to-one partial replacement and the same six virtual views; it selected 30,012 anchors. No GT/CD/EMD, category, or sample-specific routing entered edit/decoding.
+- What is approved: the visible quality and full-body preservation of this exact baseline. Stronger candidates must keep its input prior, one shared zero-shot parameterization, all 100k complete-prior slots, and positive-overlap-only policy; only edit-strength parameters may change.
+
+## 2026-09-04 CST — user-preferred 06830 relaxed-anchor Gaussian edit
+
+- User approval: after viewing the five frozen variants and their offline
+  metrics, the user stated that “`宽松锚点 0.075` 会更好些”.  Treat this as the
+  preferred shared 3DGS-edit parameterization candidate, subject to a
+  cross-sample check.  It is **not** a per-sample metric route: the same
+  residual/displacement bounds must be applied to every sample in a batch.
+- Exact outputs: `workspace/single_view_boundary_gaussian_redwood10_20260904/gaussian/06830/strength_075/{edit/partial_anchored_gaussian_edit_editable_prior_100k.ply,edit/partial_anchored_gaussian_edit_partial_gray_prior_red.ply,edit/partial_anchored_gaussian_edit_saved_view_projection.png,edit/partial_anchored_gaussian_edit_virtual_view_board.png,decoded/partial_anchored_gaussian_decoded_100k.ply,decoded/partial_anchored_gaussian_partial_gray_decoded_red.ply,decoded/partial_anchored_gaussian_saved_view_projection.png,decoded/partial_anchored_gaussian_virtual_view_board.png}`.
+  The decoded output retains exactly 100,000 Pixal slots and uses 19,576
+  collision-free one-to-one partial anchors; it never concatenates or deletes
+  the unobserved prior.  The visual comparison boards are
+  `workspace/single_view_boundary_gaussian_redwood10_20260904/gaussian/06830/{strength_comparison_board.png,strength_virtual_comparison_board.png}`.
+- Inputs: registered Pixal prior
+  `workspace/best_register_redwood10_20260904/06830/camera1_amplified_registered_100k.ply`; partial
+  `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/partial/06830.ply`; Camera-1
+  `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/camera/06830/camera.pth`; depth
+  `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/camera/06830/depth.png`; Qwen semantic
+  `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/camera/06830/img.png`; GPT clarity image
+  `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/pixal/06830/gpt_image.png`; and Pixal
+  input/mesh `workspace/single_view_boundary_gaussian_redwood10_20260904/inputs/pixal/06830/{pixal3d_input.png,pixal3d.glb}`.
+- Models / upstream generation: Qwen-Image-Edit-2511 uses exact prompt
+  `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的tricycle，纯白背景`; negative prompt ` `;
+  true CFG `4.0`; 40 steps; raw-depth input; seed/scheduler/backend `UNKNOWN`.
+  The retained GPT clarity prompt is exactly: `Edit the supplied Qwen semantic image into a clear, complete, realistic studio image of the same blue child's tricycle with a tall rear push handle. The input is the sole geometric authority. Preserve exactly the camera viewpoint, object yaw, image-space center, projected size, frame silhouette, tall push-handle height and curvature, seat, three-wheel layout, front fork, pedals, and especially the existing steering/front-wheel direction and foreshortening. Only improve sharpness, clean boundaries, coherent realistic material, and complete surfaces already implied by the input. Plain white background. Do not rotate, rescale, recenter, mirror, straighten or reverse the front wheel, shorten the push handle, move wheels, redesign, add/remove parts, or add text/clutter.` GPT negative prompt, checkpoint, seed, scheduler, CFG, and backend are `UNKNOWN`.  Pixal3D uses `/opt/data/private/cr/lab/GenPC/models/Pixal3D-weights`, DINOv3 `/opt/data/private/cr/lab/GenPC/models/dinov3-vitl16-pretrain-lvd1689m`, MoGe-2 `/opt/data/private/cr/lab/GenPC/models/moge-2-vitl/model.pt`, RMBG-2.0 `/opt/data/private/cr/lab/GenPC/models/RMBG-2.0`, xFormers, seed `42`, 1024 px, 12 sparse/shape/texture steps, a 300k decimation target, 2048 texture, and 100k sampled surface points.  Sparse and shape guidance are `7.5`; texture guidance is `1.0`.
+- Frozen edit / decode: Camera-1 mutual pixel-indexed positives plus six signed-PCA 384-px virtual-view mutual positives; missing partial pixels remain unconstrained.  The boundary-conditioned kNN graph has 8 neighbours, edge ratio `1.8`, pixel radius `2`, screening `.0015`, six self-protection views, protection weight `.01`, and 240 CG iterations at `1e-5` tolerance.  Shared relaxed bounds are `max_anchor_residual_ratio=.075` and `max_displacement_ratio=.075`; `remote_gain=1.0`, support/remote radius `.08` partial-bbox diagonal, protection exclusion `.10` diagonal.  No GT, CD, EMD, category, or sample-specific routing enters the edit or decode.
+- Offline-only evidence: frozen-output audit with seed `6145` and 16,384-point FPS reports CD-L1/EMD `1.54112596 / 2.81621478` (`×10²`) in `workspace/single_view_boundary_gaussian_redwood10_20260904/gaussian/06830/postfreeze_strength_ablation/{metrics.csv,protocol.json}`.  This is lower than baseline `1.69312470 / 3.16989869`, remote-gain-2 `1.65262204 / 3.05689238`, and MV512+remote-gain-2 `1.66569538 / 3.08937691`; it is descriptive evidence only and must not be used as an inference-time gate.
+
+## 2026-09-04 CST — user-approved Redwood-10 relaxed-anchor Gaussian batch
+
+- User approval: “效果非常好了 可以保存代码 提交到github上”.  Preserve this
+  ten-sample post-registration result as the accepted shared `.075` Gaussian
+  edit/decode batch.  Do not overwrite it, switch parameters per sample, or
+  re-run upstream Qwen/GPT/Pixal generation without explicit user direction.
+- Sample ids and exact outputs: `01184, 05117, 05452, 06127, 06145, 06188,
+  06830, 07136, 07306, 09639`.  The complete artifact root is
+  `workspace/relaxed_anchor_gaussian_redwood10_20260904`; exact final
+  predictions are
+  `gaussian/<sample>/decoded/partial_anchored_gaussian_decoded_100k.ply`, with
+  editable prior, graph field, positive pairs, overlays, anchor assignments,
+  and six-view board alongside each result.  The machine-readable batch record
+  is `gaussian/batch_manifest.json`; the post-freeze metric record is
+  `postfreeze_cd_emd/{metrics_samples.csv,metrics_summary.json,protocol.json}`.
+  Every final PLY was verified to retain exactly 100,000 Pixal slots.
+- Inputs: per sample, copied depth/camera/Qwen semantic assets are at
+  `inputs/camera/<sample>/`, copied GPT/Pixal image, GLB, 100k surface prior
+  and metadata are at `inputs/pixal/<sample>/`, and the real scan is
+  `inputs/partial/<sample>.ply`.  Accepted registered priors are at
+  `registration/<sample>/final/camera1_amplified_registered_100k.ply`.  No
+  upstream image, GLB, MoGe, or Sim(3) inference was re-run for this
+  post-registration batch.
+- Models / generation: inherited Qwen-Image-Edit-2511 assets use
+  `/opt/data/private/cr/lab/GenPC/models/Qwen-Image-Edit-2511` and the
+  Nunchaku transformer
+  `/opt/data/private/cr/lab/GenPC/models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`;
+  Qwen negative prompt is exactly ` `, true CFG `4.0`, 40 steps, raw-depth
+  input, and Qwen seed/scheduler/backend `UNKNOWN`.  Inherited Pixal3D uses
+  `/opt/data/private/cr/lab/GenPC/models/Pixal3D-weights`, DINOv3
+  `/opt/data/private/cr/lab/GenPC/models/dinov3-vitl16-pretrain-lvd1689m`,
+  MoGe-2 `/opt/data/private/cr/lab/GenPC/models/moge-2-vitl/model.pt`, and
+  RMBG-2.0 `/opt/data/private/cr/lab/GenPC/models/RMBG-2.0`; seed `42`, 1024
+  px, xFormers, 12 sparse/shape/texture steps, 300k decimation target, 2048
+  texture, and 100k surface sampling.  GPT checkpoint/version, seed, steps,
+  CFG, scheduler, backend and negative prompt are `UNKNOWN` unless noted
+  below.
+- Exact inherited Qwen prompts (all use `input_image: raw_depth.png`, negative
+  prompt ` `, true CFG `4.0`, 40 steps): `01184`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的rubbish bin，纯白背景`; `05117`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red chair，纯白背景`; `05452`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的armchair，纯白背景`; `06127`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的terracotta flower pot with leafy plant，纯白背景`; `06145`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的table，纯白背景`; `06188`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red motorcyle，纯白背景`; `06830`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的tricycle，纯白背景`; `07136`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的leather sofa，纯白背景`; `07306`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red office trash can，纯白背景`; `09639`: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的Ergonomic Chair，纯白背景`.
+- Exact inherited GPT prompts: `01184`: `UNKNOWN` (contract: clarity-only edit
+  of qwen_img.png; preserve the wheelie-bin camera pose, image-space position,
+  projected size, body silhouette, lid, handle and two parallel wheels; do not
+  rotate, rescale, recenter, mirror, add/remove parts, or alter wheel
+  placement). `05117`: `UNKNOWN` (contract: clarity-only edit of qwen_img.png;
+  preserve the red chair camera pose, image-space position, projected size,
+  back, seat and four-leg layout; do not rotate, rescale, recenter, mirror,
+  add/remove parts, or alter leg placement). `05452`: `UNKNOWN` (contract:
+  clarity-only edit of qwen_img.png; preserve the brown curved chair camera
+  pose, image-space position, projected size, thin curved back/seat profile,
+  arms and legs; do not rotate, rescale, recenter, mirror, add a pointed back,
+  add/remove parts, or alter curvature). `06127`: `Edit the supplied Qwen semantic image into a clear, complete, realistic studio image of the same potted plant. The input is the sole geometric authority. Preserve exactly the camera viewpoint, object yaw, image-space center, projected height and width, terracotta pot silhouette and opening, stem locations, and the number, direction, overlap, curvature, and relative size of every major visible leaf. Only improve sharpness, clean boundaries, coherent realistic material, and complete surfaces already implied by the input. Plain white background. Do not rotate, rescale, recenter, mirror, redesign, add or remove leaves, rearrange foliage, alter the pot, or add text/clutter.` `06145`: `Edit the supplied Qwen semantic image into a clear, complete, realistic studio image of the same pedestal table. The input is the sole geometric authority. Preserve exactly the camera viewpoint, object yaw, image-space center, projected size, tabletop long/short axis orientation and perspective, tabletop thickness, single central pedestal position, and round base dimensions. Only improve sharpness, clean boundaries, coherent realistic material, and complete surfaces already implied by the input. Plain white background. Do not rotate, rescale, recenter, mirror, swap tabletop length and width, change the pedestal or base proportions, add parts, remove parts, or add text/clutter.` `06188`: `Edit the supplied Qwen semantic image into a clear, complete, realistic studio image of the same red scooter. The input is the sole geometric authority. Preserve exactly the camera viewpoint, object yaw, image-space center, projected size, body silhouette, seat, handlebars, mirrors, both wheels, front fork, and especially the existing front-wheel and steering-head tilt and foreshortening. Only improve sharpness, clean boundaries, coherent realistic material, and complete surfaces already implied by the input. Plain white background. Do not rotate, rescale, recenter, mirror, straighten or reverse the steering angle, move either wheel, redesign the scooter, add/remove parts, add a rider, or add text/clutter.` `06830`: `Edit the supplied Qwen semantic image into a clear, complete, realistic studio image of the same blue child's tricycle with a tall rear push handle. The input is the sole geometric authority. Preserve exactly the camera viewpoint, object yaw, image-space center, projected size, frame silhouette, tall push-handle height and curvature, seat, three-wheel layout, front fork, pedals, and especially the existing steering/front-wheel direction and foreshortening. Only improve sharpness, clean boundaries, coherent realistic material, and complete surfaces already implied by the input. Plain white background. Do not rotate, rescale, recenter, mirror, straighten or reverse the front wheel, shorten the push handle, move wheels, redesign, add/remove parts, or add text/clutter.` `07136`: `Edit the supplied Qwen semantic image into a clear, complete, realistic studio image of the same black leather sofa. The input is the sole geometric authority. Preserve exactly the camera viewpoint, oblique yaw and elevation, image-space center, projected length/height/depth, full outer silhouette, backrest length and tilt, seat depth, both armrests, base, and all major visible proportions. Only improve sharpness, clean boundaries, coherent realistic leather material, and complete surfaces already implied by the input. Plain white background. Do not rotate, rescale, recenter, mirror, shorten or widen the sofa, change back/seat/arm dimensions, add cushions or legs, remove parts, or add text/clutter.` `07306`: `Edit the supplied Qwen semantic image into a clear, complete, realistic studio image of the same red cylindrical trash can. The input is the sole geometric authority. Preserve exactly the camera viewpoint, object yaw, image-space center, projected height and width, cylindrical body silhouette, top rim/opening geometry, bottom profile, and all visible proportions. Only improve sharpness, clean boundaries, coherent realistic material, and complete surfaces already implied by the input. Plain white background. Do not rotate, rescale, recenter, mirror, turn it into a wheeled bin, add a lid/handle/wheels, change rim or body dimensions, add/remove parts, or add text/clutter.` `09639`: `Use case: precise-object-edit. Asset type: zero-shot 3D reconstruction conditioning image. Primary request: Enhance the input Qwen-generated office-chair image into a sharp, photorealistic and structurally complete product image. Authoritative invariants: the input image is the sole authority for camera azimuth, elevation, roll, perspective, chair yaw, center position, projected size, normalized bounding box, canvas occupancy, silhouette, backrest recline, left/right armrest positions, seat outline, central cylinder, five-star base directions, leg lengths, and caster locations. Preserve these approximately pixel-aligned. Do not rotate, straighten, symmetrize, recenter, zoom, enlarge, or shrink the chair. Subject/detail: preserve the same padded ergonomic swivel office chair design. Clarify the upholstery into coherent dark charcoal fabric or leather padding; repair blurry and melted edges; make the arm supports, seat/back junction, gas cylinder, five separate base legs, and casters mechanically clean and complete. Complete only genuinely ambiguous or missing small regions while following the existing silhouette. Scene/backdrop: preserve the clean pure white background. Constraints: change image quality and local structural clarity only; keep the same pose, dimensions, footprint, and part layout; full chair remains inside frame. Avoid: canonical front view, mesh-back redesign, changed chair proportions, extra or missing legs, changed wheel positions, merged feet, room, floor, cast shadow, text, logo, watermark, people, or other objects.`
+- Frozen post-registration method: use the accepted final rigid Pixal prior,
+  Camera-1 mutual positives and six signed-PCA 384-px positive-only virtual
+  overlaps; missing partial pixels remain unconstrained.  The common graph
+  settings are 8 neighbours, edge ratio `1.8`, screening `.0015`, six
+  self-protection views, protection weight `.01`, protection exclusion `.10`
+  partial diagonal, maximum anchor residual `.075`, maximum displacement
+  `.075`, remote gain `1.0`, and collision-free one-to-one partial-anchor
+  replacement.  This is zero-shot: no GT, CD, EMD, category, or sample-id
+  routing enters the edit or decoder.
+- Offline-only evidence: after all ten predictions froze, fixed-seed 6145
+  16,384-point FPS evaluation reports mean CD-L1/EMD `1.58197163 / 2.51144224`
+  (`×10²`).  Per-sample values live in the recorded CSV.  These metrics are
+  post-freeze reporting only and must not become a test-time gate.

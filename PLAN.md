@@ -30,12 +30,53 @@
   remain unchanged, and the decoder still preserves exactly 100k Pixal slots.
   No GT, CD, EMD, category, or sample-specific routing may enter the edit or
   decoder.
+- [ ] On the user-approved `01184` baseline only, compare frozen ablations of
+  (a) stronger **non-control** graph propagation with exact observed controls,
+  (b) denser positive-only multi-view pixel evidence, and (c) their
+  combination. CD/EMD may be reported only after each candidate is fixed; the
+  winner cannot become an inference-time metric gate.
+  - Completed 2026-09-04: all eight 01184 candidates are frozen and evaluated
+    only afterwards at
+    `workspace/single_view_boundary_gaussian_redwood10_20260904/gaussian/01184/postfreeze_strength_ablation/metrics.csv`.
+    Baseline is `1.0751/1.8033` CD/EMD x1e2. The strict-anchor variants improve
+    modestly: remote gain 1.45 `1.0746/1.7941`, MV512+remote 1.45
+    `1.0724/1.7950`, remote gain 2.0 `1.0736/1.7973`, and MV512+remote 2.0
+    `1.0725/1.7915`. Relaxing the positive anchor residual to .075 is best on
+    this one case (`1.0665/1.7814`), while .09 regresses (`1.1272/1.8455`).
+    These are ablation observations, not metric-based per-sample selection.
+  - Cross-check 2026-09-04: on independently frozen `06830` outputs, the
+    shared relaxed-anchor `.075` setting is again lowest (`1.5411/2.8162`)
+    versus baseline (`1.6931/3.1699`), strict remote-gain `2.0`
+    (`1.6526/3.0569`), and MV512+remote-gain `2.0` (`1.6657/3.0894`), all
+    CD/EMD x1e2.  The user visually preferred `.075`; this is recorded as a
+    batch-level candidate only, never an inference-time GT metric gate.  Exact
+    audit: `workspace/single_view_boundary_gaussian_redwood10_20260904/gaussian/06830/postfreeze_strength_ablation/metrics.csv`.
 - [ ] Materialize the original fixed Qwen/GPT/Pixal inputs and re-run the
   fixed Pixal--MoGe registration for all ten Redwood samples under
   `workspace/single_view_boundary_gaussian_redwood10_20260904`, then apply
   the same multiview-positive boundary-conditioned Gaussian parameterization
-  to all ten. Input materialization is verified (180 files); the single-GPU
-  registration rebuild is running before the CPU Gaussian batch begins.
+  to all ten. Input materialization is verified (180 files). The CPU Gaussian
+  batch over the retained best-registration root is complete and structurally
+  verified: ten decoded 100k PLYs, exact slot preservation, 18.8k--48.3k
+  collision-free partial anchors, and ten six-view boards are under
+  `workspace/single_view_boundary_gaussian_redwood10_20260904/gaussian`.
+  The independent single-GPU registration rebuild from those materialized
+  inputs remains in progress as a reproducibility audit; it is not used for
+  the first frozen Gaussian batch.
+- [x] Create a separate self-contained **post-registration** Redwood-10 result
+  root for the user-preferred shared relaxed-anchor configuration (`.075`).
+  The task scope was clarified to exclude registration and upstream image/3-D
+  regeneration: retained depth/Qwen/GPT/Pixal inputs and accepted registered
+  priors were copied, then the same multi-view boundary-conditioned Gaussian
+  edit/decode was run on all ten samples.  The root
+  `workspace/relaxed_anchor_gaussian_redwood10_20260904` contains inputs,
+  GLBs, priors, registered PLYs, edits, decoded PLYs, boards, and a merged
+  ten-sample manifest.  Structural verification confirms every decoded cloud
+  has 100,000 prior slots and shared `.075/.075/.0015/.01/.10` parameters.
+  No GT/CD/EMD entered the run.  After the batch froze, a fixed-seed 16,384
+  FPS audit reported mean CD/EMD `1.5820/2.5114` (x1e2) at
+  `workspace/relaxed_anchor_gaussian_redwood10_20260904/postfreeze_cd_emd/`;
+  it is reporting-only and cannot select a test-time route.
 
 ## Agent GenPC+ (2026-09-03)
 

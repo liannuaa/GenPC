@@ -52,6 +52,9 @@ def main() -> None:
     parser.add_argument("--prior-protection-views", type=int, default=6)
     parser.add_argument("--prior-protection-weight", type=float, default=.02)
     parser.add_argument("--protection-exclusion-ratio", type=float, default=.08)
+    parser.add_argument("--remote-gain", type=float, default=1.)
+    parser.add_argument("--remote-gain-radius-ratio", type=float, default=.08)
+    parser.add_argument("--remote-displacement-cap-multiplier", type=float, default=1.)
     parser.add_argument("--graph-cg-tolerance", type=float, default=1e-5)
     parser.add_argument("--graph-cg-max-iterations", type=int, default=240)
     parser.add_argument("--padding", type=float, default=.15)
@@ -92,6 +95,9 @@ def main() -> None:
             prior_protection_views=int(args.prior_protection_views),
             prior_protection_weight=float(args.prior_protection_weight),
             protection_exclusion_ratio=float(args.protection_exclusion_ratio),
+            remote_gain=float(args.remote_gain),
+            remote_gain_radius_ratio=float(args.remote_gain_radius_ratio),
+            remote_displacement_cap_multiplier=float(args.remote_displacement_cap_multiplier),
             cg_tolerance=float(args.graph_cg_tolerance),
             cg_max_iterations=int(args.graph_cg_max_iterations), **method_args,
         )
@@ -146,6 +152,9 @@ def main() -> None:
                        "prior_protection_views": int(args.prior_protection_views),
                        "prior_protection_weight": float(args.prior_protection_weight),
                        "protection_exclusion_ratio": float(args.protection_exclusion_ratio),
+                       "remote_gain": float(args.remote_gain),
+                       "remote_gain_radius_ratio": float(args.remote_gain_radius_ratio),
+                       "remote_displacement_cap_multiplier": float(args.remote_displacement_cap_multiplier),
                        "graph_cg_tolerance": float(args.graph_cg_tolerance),
                        "graph_cg_max_iterations": int(args.graph_cg_max_iterations)},
         "outputs": {"editable_prior": str(Path(f"{stem}_editable_prior_100k.ply").resolve()),
