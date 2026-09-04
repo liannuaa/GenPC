@@ -48,10 +48,10 @@ def main() -> None:
                         help="Optional frozen registration root. Defaults to <root>/registration.")
     parser.add_argument("--samples", nargs="+", default=list(REDWOOD10_SAMPLE_IDS),
                         help="Sample identifiers with materialized partial, camera, Pixal, and registration assets.")
-    parser.add_argument("--max-pixel-distance", type=float, default=2.0)
+    parser.add_argument("--max-pixel-distance", type=float, default=1.0)
     parser.add_argument("--virtual-positive-views", type=int, default=6)
     parser.add_argument("--virtual-render-size", type=int, default=384)
-    parser.add_argument("--virtual-max-pixel-distance", type=float, default=2.0)
+    parser.add_argument("--virtual-max-pixel-distance", type=float, default=1.0)
     parser.add_argument("--max-anchor-residual-ratio", type=float, default=.075)
     parser.add_argument("--support-radius-ratio", type=float, default=.08)
     parser.add_argument("--max-displacement-ratio", type=float, default=.075)

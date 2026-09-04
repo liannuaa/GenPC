@@ -64,7 +64,7 @@ remaining camera-chain error using saved-view silhouette/depth and visible
 3. **Coupled residual and Camera-1 continuation.** A joint residual aligns
 the native MoGe evidence, bridge matches, partial surface, and saved-view
 render. The final continuation applies the fixed three-level Camera-1 update,
-followed by a 1-degree wide tilt and a final 0.5-degree continuation. Every
+followed by a 1-degree wide tilt and a final 1-degree continuation. Every
 stage is applied; diagnostic scores never reject or route samples.
 Within a level, the fixed independent candidate scores may run concurrently,
 but they are consumed in their original proposal order and use the same
@@ -81,7 +81,7 @@ Frozen registration search settings:
 | Coupled two-camera residual | 32,000 points; at most 10,000 Camera-1 visible pairs; 64 robust-fit trials |
 | Camera-1 continuation | 32,000 points; three standard levels: \((.006,.30^\circ,.006)\), \((.002,.10^\circ,.002)\), \((.0005,.025^\circ,.0005)\) |
 | Wide tilt continuation | \((.010,1.0^\circ,.010)\), \((.004,.35^\circ,.004)\), \((.001,.10^\circ,.001)\) |
-| Final tilt continuation | \((.010,.5^\circ,.010)\), \((.004,.175^\circ,.004)\), \((.001,.05^\circ,.001)\) |
+| Final tilt continuation | \((.010,1.0^\circ,.010)\), \((.004,.35^\circ,.004)\), \((.001,.10^\circ,.001)\) |
 | Candidate scoring | 8 independent CPU workers; proposal order and deterministic minimum selection are preserved |
 
 ## Partial-anchored Gaussian edit
@@ -106,7 +106,7 @@ Frozen shared edit parameters:
 
 | Parameter | Value |
 | --- | ---: |
-| saved/virtual match radius | 2 px |
+| saved/virtual match radius | 1.0 px |
 | virtual views / resolution | 6 / 384 |
 | anchor residual cap | 0.075 partial-bbox diagonal |
 | displacement cap | 0.075 partial-bbox diagonal |

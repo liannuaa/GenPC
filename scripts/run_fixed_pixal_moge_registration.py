@@ -7,7 +7,7 @@ surface priors, and it never reads GT/CD/EMD.  For every sample it applies one
 fixed route:
 
 Pixal-native MoGe -> two-camera bridge -> coupled residual -> pixel-indexed
-visible 3-D Sim(3) -> amplified Camera-1 -> 1-degree wide tilt -> 0.5-degree
+visible 3-D Sim(3) -> amplified Camera-1 -> 1-degree wide tilt -> 1-degree
 continuation.  All stages are applied; score records are diagnostic rather
 than proposal gates.
 """
@@ -114,11 +114,21 @@ def main() -> None:
                         default=ROOT / "workspace" / "pixal_moge_full9_rebuilt_20260904")
     parser.add_argument("--moge-model", type=Path, default=SHARED_ROOT / "models" / "moge-2-vitl" / "model.pt")
     parser.add_argument("--rmbg-model", type=Path, default=SHARED_ROOT / "models" / "RMBG-2.0")
+    parser.add_argument("--camera1-search-points", type=int, default=32_000,
+                        help="Shared visible Sim(3) subset size for all three Camera-1 continuations.")
+    parser.add_argument("--camera1-wide-tilt-degrees", type=float, default=1.0,
+                        help="Shared wide Camera-1 tilt trust region in degrees.")
+    parser.add_argument("--camera1-final-tilt-degrees", type=float, default=1.0,
+                        help="Shared final Camera-1 tilt trust region in degrees.")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--in-process", action=argparse.BooleanOptionalAction, default=True,
                         help="Reuse imports between fixed stages; --no-in-process restores subprocess execution.")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.camera1_search_points < 3:
+        raise ValueError("--camera1-search-points must be at least three")
+    if min(args.camera1_wide_tilt_degrees, args.camera1_final_tilt_degrees) <= 0.:
+        raise ValueError("Camera-1 tilt trust regions must be positive")
 
     python = sys.executable
     manifest: dict[str, object] = {
@@ -128,8 +138,15 @@ def main() -> None:
         "parameters": {
             "proposal_gates_used": False,
             "amplified_levels": [[.006, .30, .006], [.002, .10, .002], [.0005, .025, .0005]],
-            "wide_tilt_levels": [[.010, 1.00, .010], [.004, .35, .004], [.001, .10, .001]],
-            "final_tilt_levels": [[.010, .50, .010], [.004, .175, .004], [.001, .05, .001]],
+            "wide_tilt_levels": [[.010, float(args.camera1_wide_tilt_degrees), .010],
+                                 [.004, .35 * float(args.camera1_wide_tilt_degrees), .004],
+                                 [.001, .10 * float(args.camera1_wide_tilt_degrees), .001]],
+            "final_tilt_levels": [[.010, float(args.camera1_final_tilt_degrees), .010],
+                                  [.004, .35 * float(args.camera1_final_tilt_degrees), .004],
+                                  [.001, .10 * float(args.camera1_final_tilt_degrees), .001]],
+            "camera1_search_points": int(args.camera1_search_points),
+            "camera1_wide_tilt_degrees": float(args.camera1_wide_tilt_degrees),
+            "camera1_final_tilt_degrees": float(args.camera1_final_tilt_degrees),
         },
     }
     args.output_root.mkdir(parents=True, exist_ok=True)
@@ -187,7 +204,8 @@ def main() -> None:
                     python, "scripts/run_camera1_amplified_sim3_refine.py",
                     "--partial", str(paths["partial"]), "--registered-prior", str(joint_prior),
                     "--camera", str(paths["camera"]), "--semantic", str(paths["semantic"]),
-                    "--output-dir", str(paths["amplified"]), "--device", "cpu",
+                    "--output-dir", str(paths["amplified"]),
+                    "--search-points", str(args.camera1_search_points), "--device", "cpu",
                 ], cwd=ROOT, log=paths["amplified"] / "stage.log", dry_run=args.dry_run,
                      in_process=args.in_process)
             wide_prior = paths["wide_tilt"] / REGISTERED_PRIOR_FILENAME
@@ -196,7 +214,8 @@ def main() -> None:
                     python, "scripts/run_camera1_amplified_sim3_refine.py",
                     "--partial", str(paths["partial"]), "--registered-prior", str(amplified_prior),
                     "--camera", str(paths["camera"]), "--semantic", str(paths["semantic"]),
-                    "--output-dir", str(paths["wide_tilt"]), "--wide-tilt-search", "--device", "cpu",
+                    "--output-dir", str(paths["wide_tilt"]), "--search-points", str(args.camera1_search_points),
+                    "--wide-tilt-search", "--max-tilt-degrees", str(args.camera1_wide_tilt_degrees), "--device", "cpu",
                 ], cwd=ROOT, log=paths["wide_tilt"] / "stage.log", dry_run=args.dry_run,
                      in_process=args.in_process)
             final_prior = paths["final"] / REGISTERED_PRIOR_FILENAME
@@ -205,7 +224,8 @@ def main() -> None:
                     python, "scripts/run_camera1_amplified_sim3_refine.py",
                     "--partial", str(paths["partial"]), "--registered-prior", str(wide_prior),
                     "--camera", str(paths["camera"]), "--semantic", str(paths["semantic"]),
-                    "--output-dir", str(paths["final"]), "--wide-tilt-search", "--max-tilt-degrees", ".5",
+                    "--output-dir", str(paths["final"]), "--search-points", str(args.camera1_search_points),
+                    "--wide-tilt-search", "--max-tilt-degrees", str(args.camera1_final_tilt_degrees),
                     "--device", "cpu",
                 ], cwd=ROOT, log=paths["final"] / "stage.log", dry_run=args.dry_run,
                      in_process=args.in_process)

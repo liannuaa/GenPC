@@ -99,3 +99,65 @@ bridge, Camera-1 continuation, and the fixed partial-anchored Gaussian edit
 and decode. No GT is read before the final prediction. The offline 16,384-point
 audit (seed `6145`) reported CD-L1×100 `1.16162859` and EMD×100 `1.80500858`;
 these are reporting-only.
+
+## 2026-09-05 CST — globally calibrated fixed registration/edit defaults
+
+**Status.** User-directed calibration of the already fixed mainline. The
+Qwen → GPT → Pixal assets, registration stage order, Gaussian edit/decode
+algorithm, and 100k prior carrier are unchanged. Only two values are updated
+globally for every sample: the final Camera-1 Sim(3) trust region is `1.0°`
+and the saved/virtual positive-correspondence radii are `1.0 px`. There is no
+sample/category branch, learned update, or inference-time GT/CD/EMD access.
+
+**Outputs.** The complete candidate is
+`workspace/fixed_mainline_calibration_20260905/combo_final100_pixel100`.
+Its registration inputs are the ten final PLYs under
+`workspace/fixed_mainline_calibration_20260905/registration_final100_replay/<id>/final/`;
+the final predictions are
+`combo_final100_pixel100/gaussian/<id>/decoded/partial_anchored_gaussian_decoded_100k.ply`.
+All ten (`01184, 05117, 05452, 06127, 06145, 06188, 06830, 07136, 07306,
+09639`) were verified to contain exactly 100,000 points. The no-override smoke
+run is `workspace/fixed_mainline_default_smoke_20260905`; for `01184` both its
+final registration PLY and decoded PLY are byte-identical to the selected
+candidate.
+
+**Inputs/models/prompts.** This calibration did not regenerate an image or a
+3-D prior. It reuses the exact partial, Camera-1, Qwen/GPT/Pixal inputs from
+`workspace/relaxed_anchor_gaussian_redwood10_20260904/inputs`; the complete
+Qwen prompts, GPT prompt records, model paths, checkpoints, seeds, and upstream
+generation parameters are therefore exactly those recorded in the preceding
+2026-09-04 accepted Redwood-10 entry. New Qwen/GPT/Pixal generation prompt:
+`NOT RUN`. New image/3-D generation seed, scheduler, CFG and negative prompt:
+`NOT APPLICABLE`. Native registration uses the existing Pixal 100k prior plus
+MoGe-2 `models/moge-2-vitl/model.pt` and RMBG-2.0 `models/RMBG-2.0` under the
+same fixed two-camera route.
+
+**Frozen numerical settings.** Standard/wide Camera-1 continuation remains
+unchanged (32,000 points; wide trust region `1.0°`). The final continuation
+uses levels `(0.010, 1.0°, 0.010)`, `(0.004, 0.35°, 0.004)`, and
+`(0.001, 0.10°, 0.001)`. Gaussian edit/decode uses `1.0 px` for both saved and
+virtual positive matches; six virtual views at 384 px; anchor/displacement
+caps `.075`; 8-neighbour graph, edge ratio `1.8`, screening `.0015`; six
+protection views, weight `.01`, exclusion `.10`; remote gain `1.0`; and CG
+`1e-5/240`. Do not alter these values without a new complete global audit.
+
+**Offline-only evidence.** The fixed 16,384-point audit with seed `6145`
+reported CD-L1×100 / EMD×100:
+
+| id | CD | EMD |
+| --- | ---: | ---: |
+| 01184 | 1.0610 | 1.7740 |
+| 05117 | 1.6685 | 2.9317 |
+| 05452 | 0.9441 | 1.5376 |
+| 06127 | 2.3836 | 3.7654 |
+| 06145 | 0.6561 | 1.0179 |
+| 06188 | 1.2063 | 1.9679 |
+| 06830 | 1.5183 | 2.7327 |
+| 07136 | 1.2703 | 2.3600 |
+| 07306 | 3.1936 | 3.9313 |
+| 09639 | 1.7803 | 2.7671 |
+| mean | **1.5682** | **2.4786** |
+
+This improves the prior fixed baseline `1.5820 / 2.5114` on both metrics. The
+metric file is `combo_final100_pixel100/metrics.{csv,json}` and is reporting
+only; it was never read by registration or Gaussian editing.

@@ -101,3 +101,44 @@
     reproduced the accepted final PLY byte-for-byte (SHA-256
     `8625684013a23b8266872a4a5dd6813fbb63ae6ba800b0a9fa4525e677c6c4e6`).
     `pytest -q` passed `44/44` after adding the path-contract coverage.
+
+## Fixed-mainline global parameter calibration — 2026-09-05
+
+- [x] Freeze the Qwen → GPT → Pixal assets, the staged two-camera Sim(3)
+  route, and the partial-anchored Gaussian algorithm. The only experimental
+  degrees of freedom are globally shared registration/edit numerical
+  parameters; no sample/category routing or inference-time GT access is
+  permitted.
+- [x] Record the accepted ten-sample offline baseline from
+  `workspace/relaxed_anchor_gaussian_redwood10_20260904`: CD-L1×100
+  `1.58197163`, EMD×100 `2.51144224` (16,384 points, seed 6145).
+- [x] Run a pre-registered Redwood-10 Gaussian edit sweep in fresh output
+  roots, evaluate every complete candidate offline, and identify globally
+  robust settings from mean and per-sample deltas.
+  - The accepted edit caps remain `.075`; `.08` and `.09` both regressed.
+    A shared saved/virtual correspondence radius of `1.5 px` improved the
+    baseline to CD-L1×100 `1.58079308`, EMD×100 `2.50663875`.
+- [x] Starting from the fixed accepted wide-tilt registrations, test only
+  global Camera-1 final-continuation trust regions; run the selected setting
+  through the selected Gaussian edit and compare the complete ten-sample
+  output to the baseline.
+  - With the same `wide_tilt` input and `1.5 px` edit, final trust regions
+    `.5/.75/1.0/1.25` degrees gave, respectively,
+    `1.5723614/2.4918336`, `1.5700483/2.4854301`,
+    `1.5691580/2.4829483`, and `1.5728989/2.4932225` (CD-L1×100 / EMD×100).
+    The `1.0` degree setting is therefore the strongest tested global value.
+  - Holding that `1.0°` registration fixed, the shared saved/virtual radii
+    `.5/1.0/1.5 px` gave `1.5686855/2.4826558`, `1.5682055/2.4785676`, and
+    `1.5691580/2.4829483`. Thus the central `1.0 px` radius is selected on
+    both metrics, without any sample-specific route.
+- [x] Freeze the strongest reproducible global parameter set in the public
+  defaults/docs, run tests plus a clean ten-sample audit, and record the final
+  accepted output without changing upstream generation assets or method route.
+  - Defaults are final Camera-1 trust region `1.0°` and saved/virtual positive
+    correspondence radii `1.0 px`; every other fixed numerical setting remains
+    at the accepted `.075/.0015/.01/.10` configuration. The full frozen audit
+    is `workspace/fixed_mainline_calibration_20260905/combo_final100_pixel100`
+    with CD-L1×100 `1.5682054963`, EMD×100 `2.4785676040`. All ten decoded
+    outputs contain 100,000 points. A no-override 01184 rerun at
+    `workspace/fixed_mainline_default_smoke_20260905` reproduced the selected
+    registration and decoded PLY byte-for-byte; `pytest -q` passed `44/44`.

@@ -38,10 +38,10 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--dual-field", type=Path,
                         help="Optional existing dual-Gaussian NPZ. If omitted, initialize the field from prior + partial.")
-    parser.add_argument("--max-pixel-distance", type=float, default=2.)
+    parser.add_argument("--max-pixel-distance", type=float, default=1.0)
     parser.add_argument("--virtual-positive-views", type=int, default=6)
     parser.add_argument("--virtual-render-size", type=int, default=384)
-    parser.add_argument("--virtual-max-pixel-distance", type=float, default=2.)
+    parser.add_argument("--virtual-max-pixel-distance", type=float, default=1.0)
     parser.add_argument("--max-anchor-residual-ratio", type=float, default=.06)
     parser.add_argument("--edit-method", choices=("graph", "compact"), default="graph")
     parser.add_argument("--support-radius-ratio", type=float, default=.08)
