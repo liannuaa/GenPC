@@ -81,14 +81,33 @@ class QwenImageEdit:
         size=512,
         seed=None,
     ):
+        prompt = build_completion_prompt(flag)
+        return self.generate_with_prompt(image, prompt, size=size, seed=seed)
+
+    def generate_with_prompt(
+        self,
+        image,
+        prompt,
+        *,
+        size=512,
+        seed=None,
+    ):
+        """Run one Qwen edit with an externally measured agent instruction.
+
+        ``generate`` remains the depth-completion API used by the main
+        pipeline. Agent actions use this method so their bounded text action
+        is consumed by the image editor and can be persisted beside the target.
+        """
         if isinstance(image, str):
             image = Image.open(image).convert("RGB")
         else:
             image = image.convert("RGB")
+        prompt = str(prompt).strip()
+        if not prompt:
+            raise ValueError("Qwen image-edit prompt must be non-empty")
         generator = None
         if seed is not None and str(self.device).startswith("cuda"):
             generator = torch.Generator(device="cuda").manual_seed(int(seed))
-        prompt = build_completion_prompt(flag)
         output = self.pipeline(
             image=[image.convert("RGB")],
             prompt=prompt,

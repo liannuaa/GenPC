@@ -12,20 +12,35 @@ import sys
 
 import numpy as np
 import torch
+import yaml
+from munch import Munch
 
 ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = ROOT.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from main import metric
-from scripts.run_zero_shot_posterior_guidance import load_config
+from utils.runtime import normalize_runtime_config
 
 
 SAMPLES = ("01184", "05117", "05452", "06127", "06145",
            "06188", "06830", "07136", "07306", "09639")
 CANDIDATE_ROOT = (
     ROOT / "gpt_version/_pixal_bidirectional_cycle_registration_forced_audit_20260823")
-V15_ROOT = ROOT / "gpt_version/_pixal_guarded_unified_registration_v15_20260822"
+# Historical baselines intentionally live in the shared project root.  A
+# worktree has its own source checkout but does not duplicate multi-GB frozen
+# experiments, so resolving this relative to ``ROOT`` breaks reproducible
+# single-sample agent audits.
+V15_ROOT = PROJECT_ROOT / "gpt_version/_pixal_guarded_unified_registration_v15_20260822"
+
+
+def load_config(path, device):
+    """Local config loader keeps this post-freeze evaluator self-contained."""
+    cfg = Munch.fromDict(yaml.safe_load(Path(path).read_text()))
+    cfg.paths = getattr(cfg, "paths", Munch())
+    cfg.device = str(device)
+    return normalize_runtime_config(cfg)
 
 
 def candidate_path(root: Path, sample: str, template: str) -> Path:
@@ -64,6 +79,11 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("--candidate-root", type=Path, default=CANDIDATE_ROOT)
     parser.add_argument("--v15-root", type=Path, default=V15_ROOT)
+    parser.add_argument("--extra-baseline-root", type=Path,
+                        help="Optional frozen baseline root for an additional post-freeze comparison.")
+    parser.add_argument("--extra-baseline-name", default="extra_baseline")
+    parser.add_argument("--extra-baseline-template",
+                        default="{sample}_bidirectional_cycle_registered_uniform.ply")
     parser.add_argument("--config", type=Path, default=ROOT / "configs/config.yaml")
     parser.add_argument("--output-root", type=Path, default=None)
     parser.add_argument("--metric-seed", type=int, default=6145)
@@ -90,6 +110,12 @@ def main(argv=None):
             for sample in samples},
         "v15": {sample: v15_path(args.v15_root, sample) for sample in samples},
     }
+    if args.extra_baseline_root is not None:
+        variants[str(args.extra_baseline_name)] = {
+            sample: candidate_path(
+                args.extra_baseline_root, sample, args.extra_baseline_template)
+            for sample in samples
+        }
     rows = []
     for variant, paths in variants.items():
         rows.extend(evaluate_variant(
@@ -121,6 +147,12 @@ def main(argv=None):
         "equivalent_gt_fps_by_shared_seed": True,
         "metric_num_points": int(getattr(cfg, "metric_num_points", 16384)),
         "candidate_name_template": args.candidate_name_template,
+        "extra_baseline": (
+            None if args.extra_baseline_root is None else {
+                "name": str(args.extra_baseline_name),
+                "root": str(args.extra_baseline_root),
+                "template": args.extra_baseline_template,
+            }),
         "samples": list(samples),
         "summary": summary,
     }

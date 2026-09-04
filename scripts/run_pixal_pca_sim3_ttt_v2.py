@@ -11,6 +11,7 @@ import sys
 
 import numpy as np
 from scipy.spatial import cKDTree
+import torch
 import trimesh
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,6 +65,150 @@ def proper_pca_rotations(source, target):
                                "rotation": rotation})
     if len(result) != 24: raise RuntimeError(f"Expected 24 rotations, got {len(result)}")
     return result
+
+
+def _pca_basis_gpu(points, device):
+    """Return the robust PCA frame on CUDA without changing the 24-way contract."""
+    values = torch.as_tensor(np.asarray(points), dtype=torch.float32, device=device)
+    # ``np.median`` uses the interpolated middle value for an even population;
+    # use the same convention so the CUDA orientation set matches the legacy
+    # NumPy reference exactly enough for a no-regression shortlist.
+    center = torch.quantile(values, .5, dim=0)
+    radius = torch.linalg.vector_norm(values - center, dim=1)
+    kept = values[radius <= torch.quantile(radius, .98)]
+    # np.cov centers columns internally.  The preceding robust shift in the
+    # reference implementation therefore has no effect on covariance; use the
+    # arithmetic mean here, not the robust median.
+    centered = kept - kept.mean(dim=0)
+    covariance = centered.T @ centered / max(int(len(centered)) - 1, 1)
+    _, basis = torch.linalg.eigh(covariance)
+    basis = basis.flip(dims=(1,))
+    if float(torch.linalg.det(basis)) < 0.:
+        basis[:, -1] *= -1.
+    return center, basis
+
+
+def proper_pca_rotations_gpu(source, target, device):
+    """GPU PCA followed by the same 24 proper signed axis permutations."""
+    _, bs = _pca_basis_gpu(source, device)
+    _, bt = _pca_basis_gpu(target, device)
+    result = []
+    for permutation in itertools.permutations(range(3)):
+        for signs in itertools.product((-1., 1.), repeat=3):
+            permutation_matrix = torch.zeros((3, 3), dtype=torch.float32, device=device)
+            permutation_matrix[torch.arange(3, device=device), list(permutation)] = torch.tensor(
+                signs, dtype=torch.float32, device=device
+            )
+            rotation = bt @ permutation_matrix @ bs.T
+            if float(torch.linalg.det(rotation)) > .999999:
+                result.append({"permutation": permutation, "signs": signs,
+                               "rotation": rotation.detach().cpu().numpy().astype(np.float64)})
+    if len(result) != 24:
+        raise RuntimeError(f"Expected 24 rotations, got {len(result)}")
+    return result
+
+
+def gpu_prescreen_rotation_ids(items, source, partial, projector, target_mask, args):
+    """Batch the inexpensive saved-view initialization test on GPU.
+
+    This only selects which PCA orientations receive the original CPU 2-D+3-D
+    coordinate-descent refinement.  The final ranking therefore remains the
+    exact historical objective, while the expensive 24-way exhaustive loop is
+    reduced to a small, generic shortlist.
+    """
+    device = torch.device(args.gpu_device)
+    source_t = torch.as_tensor(np.asarray(source), dtype=torch.float32, device=device)
+    rotations = torch.as_tensor(np.stack([item["rotation"] for item in items]),
+                                dtype=torch.float32, device=device)
+    source_center = source_t.median(dim=0).values
+    target_center = torch.as_tensor(np.median(partial, axis=0), dtype=torch.float32, device=device)
+    scales = torch.as_tensor(args.initial_scales, dtype=torch.float32, device=device)
+    size = int(args.render_size)
+    target = torch.as_tensor(target_mask.reshape(-1), dtype=torch.bool, device=device)
+    target_count = target.sum().float().clamp_min(1.)
+    center_xy = torch.as_tensor(projector.center_xy, dtype=torch.float32, device=device)
+
+    def scores(rotations_b, scales_b, translations_b):
+        """Hard saved-view silhouette score for a batch of candidate Sim(3)s."""
+        batch = len(scales_b)
+        moved = (scales_b[:, None, None]
+                 * torch.matmul(source_t.unsqueeze(0), rotations_b.transpose(1, 2))
+                 + translations_b[:, None, :])
+        camera = projector.camera.transform(moved.reshape(-1, 3))
+        uv = (camera[:, :2] - center_xy) / float(projector.scale_xy)
+        uv = uv * (1. - 2. * float(projector.padding)) + .5
+        uv[:, 1] = 1. - uv[:, 1]
+        xy = torch.round(uv * float(size - 1)).long()
+        valid = ((xy[:, 0] >= 0) & (xy[:, 0] < size) & (xy[:, 1] >= 0) & (xy[:, 1] < size)
+                 & torch.isfinite(camera[:, 2]) & (camera[:, 2] > 1e-8))
+        trial_id = torch.arange(batch, device=device).repeat_interleave(len(source_t))
+        flat_pixel = trial_id[valid] * (size * size) + xy[valid, 1] * size + xy[valid, 0]
+        occupancy = torch.zeros(batch * size * size, dtype=torch.int32, device=device)
+        occupancy.scatter_add_(0, flat_pixel, torch.ones_like(flat_pixel, dtype=torch.int32))
+        predicted = occupancy.reshape(batch, size * size) > 0
+        intersection = (predicted & target).sum(dim=1).float()
+        predicted_count = predicted.sum(dim=1).float()
+        iou = intersection / (predicted_count + target_count - intersection).clamp_min(1.)
+        coverage = intersection / target_count
+        leakage = (predicted_count - intersection) / predicted_count.clamp_min(1.)
+        return iou + .15 * coverage - .45 * leakage
+
+    # Same multi-scale centroid initialization as the exact CPU loop.
+    rotation_ids = torch.arange(len(items), device=device).repeat_interleave(len(scales))
+    trial_scales = scales.repeat(len(items))
+    trial_rotations = rotations[rotation_ids]
+    trial_translation = target_center.unsqueeze(0) - trial_scales[:, None] * torch.einsum(
+        "bij,j->bi", trial_rotations, source_center
+    )
+    initial = scores(trial_rotations, trial_scales, trial_translation).reshape(len(items), len(scales))
+    scale_ids = initial.argmax(dim=1)
+    current_scale = scales[scale_ids]
+    current_translation = target_center.unsqueeze(0) - current_scale[:, None] * torch.einsum(
+        "bij,j->bi", rotations, source_center
+    )
+    current_score = initial.gather(1, scale_ids[:, None]).squeeze(1)
+
+    # Preserve the original coordinate-search schedule, but score all 24x8
+    # proposals in one CUDA pass at every step.  This does not select a final
+    # transform; it only makes the shortlist robust to large initial offsets.
+    diagonal = max(float(np.linalg.norm(np.ptp(partial, axis=0))), 1e-8)
+    scale_step, translation_step = .10, .09 * diagonal
+    candidate_ids = torch.arange(len(items), device=device)
+    for _ in range(int(args.levels)):
+        for _ in range(8):
+            proposal_scale = current_scale[:, None].repeat(1, 8)
+            proposal_translation = current_translation[:, None, :].repeat(1, 8, 1)
+            proposal_scale[:, 0] += scale_step
+            proposal_scale[:, 1] -= scale_step
+            for axis in range(3):
+                proposal_translation[:, 2 + 2 * axis, axis] += translation_step
+                proposal_translation[:, 3 + 2 * axis, axis] -= translation_step
+            flat_scale = proposal_scale.reshape(-1)
+            flat_translation = proposal_translation.reshape(-1, 3)
+            proposal_scores = scores(rotations.repeat_interleave(8, dim=0), flat_scale, flat_translation)
+            proposal_scores = proposal_scores.reshape(len(items), 8)
+            proposal_scores[(proposal_scale < .45) | (proposal_scale > 1.20)] = -torch.inf
+            best_score, best_coordinate = proposal_scores.max(dim=1)
+            improve = best_score > current_score + 1e-10
+            if not bool(improve.any()):
+                break
+            chosen_scale = proposal_scale.gather(1, best_coordinate[:, None]).squeeze(1)
+            chosen_translation = proposal_translation[
+                candidate_ids, best_coordinate
+            ]
+            current_scale = torch.where(improve, chosen_scale, current_scale)
+            current_translation = torch.where(improve[:, None], chosen_translation, current_translation)
+            current_score = torch.where(improve, best_score, current_score)
+        scale_step *= .5
+        translation_step *= .5
+
+    best = current_score
+    order = torch.argsort(best, descending=True)
+    keep = order[:min(int(args.gpu_topk), len(items))].detach().cpu().tolist()
+    detail = {"enabled": True, "device": str(device), "shortlist_size": len(keep),
+              "rotation_scores": best.detach().cpu().numpy(), "selected_rotation_ids": keep,
+              "screen_coordinate_descent": {"levels": int(args.levels), "steps_per_level": 8}}
+    return keep, detail
 
 
 def make_transform(rotation, scale, translation):
@@ -157,12 +302,21 @@ def process(args, sample):
     diagonal = max(float(np.linalg.norm(np.ptp(partial_full, axis=0))), 1e-8)
     projector = SavedCameraProjector.from_partial(
         partial_full, camera_dir / "camera.pth", padding=args.padding,
-        image_shape=(512, 512), device="cpu")
+        image_shape=(512, 512), device=args.gpu_device if args.gpu_prescreen else "cpu")
     source = subset(source_full, args.source_points)
     partial = subset(partial_full, args.partial_points)
     target_mask = render_mask(projector, partial_full, args.render_size)
+    items = (proper_pca_rotations_gpu(source_full, partial_full, args.gpu_device)
+             if args.gpu_prescreen else proper_pca_rotations(source_full, partial_full))
+    if args.gpu_prescreen:
+        shortlisted_ids, prescreen = gpu_prescreen_rotation_ids(
+            items, source, partial_full, projector, target_mask, args
+        )
+    else:
+        shortlisted_ids, prescreen = list(range(len(items))), {"enabled": False}
     candidates = []
-    for rotation_id, item in enumerate(proper_pca_rotations(source_full, partial_full)):
+    for rotation_id in shortlisted_ids:
+        item = items[rotation_id]
         scale, translation, metrics, trace = optimize(
             source, partial, item["rotation"], projector, target_mask, diagonal, args)
         candidate = {"rotation_id": rotation_id, **item, "scale": scale,
@@ -210,6 +364,7 @@ def process(args, sample):
                 "all_100k_pixal_points_preserved": len(registered) == 100000,
                 "nonrigid_deformation_used": False, "anisotropic_scale_used": False},
             "ranking": [{"rank": i + 1, **item} for i, item in enumerate(ranked)],
+            "gpu_prescreen": prescreen,
             "shared_parameters": vars(args), "outputs": paths}
     Path(f"{stem}_info.json").write_text(json.dumps(jsonable(info), indent=2))
     return info
@@ -228,6 +383,11 @@ def main():
     parser.add_argument("--source-points", type=int, default=12000)
     parser.add_argument("--partial-points", type=int, default=6000)
     parser.add_argument("--padding", type=float, default=.15)
+    parser.add_argument("--gpu-prescreen", action="store_true",
+                        help="Use CUDA PCA and batch saved-view shortlist before exact refinement.")
+    parser.add_argument("--gpu-topk", type=int, default=8,
+                        help="Number of generic PCA orientations retained after the GPU prescreen.")
+    parser.add_argument("--gpu-device", default="cuda")
     args = parser.parse_args(); args.output_root.mkdir(parents=True, exist_ok=True)
     infos = [process(args, str(sample)) for sample in args.samples]
     print(json.dumps(jsonable({"outputs": [x["outputs"] for x in infos],

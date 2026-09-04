@@ -33,10 +33,15 @@ class MogeObjectPoints:
     original_indices: np.ndarray
 
 
-def point_uv_to_pixel_xy(point_uv, image_size):
+def point_uv_to_pixel_xy(point_uv, image_size, *, flip_y=False):
     uv = np.asarray(point_uv, dtype=np.float64)
     if uv.ndim != 2 or uv.shape[1] != 2:
         raise ValueError(f"point_uv must have shape [N, 2], got {uv.shape}")
+    uv = uv.copy()
+    if bool(flip_y):
+        # DepthPrompting canonical UV uses a bottom-left origin, while the
+        # semantic PNG and MoGe arrays use top-left image coordinates.
+        uv[:, 1] = 1.0 - uv[:, 1]
     pixel_xy = np.rint(uv * (int(image_size) - 1)).astype(np.int64)
     valid = np.isfinite(uv).all(axis=1)
     valid &= (uv[:, 0] >= 0.0) & (uv[:, 0] <= 1.0)
@@ -49,8 +54,10 @@ def build_partial_to_moge_index(
     image_size,
     moge_pixel_xy,
     max_pixel_distance,
+    *,
+    flip_y=False,
 ):
-    pixel_xy, valid_partial = point_uv_to_pixel_xy(point_uv, image_size)
+    pixel_xy, valid_partial = point_uv_to_pixel_xy(point_uv, image_size, flip_y=flip_y)
     moge_pixel_xy = np.asarray(moge_pixel_xy, dtype=np.float64)
     if moge_pixel_xy.ndim != 2 or moge_pixel_xy.shape[1] != 2:
         raise ValueError(f"moge_pixel_xy must have shape [M, 2], got {moge_pixel_xy.shape}")
@@ -319,6 +326,7 @@ def run(args):
         image_size=image_size,
         moge_pixel_xy=object_moge.pixel_xy,
         max_pixel_distance=args.max_pixel_distance,
+        flip_y=bool(args.flip_point_uv_y),
     )
     partial_to_full_moge = np.full(len(index_result.partial_to_moge), -1, dtype=np.int64)
     matched_mask = index_result.partial_to_moge >= 0
@@ -368,6 +376,7 @@ def run(args):
         "matched_partial_points": int(len(index_result.matched_partial_indices)),
         "match_ratio": float(len(index_result.matched_partial_indices) / max(len(point_uv), 1)),
         "max_pixel_distance": float(args.max_pixel_distance),
+        "partial_uv_bottom_left_to_image_top_left": bool(args.flip_point_uv_y),
         "use_rmbg_mask": bool(args.use_rmbg_mask),
         "object_alpha_threshold": int(args.object_alpha_threshold),
         "object_mask_erode_pixels": int(args.object_mask_erode_pixels),
@@ -400,6 +409,8 @@ def parse_args():
     parser.add_argument("--fp16", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--image_size", type=int, default=512)
     parser.add_argument("--max_pixel_distance", type=float, default=2.0)
+    parser.add_argument("--flip_point_uv_y", action=argparse.BooleanOptionalAction, default=False,
+                        help="Convert bottom-left canonical partial UV to top-left semantic/MoGe pixels.")
     parser.add_argument("--rmbg_model", default=str(PROJECT_ROOT / "models" / "RMBG-2.0"))
     parser.add_argument("--object_alpha_threshold", type=int, default=128)
     parser.add_argument("--object_mask_erode_pixels", type=int, default=2)

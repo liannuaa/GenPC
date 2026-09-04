@@ -28,7 +28,9 @@ OUTPUT_ROOT = ROOT / "gpt_version/_pixal_bidirectional_consensus_surface_project
 
 
 def process(args, sample):
-    input_path = args.input_root / sample / f"{sample}_bidirectional_cycle_registered_100k.ply"
+    input_stem = args.input_stem_template.format(sample=sample)
+    output_stem = args.output_stem_template.format(sample=sample)
+    input_path = args.input_root / sample / f"{input_stem}_registered_100k.ply"
     body = base.load_points(input_path)
     partial = base.load_points(ROOT / "data" / f"{sample}.ply")
     diagonal = max(float(np.linalg.norm(np.ptp(partial, axis=0))), 1e-8)
@@ -41,7 +43,7 @@ def process(args, sample):
         prior_mass_penalty=args.prior_mass_penalty)
     output_dir = args.output_root / sample
     output_dir.mkdir(parents=True, exist_ok=True)
-    stem = output_dir / f"{sample}_bidirectional_cycle"
+    stem = output_dir / output_stem
     registered = Path(f"{stem}_registered_100k.ply")
     compare = Path(f"{stem}_partial_gray_pixal_red.ply")
     projection = Path(f"{stem}_projection.png")
@@ -77,6 +79,8 @@ def main(argv=None):
     parser.add_argument("--input-root", type=Path, default=INPUT_ROOT)
     parser.add_argument("--output-root", type=Path, default=OUTPUT_ROOT)
     parser.add_argument("--camera-root", type=Path, default=base.CAMERA_ROOT)
+    parser.add_argument("--input-stem-template", default="{sample}_bidirectional_cycle")
+    parser.add_argument("--output-stem-template", default="{sample}_bidirectional_cycle")
     parser.add_argument("--samples", nargs="+", default=list(SAMPLES))
     parser.add_argument("--mass-budgets", nargs="+", type=float,
                         default=[.04, .08, .12])

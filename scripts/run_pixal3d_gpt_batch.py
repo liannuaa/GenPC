@@ -25,7 +25,13 @@ import trimesh
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-PIXAL3D_ROOT = PROJECT_ROOT / "models" / "Pixal3D"
+# A worktree intentionally does not duplicate multi-GB source checkouts.  The
+# external source is read-only; generated assets still belong to ``--root``.
+PIXAL3D_ROOT = Path(os.environ.get(
+    "PIXAL3D_SOURCE", str(PROJECT_ROOT / "models" / "Pixal3D"))).resolve()
+if not PIXAL3D_ROOT.exists():
+    raise FileNotFoundError(
+        f"Pixal3D source is missing: {PIXAL3D_ROOT}. Set PIXAL3D_SOURCE.")
 if str(PIXAL3D_ROOT) not in sys.path:
     sys.path.insert(0, str(PIXAL3D_ROOT))
 
@@ -215,6 +221,12 @@ def export_result(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=PROJECT_ROOT / "gpt_version")
+    parser.add_argument("--input-root", type=Path, default=None,
+                        help="Semantic-image root; defaults to --root.")
+    parser.add_argument("--output-root", type=Path, default=None,
+                        help="Pixal asset root; defaults to --root.")
+    parser.add_argument("--input-name", default="gpt_image.png",
+                        help="Per-sample semantic image filename.")
     parser.add_argument("--model", type=Path, default=PROJECT_ROOT / "models" / "Pixal3D-weights")
     parser.add_argument("--dino", type=Path, default=PROJECT_ROOT / "models" / "dinov3-vitl16-pretrain-lvd1689m")
     parser.add_argument("--moge", type=Path, default=PROJECT_ROOT / "models" / "moge-2-vitl")
@@ -227,6 +239,8 @@ def main() -> None:
     parser.add_argument("--texture-size", type=int, default=2048)
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
+    input_root = args.input_root or args.root
+    output_root = args.output_root or args.root
 
     for required in (args.model, args.dino, args.moge, args.rmbg):
         if not required.exists():
@@ -241,11 +255,13 @@ def main() -> None:
     prepared: dict[str, tuple[Path, dict[str, float]]] = {}
     preprocessed_paths: dict[str, Path] = {}
     for sample_id in args.ids:
-        sample_dir = args.root / sample_id
-        image_path = sample_dir / "gpt_image.png"
+        input_dir = input_root / sample_id
+        output_dir = output_root / sample_id
+        output_dir.mkdir(parents=True, exist_ok=True)
+        image_path = input_dir / args.input_name
         if not image_path.exists():
             raise FileNotFoundError(image_path)
-        processed_path = sample_dir / "pixal3d_input.png"
+        processed_path = output_dir / "pixal3d_input.png"
         processed = pipeline.preprocess_image(Image.open(image_path))
         processed.save(processed_path)
         preprocessed_paths[sample_id] = processed_path
@@ -261,7 +277,8 @@ def main() -> None:
     torch.cuda.empty_cache()
 
     for sample_id in args.ids:
-        sample_dir = args.root / sample_id
+        input_dir = input_root / sample_id
+        sample_dir = output_root / sample_id
         glb_path = sample_dir / "pixal3d.glb"
         ply_path = sample_dir / "pixal3d_sampled_100k.ply"
         metadata_path = sample_dir / "pixal3d_metadata.json"
@@ -298,7 +315,7 @@ def main() -> None:
         )
         metadata = {
             "sample_id": sample_id,
-            "input": str((sample_dir / "gpt_image.png").resolve()),
+            "input": str((input_dir / args.input_name).resolve()),
             "preprocessed_input": str(processed_path.resolve()),
             "model": str(args.model.resolve()),
             "dino": str(args.dino.resolve()),

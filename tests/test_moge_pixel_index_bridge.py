@@ -6,6 +6,7 @@ from scripts.run_moge_pixel_index_bridge import (
     build_partial_to_moge_index,
     colors_for_moge_hits,
     filter_moge_points_by_object_mask,
+    point_uv_to_pixel_xy,
 )
 
 
@@ -48,6 +49,11 @@ class MogePixelIndexBridgeTest(unittest.TestCase):
         np.testing.assert_allclose(colors[1], [1.0, 0.0, 0.0])
         np.testing.assert_allclose(colors[2], [0.55, 0.55, 0.55])
         np.testing.assert_allclose(colors[3], [1.0, 0.0, 0.0])
+
+    def test_bottom_left_partial_uv_converts_to_top_left_semantic_pixels(self):
+        pixel, valid = point_uv_to_pixel_xy(np.array([[.25, .20]]), 101, flip_y=True)
+        np.testing.assert_array_equal(pixel, np.array([[25, 80]]))
+        np.testing.assert_array_equal(valid, np.array([True]))
 
     def test_filter_moge_points_by_object_mask_keeps_only_masked_pixels(self):
         points = np.array(

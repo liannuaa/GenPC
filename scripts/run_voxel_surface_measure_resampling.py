@@ -22,7 +22,7 @@ SAMPLES = ("01184", "05117", "05452", "06127", "06145",
 
 def process(args, sample):
     source_dir = args.input_root / sample
-    stem_name = f"{sample}_bidirectional_cycle"
+    stem_name = args.stem_template.format(sample=sample)
     input_path = source_dir / f"{stem_name}_registered_100k.ply"
     info_path = source_dir / f"{stem_name}_surface_projection_info.json"
     source_info = json.loads(info_path.read_text())
@@ -81,6 +81,7 @@ def main():
     parser.add_argument("--input-root", type=Path, required=True)
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--camera-root", type=Path, default=base.CAMERA_ROOT)
+    parser.add_argument("--stem-template", default="{sample}_bidirectional_cycle")
     parser.add_argument("--samples", nargs="+", default=list(SAMPLES))
     parser.add_argument("--target-points", type=int, default=32768)
     parser.add_argument("--outlier-k", type=int, default=8)

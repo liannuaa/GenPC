@@ -24,15 +24,16 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED_ROOT = ROOT.parents[1]
-SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07306", "09639")
+SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639")
 
 
-def _paths(sample: str, *, pixal_root: Path, camera_root: Path, output_root: Path) -> dict[str, Path]:
+def _paths(sample: str, *, pixal_root: Path, camera_root: Path, partial_root: Path,
+           output_root: Path) -> dict[str, Path]:
     pixal = pixal_root / sample
     camera = camera_root / sample
     output = output_root / sample
     return {
-        "partial": ROOT / "data" / f"{sample}.ply",
+        "partial": partial_root / f"{sample}.ply",
         "prior": pixal / "pixal3d_sampled_100k.ply",
         "pixal_input": pixal / "pixal3d_input.png",
         "pixal_metadata": pixal / "pixal3d_metadata.json",
@@ -77,6 +78,7 @@ def main() -> None:
                         default=SHARED_ROOT / "workspace" / "redwood_qwen_gpt_pixal_bidirectional_mainline_20260823")
     parser.add_argument("--camera-root", type=Path,
                         default=SHARED_ROOT / "workspace" / "redwood_onestage_rawdepth_512_stage2_20260714")
+    parser.add_argument("--partial-root", type=Path, default=ROOT / "data")
     parser.add_argument("--output-root", type=Path,
                         default=ROOT / "workspace" / "pixal_moge_full9_rebuilt_20260904")
     parser.add_argument("--moge-model", type=Path, default=SHARED_ROOT / "models" / "moge-2-vitl" / "model.pt")
@@ -100,6 +102,7 @@ def main() -> None:
     args.output_root.mkdir(parents=True, exist_ok=True)
     for sample in args.samples:
         paths = _paths(sample, pixal_root=args.pixal_root, camera_root=args.camera_root,
+                       partial_root=args.partial_root,
                        output_root=args.output_root)
         try:
             _require(paths, ("partial", "prior", "pixal_input", "pixal_metadata", "camera", "point_uv", "source_mask", "semantic"))

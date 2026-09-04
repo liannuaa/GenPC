@@ -7,7 +7,10 @@ from fpsample import fps_sampling
 from scipy.spatial import cKDTree
 
 from src.bidirectional_cycle_registration import visible_score
-from src.ray_consistent_registration import smooth_observation_absorption
+from src.ray_consistent_registration import (
+    smooth_observation_absorption,
+    soft_ray_correspondences,
+)
 
 
 def project_visible_surface_mass(body, partial, *, budget_ratio, seed):
@@ -38,6 +41,61 @@ def project_visible_surface_mass(body, partial, *, budget_ratio, seed):
         "exact_partial_points_inserted": int(len(targets)),
         "output_points": int(len(projected)),
         "removed_prior_distance_q95": float(np.quantile(distance[removed_ids], .95)),
+    }
+
+
+def project_corresponded_surface_mass(body, partial, projector, *, diagonal,
+                                     budget_ratio, seed):
+    """Exchange mass only across robust saved-view prior/scan correspondences.
+
+    Unlike nearest-surface replacement, each observed point replaces the
+    visible prior point on the same reliable image ray.  It is a discrete
+    posterior surface update: no interpolation, deformation, or hidden-body
+    deletion is performed.
+    """
+    body = np.asarray(body, dtype=np.float64)
+    partial = np.asarray(partial, dtype=np.float64)
+    budget = min(len(partial), int(round(float(budget_ratio) * len(body))))
+    pairs = soft_ray_correspondences(
+        partial, body, projector, pixel_radius=5., trim_quantile=.75,
+        max_distance_ratio=.14, bbox_diagonal=float(diagonal))
+    partial_ids = np.asarray(pairs["partial_ids"], dtype=np.int64)
+    body_ids = np.asarray(pairs["generated_ids"], dtype=np.int64)
+    if budget < 32 or len(partial_ids) < budget:
+        return body.copy(), {
+            "valid": False, "reason": "insufficient_robust_correspondences",
+            "budget": int(budget), "matched_pairs": int(len(partial_ids)),
+        }
+    # A prior point is allowed one observation only.  This preserves the
+    # surface measure and avoids scan-line oversampling a single visible cell.
+    _, unique_body = np.unique(body_ids, return_index=True)
+    partial_ids, body_ids = partial_ids[unique_body], body_ids[unique_body]
+    if len(body_ids) < budget:
+        return body.copy(), {
+            "valid": False, "reason": "insufficient_unique_prior_anchors",
+            "budget": int(budget), "matched_pairs": int(len(partial_ids)),
+        }
+    candidate_points = partial[partial_ids]
+    selected_local = fps_sampling(
+        candidate_points.astype(np.float32), budget,
+        start_idx=int(seed) % len(candidate_points))
+    selected_local = np.asarray(selected_local, dtype=np.int64)
+    removed_ids = body_ids[selected_local]
+    targets = candidate_points[selected_local]
+    keep = np.ones(len(body), dtype=bool)
+    keep[removed_ids] = False
+    projected = np.concatenate((body[keep], targets), axis=0)
+    return projected, {
+        "valid": True,
+        "reason": "ray_corresponded_observed_surface_mass_projection",
+        "budget": int(budget),
+        "budget_ratio": float(budget / len(body)),
+        "matched_pairs": int(len(pairs["partial_ids"])),
+        "unique_prior_anchors": int(len(body_ids)),
+        "complete_prior_points_preserved": int(keep.sum()),
+        "complete_prior_fraction_preserved": float(keep.mean()),
+        "exact_partial_points_inserted": int(len(targets)),
+        "output_points": int(len(projected)),
     }
 
 
@@ -81,6 +139,17 @@ def select_observation_conditioned_postprocess(
         candidates.append({
             "route": "surface_mass_projection", "body": moved, "score": score,
             "selection_objective": objective, "info": info,
+        })
+        moved, info = project_corresponded_surface_mass(
+            body, partial, projector, diagonal=diagonal,
+            budget_ratio=float(budget_ratio), seed=int(seed))
+        if not info.get("valid", False):
+            continue
+        score = visible_score(partial, moved, projector, diagonal, pixel_radius=5.)
+        objective = float(score["objective"] + float(prior_mass_penalty) * budget_ratio)
+        candidates.append({
+            "route": "ray_corresponded_surface_mass_projection", "body": moved,
+            "score": score, "selection_objective": objective, "info": info,
         })
     valid = [item for item in candidates if (
         np.isfinite(item["selection_objective"])

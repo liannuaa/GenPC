@@ -94,6 +94,40 @@ class QwenImageEditPromptTest(unittest.TestCase):
         self.assertEqual(editor.last_stage1_prompt, "生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的汽车，纯白背景")
         self.assertEqual(result.size, (512, 512))
 
+    def test_generate_with_prompt_consumes_bounded_agent_instruction(self):
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch("tools.qwen_image_edit.NunchakuQwenImageTransformer2DModel"),
+            patch("tools.qwen_image_edit.QwenImageEditPlusPipeline"),
+        ):
+            editor = QwenImageEdit(
+                device="cuda", transformer_path="/tmp/transformer.safetensors",
+                pipeline_path="/tmp/pipeline", step=16, generation_size=512,
+                true_cfg_scale=4.0, negative_prompt=" ",
+            )
+        calls = []
+        editor.pipeline = lambda **kwargs: (calls.append(kwargs) or SimpleNamespace(
+            images=[Image.new("RGB", (512, 512), "white")]))
+        prompt = "Preserve pose. Correct only the observed surface locally."
+        result = editor.generate_with_prompt(Image.new("RGB", (512, 512)), prompt, seed=7)
+        self.assertEqual(result.size, (512, 512))
+        self.assertEqual(calls[0]["prompt"], prompt)
+        self.assertEqual(editor.last_stage1_prompt, prompt)
+
+    def test_generate_with_prompt_rejects_empty_instruction(self):
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch("tools.qwen_image_edit.NunchakuQwenImageTransformer2DModel"),
+            patch("tools.qwen_image_edit.QwenImageEditPlusPipeline"),
+        ):
+            editor = QwenImageEdit(
+                device="cuda", transformer_path="/tmp/transformer.safetensors",
+                pipeline_path="/tmp/pipeline", step=16, generation_size=512,
+                true_cfg_scale=4.0, negative_prompt=" ",
+            )
+        with self.assertRaises(ValueError):
+            editor.generate_with_prompt(Image.new("RGB", (512, 512)), "  ")
+
 
 if __name__ == "__main__":
     unittest.main()

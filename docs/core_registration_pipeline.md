@@ -79,6 +79,54 @@ isotropic scale + translation; no non-rigid deformation, fusion, GT, CD/EMD,
 or category-specific branch is used.  The full-nine rebuild is being written
 to `workspace/pixal_moge_fixed_route_full9_20260904`.
 
+## Single-view boundary-conditioned Gaussian edit and decode
+
+After fixed registration, the complete Pixal population and the real scan are
+kept as separate Gaussian populations in the same partial frame. Pixal
+Gaussian means are editable; real partial Gaussian means and local scales are
+immutable. Collision-free mutually visible saved-camera partial/Pixal matches
+form hard 2-D-neighbourhood controls. Their measured 3-D offsets are imposed
+as Dirichlet boundary values on a local kNN surface graph over the registered
+Pixal means:
+
+\[
+\min_{d}\; \sum_{(i,j)\in E} w_{ij}\|d_i-d_j\|_2^2
++ \lambda\sum_{i\notin C}\|d_i\|_2^2,
+\qquad d_c=\Delta_c\;(c\in C).
+\]
+
+Graph edges are pruned using local sampling scale, preventing propagation
+across large structural gaps. The weak screened term keeps disconnected or
+unsupported hidden components fixed. Hence the observed neighbourhood matches
+the partial exactly, while remote geometry follows only when it is connected
+through the same generated surface. This is a zero-shot geometric edit: it
+uses no GT/CD/EMD, category, or sample-specific decision.
+
+The partial scan is incomplete in every synthesized novel view, so its empty
+pixels are never used as negative evidence. Yet each virtual projection still
+has useful **positive** evidence: mutually z-buffered partial/Pixal pixels are
+added as cross-view controls, so side/back overlap resolves ambiguities that
+cannot be seen in the saved camera alone. The initial complete Pixal field is
+also self-rendered in fixed signed-PCA orthographic views. Front-most means
+outside a neighbourhood of the actual observations receive a small
+zero-displacement penalty. These are prior-protection views: they preserve
+hidden global shape while allowing the observed component to follow its hard
+partial anchors. They do not invent extra observations, treat missing scan
+pixels as background, or change the output point count.
+
+For review, every edit and decoded output also writes a six-panel virtual-view
+board (partial in gray, current Pixal field in red). The board is diagnostic;
+it is never used to route samples or select against GT.
+
+The point-cloud decoder does **not** concatenate the two point clouds.  It
+starts from all 100k edited Pixal means, finds mutually visible saved-camera
+partial/Pixal pixel pairs, and lets each reliable partial anchor replace at
+most one corresponding Pixal Gaussian centre.  Thus the hard observation is
+represented exactly where a prior support exists, while all unmatched Pixal
+means remain and preserve the full object.  The output retains the prior's
+100k count and sampling distribution.  CD/EMD, if requested, are evaluated
+only afterwards as an offline report.
+
 ## Observation-conditioned surface posterior
 
 `src/observation_conditioned_surface_projection.py` compares identity, smooth

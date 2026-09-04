@@ -258,3 +258,63 @@ def bidirectional_cycle_step(
             } for item in candidates],
         },
     )
+
+
+def partial_to_prior_inverse_step(
+    complete, partial, projector, *, diagonal, pixel_radius=5.0,
+    max_rotation_deg=3.0, scale_bounds=(.96, 1.04),
+    max_translation_ratio=.03, min_pairs=96,
+    fractions=(.25, .5, .75, 1.), return_best_candidate=False,
+):
+    """Fit partial→visible prior and move the prior only by its exact inverse."""
+    complete = np.asarray(complete, dtype=np.float64)
+    partial = np.asarray(partial, dtype=np.float64)
+    before = visible_score(partial, complete, projector, diagonal, pixel_radius)
+    pairs = before["geometric"]
+    if len(pairs["partial_ids"]) < int(min_pairs):
+        return complete, np.eye(4), {"accepted": False,
+            "reason": "insufficient_visible_pairs", "before": before,
+            "pair_count": int(len(pairs["partial_ids"]))}
+    observed = partial[pairs["partial_ids"]]
+    prior_visible = complete[pairs["generated_ids"]]
+    raw_forward, kept = robust_fit_similarity(observed, prior_visible)
+    bounded_inverse = bounded_delta_sim3(
+        invert_proper_sim3(raw_forward), max_rotation_deg=float(max_rotation_deg),
+        scale_bounds=tuple(scale_bounds),
+        max_translation=float(max_translation_ratio) * float(diagonal))
+    candidates = []
+    for fraction in fractions:
+        step = interpolate_sim3(bounded_inverse, fraction)
+        moved = apply_transform(complete, step)
+        candidates.append({"fraction": float(fraction), "inverse_step": step,
+                           "moved": moved,
+                           "score": visible_score(partial, moved, projector, diagonal, pixel_radius)})
+    selected = min(candidates, key=lambda item: item["score"]["objective"])
+    projection_before = before["projection"]
+    projection_after = selected["score"]["projection"]
+    accepted = bool(
+        np.isfinite(selected["score"]["objective"])
+        and selected["score"]["objective"] < before["objective"] * .9975
+        and selected["score"]["geometric"]["objective"] <= before["geometric"]["objective"] * 1.002
+        and projection_after["coverage"] >= projection_before["coverage"] - .02
+        and projection_after["iou"] >= projection_before["iou"] - .01)
+    exposed = bool(accepted or return_best_candidate)
+    forward = invert_proper_sim3(selected["inverse_step"])
+    exact = apply_transform(apply_transform(observed, forward), selected["inverse_step"])
+    cycle = float(np.sqrt(np.mean(np.sum((exact - observed) ** 2, axis=1))) /
+                  max(float(diagonal), 1e-12))
+    return (selected["moved"] if exposed else complete,
+            selected["inverse_step"] if exposed else np.eye(4), {
+        "accepted": accepted,
+        "candidate_exposed_for_audit": bool(return_best_candidate and not accepted),
+        "reason": "accepted" if accepted else "do_no_harm_gate",
+        "before": before, "after": selected["score"],
+        "pair_count": int(len(observed)), "forward_trimmed_count": int(kept.sum()),
+        "raw_forward_partial_to_pixal": raw_forward,
+        "applied_strict_inverse_pixal_to_partial": selected["inverse_step"],
+        "selected_fraction": selected["fraction"],
+        "cycle": {"exact_inverse_cycle_rms": cycle, "independent_reverse_cycle_rms": 0.},
+        "candidate_summary": [{"fraction": item["fraction"],
+                                "visible_objective": item["score"]["objective"]}
+                               for item in candidates],
+    })

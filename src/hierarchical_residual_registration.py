@@ -301,20 +301,36 @@ def intrinsic_local_step(
     anchor_ratio: float = .145,
     max_handle_displacement_ratio: float = .055,
     max_vertex_displacement_ratio: float = .045,
+    max_flipped_face_ratio: float = 8e-4,
     component_policy: str = "line_priority",
-    continuation=(1., .75, .50, .35, .25, .15, .10, .05),
+    guidance_body: np.ndarray | None = None,
+    guidance_max_transfer_ratio: float = .025,
+    # Thin or near-contact surfaces can fail a topology check even when a
+    # coarse residual direction is correct.  A fixed, shared fine tail lets
+    # the same local action take a genuinely small step rather than turning a
+    # safe rejection into a global re-generation.  The final acceptance still
+    # requires the common saved-view and multi-view no-harm gates.
+    continuation=(1., .75, .50, .35, .25, .15, .10, .05, .035, .025, .015, .01, .005),
 ):
-    """Propose and gate one topology-aware visible residual component."""
+    """Propose and gate one topology-aware visible residual component.
+
+    An optional re-registered generated ``guidance_body`` contributes only
+    visible residual vectors.  Handle locations, topology, and all unobserved
+    support remain on the original ``mesh``/``body``.
+    """
     before = soft_ray_correspondences(
         partial, body, projector, pixel_radius=5., trim_quantile=.75,
         max_distance_ratio=.14, bbox_diagonal=diagonal)
     proxy = build_proxy(mesh, int(proxy_triangles))
     surface, face_ids = sample_surface(proxy, int(correspondence_samples), int(seed))
+    component_source = (surface if guidance_body is None else
+                        np.asarray(guidance_body, dtype=np.float64))
     components, component_summary = visible_residual_components(
-        partial, surface, projector, diagonal=diagonal)
+        partial, component_source, projector, diagonal=diagonal)
     if not components:
         return mesh.copy(), np.asarray(body).copy(), {
             **component_summary, "accepted": False,
+            "guidance_body_used": guidance_body is not None,
             "before": before, "after": before}
     vertices = np.asarray(proxy.vertices, dtype=np.float64)
     faces = np.asarray(proxy.faces, dtype=np.int64)
@@ -322,6 +338,22 @@ def intrinsic_local_step(
     rejected_components = []
     for component_rank, (pair, component) in enumerate(components):
         source, target = pair
+        if guidance_body is not None:
+            # A generated proposal can have an incorrect hidden part or a
+            # shifted thin surface.  Its displacement is informative only
+            # where that proposal already lies close to the source mesh; do
+            # not create handles by snapping through a gap to another sheet.
+            transfer_distance = cKDTree(surface).query(source, k=1, workers=-1)[0]
+            transferable = transfer_distance <= float(guidance_max_transfer_ratio) * diagonal
+            if int(transferable.sum()) < int(min_handles):
+                rejected_components.append({
+                    **component, "component_rank": int(component_rank),
+                    "reason": "insufficient_nearby_guidance",
+                    "transferable_correspondences": int(transferable.sum()),
+                    "guidance_max_transfer_ratio": float(guidance_max_transfer_ratio),
+                })
+                continue
+            source, target = source[transferable], target[transferable]
         handles, targets = _aggregate_handles(
             proxy, surface, face_ids, source, target, diagonal=diagonal,
             max_handles=max_handles,
@@ -358,6 +390,7 @@ def intrinsic_local_step(
         return mesh.copy(), np.asarray(body).copy(), {
             **component_summary, "accepted": False,
             "reason": "no_intrinsically_compact_component",
+            "guidance_body_used": guidance_body is not None,
             "rejected_components": rejected_components,
             "before": before, "after": before}
     if component_policy == "line_priority":
@@ -401,8 +434,17 @@ def intrinsic_local_step(
             bbox_diagonal=diagonal)
         candidates.append((score["objective"], float(fraction), candidate_mesh,
                            candidate_body, score, quality))
+    line_search = [{
+        "fraction": float(item[1]),
+        "objective": float(item[0]),
+        "grid_coverage": float(item[4]["grid_coverage"]),
+        "matched_coverage": float(item[4]["matched_coverage"]),
+        "edge_stretch_q01": float(item[5]["edge_stretch_q01"]),
+        "edge_stretch_q99": float(item[5]["edge_stretch_q99"]),
+        "flipped_face_ratio": float(item[5]["flipped_face_ratio"]),
+    } for item in candidates]
     topology_safe = [item for item in candidates if (
-        item[5]["flipped_face_ratio"] <= 1e-4
+        item[5]["flipped_face_ratio"] <= float(max_flipped_face_ratio)
         and item[5]["edge_stretch_q01"] >= .78
         and item[5]["edge_stretch_q99"] <= 1.28)]
     selection_pool = topology_safe if topology_safe else candidates
@@ -410,15 +452,23 @@ def intrinsic_local_step(
         selection_pool, key=lambda item: item[0])
     accepted = bool(
         np.isfinite(objective)
-        and objective <= .9995 * before["objective"]
+        # The inner solver only establishes a strictly improving local
+        # geometric proposal.  Saved-camera and fixed-frame multi-view
+        # no-harm thresholds live in the shared outer controller, so imposing
+        # a second arbitrary 0.05% margin here can discard a topology-safe
+        # correction before it is evaluated by the real acceptance policy.
+        and objective < before["objective"]
         and after["grid_coverage"] >= before["grid_coverage"] - .02
         and after["matched_coverage"] >= before["matched_coverage"] - .015
-        and quality["flipped_face_ratio"] <= 1e-4
+        and quality["flipped_face_ratio"] <= float(max_flipped_face_ratio)
         and quality["edge_stretch_q01"] >= .78
         and quality["edge_stretch_q99"] <= 1.28)
     return ((candidate_mesh, candidate_body) if accepted else
             (mesh.copy(), np.asarray(body).copy())) + ({
         **component, "accepted": accepted,
+        "guidance_body_used": guidance_body is not None,
+        "guidance_max_transfer_ratio": (float(guidance_max_transfer_ratio)
+                                        if guidance_body is not None else None),
         "reason": "intrinsic_visible_gate_passed" if accepted else "intrinsic_visible_gate_rejected",
         "handles": int(len(handles)), "anchors": int(len(anchors)),
         "component_rank": int(component_rank),
@@ -427,8 +477,10 @@ def intrinsic_local_step(
         "support_fraction": float(np.mean(support > 0.)),
         "selected_fraction": float(fraction) if accepted else 0.,
         "topology_safe_candidates": int(len(topology_safe)),
+        "line_search": line_search,
         "displacement_p99_ratio": float(np.quantile(
             np.linalg.norm(high_displacement, axis=1), .99) / diagonal),
+        "max_flipped_face_ratio": float(max_flipped_face_ratio),
         "similarity_modes_removed": removed, "solver": solver,
         "quality": quality, "before": before, "after": after,
         "mesh_vertices_deleted": 0,

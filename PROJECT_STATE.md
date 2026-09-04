@@ -6,6 +6,88 @@ asks to preserve a pipeline state.
 
 ## Accepted Results
 
+### 2026-09-04 CST - Agent Intrinsic Local Geometry Route
+
+Status: accepted research direction. The user said this route "看起来很有前途"
+and requested that subsequent work focus on it. Preserve the implementation,
+shared parameters, and the following audit artifacts unless the user requests
+a deliberate replacement. This is an accepted *route*, not a claim that it is
+already the final full-ten pipeline.
+
+Samples and outputs:
+
+- `07136` action output:
+  `workspace/agent_genpc_plus_scratch_20260903/_agent_intrinsic_relaxed_07136/registered_100k.ply`
+- `07136` mesh output:
+  `workspace/agent_genpc_plus_scratch_20260903/_agent_intrinsic_relaxed_07136/registered_mesh.glb`
+- `07136` decoded output:
+  `workspace/agent_genpc_plus_scratch_20260903/_agent_intrinsic_relaxed_07136_uniform32k/07136/07136_agent_intrinsic_registered_uniform.ply`
+- `09639` action output:
+  `workspace/agent_genpc_plus_scratch_20260903/_agent_intrinsic_relaxed_09639/registered_100k.ply`
+- Action records:
+  `workspace/agent_genpc_plus_scratch_20260903/_agent_intrinsic_relaxed_07136/intrinsic_residual_action.json`
+  and
+  `workspace/agent_genpc_plus_scratch_20260903/_agent_intrinsic_relaxed_09639/intrinsic_residual_action.json`
+
+Inputs:
+
+- Raw partials: `data/07136.ply`, `data/09639.ply`
+- Saved cameras and semantic views:
+  `workspace/agent_genpc_plus_scratch_20260903/<sample>/camera.pth` and
+  `workspace/agent_genpc_plus_scratch_20260903/<sample>/img.png`
+- Fresh registered anchors:
+  `workspace/agent_genpc_plus_scratch_20260903/_agent_pca_router_2d3d_all10_v3/<sample>/<sample>_agent_bidirectional_registered_100k.ply`
+  and corresponding `registered_mesh.glb`.
+
+Model/checkpoint:
+
+- No new generative model is invoked by this action. It optimizes vertices of
+  the already generated and registered complete mesh.
+- Upstream semantic/Pixal3D model and exact upstream checkpoint provenance:
+  `UNKNOWN` in this action record; do not infer it from a later run.
+
+Agent instruction, verbatim for both audited samples:
+
+`Keep the exact saved-camera view, object identity, global pose, global proportions, structural parts, and hidden geometry unchanged. Do not rotate, crop, mirror, recenter, add, or remove parts. Only on the visible central surface region, gently contract inward so that the local outer surface follows the observed scan. Keep every other visible and hidden region unchanged; make the correction local and smooth.`
+
+Negative prompt:
+
+- `UNKNOWN / not applicable`: no image generator is called by this mesh-local
+  action.
+
+Shared generation/optimization parameters:
+
+- Proxy triangles `12000`; correspondence samples `50000`; maximum handles
+  `96`; seed `6145`.
+- Geodesic support inner/outer/anchor ratios `.055/.125/.145` of partial-bbox
+  diagonal.
+- Maximum handle/vertex displacement `.055/.045` of partial-bbox diagonal.
+- Continuation lattice
+  `[1,.75,.5,.35,.25,.15,.1,.05,.035,.025,.015,.01,.005]`.
+- Edge stretch q01/q99 limits `.78/1.28`; flipped-face ratio limit `8e-4`.
+- Proper Sim(3) registration is frozen before this local action; fixed
+  saved-camera and PCA-frame three-view no-harm gates remain active.
+
+Postprocessing:
+
+- Decimated-proxy screened Laplacian/ARAP-style solve; explicit removal of
+  translation, rotation, and isotropic-scale modes; displacement transfer only
+  to original mesh vertices.
+- No mesh face or hidden support deletion; standard observation-conditioned
+  posterior and support-aware voxel resampling only after an accepted action.
+- `07136` post-selection-only metric: CD/EMD x1e2 `2.521/3.612`; metrics were
+  not used for routing.
+
+What was approved:
+
+- Make this intrinsic local geometry action the primary research direction.
+- Keep the generic gate and verify it across the full ten samples before
+  claiming a mainline replacement.
+
+Do not change without asking:
+
+- The local-action safety contract and the above accepted audit artifacts.
+
 ### 2026-07-14 16:38 CST - Redwood One-Stage Raw-Depth Qwen Image Batch
 
 Status: accepted visual baseline. User said this one-stage raw-depth Qwen
@@ -1446,3 +1528,184 @@ What must not change without asking:
 - Postprocessing: frozen v15 coarse initialization; independent partial-to-visible-prior and visible-prior-to-partial proper-Sim(3) consensus; strict inverse; observation-conditioned identity/smooth/4/8/12% surface-mass routing; cross-prior scale-consistency guard; support-aware 32k voxel representatives with k=8, MAD scale 4, support threshold 0.02 diagonal, observation priority, no geometry creation or deformation.
 - Accepted final output root: `workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/_cross_prior_voxel_uniform_32k`; accepted metric root: `workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/postfreeze_cross_prior_voxel_uniform_32k_cd_emd`.
 - Accepted strict mean CD-L1/EMD x1e2: `1.5944254/2.5295681`; GenPC reference `1.74/2.88`; v15 under the same protocol `2.1095899/3.0984912`. Mean point count 32,771 and mean local-density CV `0.4982 -> 0.2923`. GT metrics were unavailable to generation, registration, routing, and resampling.
+
+## 2026-09-04 CST — accepted Pixal-native MoGe first-stage registration
+
+- User approval: “可以可以 效果非常不错”. Preserve this as the approved
+  Pixal--MoGe *first-stage* registration baseline; it is not yet a final
+  partial completion or a benchmark result.
+- Sample/output: Redwood `07136` sofa. Approved artifacts are
+  `workspace/agent_genpc_plus_scratch_20260903/_pixal_analytic_moge_rayscale_rgb_07136/{pixal_native_moge_registered_100k.ply,pixal_native_moge_gray_pixal_red.ply,pixal_native_moge_projection.png,pixal_native_moge_info.json}`.
+- Inputs: Pixal surface prior
+  `workspace/agent_genpc_plus_scratch_20260903/07136/pixal3d_sampled_100k.ply`;
+  Pixal prepared image
+  `workspace/agent_genpc_plus_scratch_20260903/07136/pixal3d_input.png`;
+  Pixal camera metadata
+  `workspace/agent_genpc_plus_scratch_20260903/07136/pixal3d_metadata.json`.
+- Models: local MoGe-2
+  `/opt/data/private/cr/lab/GenPC/models/moge-2-vitl/model.pt`; local RMBG-2.0
+  `/opt/data/private/cr/lab/GenPC/models/RMBG-2.0`; Pixal prior is the existing
+  TencentARC/Pixal3D asset with recorded generation seed `42` in its metadata.
+  No new image or 3D model is generated by this stage.
+- Prompt / negative prompt: not applicable (cached `pixal3d_input.png` is the
+  complete condition; no text-conditioned generation occurs). Image serving
+  model, scheduler, CFG, and seed are therefore not applicable to this stage.
+- Frozen registration contract: reuse Pixal's saved MoGe-conditioned FOV and
+  distance (`camera_angle_x=0.6138169188`, `distance=1.5776747465`); compose
+  the documented `o_voxel.to_glb` and Pixal export axes to initialize
+  `(X,Y,Z)=(-x,-y,d+z)` in MoGe/OpenCV coordinates; use only bounded visible
+  silhouette, log-depth, boundary and auxiliary RGB residual updates. A
+  same-view support translation is only `(-1,-1)` pixels. The accepted
+  depth-gauge update is the robust camera-ray scale
+  `p_cam <- 1.09020599 p_cam`, inferred from same-pixel z-buffer ratios.
+- Result evidence: native-view silhouette IoU remains `0.75584`, coverage
+  `0.75625`, leakage `0.00072`; log-depth residual improves `0.09911 ->
+  0.04328`. MoGe foreground PLY retains semantic RGB. Future reruns must use
+  `--cached-moge` plus the paired info JSON when this exact input is unchanged;
+  do not re-infer MoGe or overwrite the accepted root without user direction.
+
+## 2026-09-04 CST — accepted 07136 hard-partial pixel-indexed Sim(3) registration baseline
+
+- User approval: “好非常非常多了 稍稍再配更准就行”. Preserve the displayed
+  relaxed two-camera result as the current accepted registration baseline for
+  the Redwood `07136` leather-sofa diagnostic. It is registration only, not
+  a fusion, local-edit, or final benchmark acceptance.
+- Exact retained outputs:
+  `workspace/pixal_moge_joint_pixel_sim3_relaxed_20260904/07136/{two_camera_joint_registered_100k.ply,two_camera_joint_partial_gray_pixal_red.ply,two_camera_joint_saved_view_projection.png,two_camera_joint_pixal_to_partial.npy,two_camera_joint_visible_pixel_residual.npy,two_camera_joint_info.json}`.
+  The displayed overlay is `two_camera_joint_partial_gray_pixal_red.ply` with
+  red Pixal points and grey hard-partial points. Do not overwrite this root.
+- Inputs: partial `data/07136.ply`; Camera-1 saved camera
+  `workspace/agent_genpc_plus_scratch_20260903/07136/camera.pth`; point UV
+  `workspace/agent_genpc_plus_scratch_20260903/07136/point_uv.npy`; semantic
+  image `workspace/agent_genpc_plus_scratch_20260903/07136/img.png`; fixed
+  Pixal sample `workspace/agent_genpc_plus_scratch_20260903/07136/pixal3d_sampled_100k.ply`;
+  Pixal input `workspace/agent_genpc_plus_scratch_20260903/07136/pixal3d_input.png`;
+  native Pixal MoGe and contract
+  `workspace/pixal_native_moge_rayscale_redwood_20260904/07136/{pixal_native_moge_points.ply,pixal_native_moge_info.json}`;
+  Camera-1/Camera-2 bridge and pixel pairs
+  `workspace/pixal_moge_two_camera_bridge_20260904/07136/{two_camera_pixal_moge_native_moge_to_partial.npy,two_camera_pixal_moge_partial_to_native_moge_matches.npy}`.
+- Models: existing TencentARC/Pixal3D weights
+  `/opt/data/private/cr/lab/GenPC/models/Pixal3D-weights`, DINOv3
+  `/opt/data/private/cr/lab/GenPC/models/dinov3-vitl16-pretrain-lvd1689m`,
+  MoGe-2 `/opt/data/private/cr/lab/GenPC/models/moge-2-vitl/model.pt`, and
+  RMBG-2.0 `/opt/data/private/cr/lab/GenPC/models/RMBG-2.0`. No model was
+  re-run for this registration. The inherited Pixal generation used seed 42,
+  1024 resolution/cascade, 12 sparse/shape/texture steps, and 100,000 surface
+  samples; detailed sampler values are in the retained `pixal3d_metadata.json`.
+- Exact inherited Qwen prompt: `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的leather sofa，纯白背景`.
+  Qwen negative prompt: ` `; true CFG 4.0; 40 inference steps. Exact inherited
+  GPT prompt: “Use case: product-mockup\nAsset type: zero-shot 3-D completion semantic input\nInput image: Image 1 is the edit target and geometric reference.\nPrimary request: Refine this dark leather sofa into a clean, complete semantic product image.\nScene/backdrop: pure white studio background.\nConstraints: preserve exactly the same camera viewpoint, image-space position, projected scale, full sofa length, width, seat depth, backrest height, left armrest contour, right-side seat edge, and the three visible cushion divisions from Image 1. Do not shorten, elongate, rotate, mirror, or reshape the sofa. Improve only sharpness, leather coherence, and clearly implied details. Do not recenter, crop, resize, add/remove cushions or parts, or alter object geometry. No text, watermark, or extra objects.” GPT serving checkpoint, seed, scheduler, CFG, and backend implementation are `UNKNOWN`.
+- Accepted registration: two calibrated camera edges are first refined by the
+  bounded joint proper Sim(3); then the hard Camera-1 z-buffers form up to
+  10,000 mutual Pixal/partial pixel-indexed visible 3-D pairs (2-pixel
+  radius), whose fixed-seed 64-trial robust Sim(3) fit supplies fractional
+  residual candidates `[.125,.25,.50,.75,1.0]`. The selected full residual
+  remains proper/isotropic and bounded to 4 degrees, scale `[.96,1.04]`, and
+  0.04 partial-bbox-diagonal translation. Camera-2 Pixal--MoGe evidence is
+  recorded but `pixel_native_gate=false`: it is not allowed to veto a better
+  hard-partial registration. No GT, CD, EMD, category, or sample-specific
+  routing is used.
+- Evidence: Camera-1 visible objective `0.1164802 -> 0.1026699`; IoU
+  `.727801 -> .747686`; coverage `.965975 -> .992867`; visible geometric
+  objective `.0181247 -> .0124421`. All 100,000 Pixal points are retained;
+  no point deletion, resampling, fusion, non-rigid deformation, or local edit
+  is applied. Future work may only make a small additional registration
+  refinement from a copy of this accepted root, with one shared parameter set
+  and explicit comparison against this baseline.
+
+## 2026-09-04 CST — accepted 07136 wide-tilt global registration candidate
+
+- User approval: “近乎完美了 可以再大一点点就行”. Preserve the wide-tilt
+  registration result as the current visual baseline for the Redwood `07136`
+  sofa; further experiments must start from a copy and remain global proper
+  Sim(3) refinements only unless the user authorizes another method.
+- Exact outputs: `workspace/pixal_moge_joint_pixel_sim3_wide_tilt_20260904/07136/{camera1_amplified_registered_100k.ply,camera1_amplified_partial_gray_pixal_red.ply,camera1_amplified_saved_view_projection.png,camera1_amplified_residual.npy,camera1_amplified_info.json}`.
+  The visual overlay uses red Pixal and grey hard partial. Do not overwrite
+  this directory.
+- Inputs: partial `data/07136.ply`; source registered prior
+  `workspace/pixal_moge_joint_pixel_sim3_amplified_20260904/07136/camera1_amplified_registered_100k.ply`; saved Camera-1
+  `workspace/redwood_onestage_rawdepth_512_stage2_20260714/07136/camera.pth`; semantic image
+  `workspace/redwood_onestage_rawdepth_512_stage2_20260714/07136/img.png`.
+  The complete prior ultimately derives from the fixed Pixal source
+  `workspace/agent_genpc_plus_scratch_20260903/07136/pixal3d_sampled_100k.ply`;
+  that optional scratch source was subsequently cleaned, but the exact
+  predecessor PLY is retained in the preceding accepted entry.
+- Models / generation: no model inference or image generation in this stage.
+  The inherited complete prior uses TencentARC/Pixal3D weights
+  `/opt/data/private/cr/lab/GenPC/models/Pixal3D-weights`, DINOv3
+  `/opt/data/private/cr/lab/GenPC/models/dinov3-vitl16-pretrain-lvd1689m`,
+  MoGe-2 `/opt/data/private/cr/lab/GenPC/models/moge-2-vitl/model.pt`, and
+  RMBG-2.0 `/opt/data/private/cr/lab/GenPC/models/RMBG-2.0`; Pixal seed 42,
+  1024 resolution, 12 sparse/shape/texture steps, and 100k surface samples.
+  The inherited Qwen prompt is exactly `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的leather sofa，纯白背景`; negative prompt is ` `, true CFG is 4.0, and steps are 40. The inherited GPT prompt is exactly: “Use case: product-mockup\nAsset type: zero-shot 3-D completion semantic input\nInput image: Image 1 is the edit target and geometric reference.\nPrimary request: Refine this dark leather sofa into a clean, complete semantic product image.\nScene/backdrop: pure white studio background.\nConstraints: preserve exactly the same camera viewpoint, image-space position, projected scale, full sofa length, width, seat depth, backrest height, left armrest contour, right-side seat edge, and the three visible cushion divisions from Image 1. Do not shorten, elongate, rotate, mirror, or reshape the sofa. Improve only sharpness, leather coherence, and clearly implied details. Do not recenter, crop, resize, add/remove cushions or parts, or alter object geometry. No text, watermark, or extra objects.” GPT serving checkpoint, seed, scheduler, CFG, and backend implementation remain `UNKNOWN`.
+- Frozen registration parameters: `scripts/run_camera1_amplified_sim3_refine.py --wide-tilt-search`; fixed 32k Camera-1 subsearch; proper isotropic Sim(3) levels `(.010,1.00deg,.010)`, `(.004,.35deg,.004)`, `(.001,.10deg,.001)`; full-point strict acceptance only. It selects a -1.0 degree x rotation and cumulative 0.4996% uniform shrink. No GT/CD/EMD, fusion, point deletion, resampling, non-rigid deformation, or local editing is used. All 100k Pixal points remain.
+- Evidence: Camera-1 objective `.0983708 -> .0945947`; IoU `.759739 -> .771579`; leakage `.235935 -> .223755`; coverage `.992603 -> .992269`. This visual acceptance is not a final benchmark/metric claim.
+
+## 2026-09-04 CST — accepted 07136 final hard-partial global Sim(3) registration
+
+- User approval: “完美”. This supersedes the prior wide-tilt candidate as the
+  accepted visual registration baseline for the Redwood `07136` sofa. Preserve
+  it exactly; all nine-sample replication runs must use the same shared
+  procedure without per-sample parameters.
+- Exact outputs: `workspace/pixal_moge_joint_pixel_sim3_final_tilt_20260904/07136/{camera1_amplified_registered_100k.ply,camera1_amplified_partial_gray_pixal_red.ply,camera1_amplified_saved_view_projection.png,camera1_amplified_residual.npy,camera1_amplified_info.json}`.
+  The displayed comparison is red Pixal versus grey hard partial. Do not
+  overwrite this output root.
+- Inputs: partial `data/07136.ply`; prior
+  `workspace/pixal_moge_joint_pixel_sim3_wide_tilt_20260904/07136/camera1_amplified_registered_100k.ply`; saved camera
+  `workspace/redwood_onestage_rawdepth_512_stage2_20260714/07136/camera.pth`;
+  semantic `workspace/redwood_onestage_rawdepth_512_stage2_20260714/07136/img.png`.
+  The base complete Pixal PLY, two-camera MoGe bridge, and prior registration
+  inputs are exactly those enumerated in the preceding accepted 07136 entries.
+- Models / generation: this stage calls no model. Inherited assets use
+  TencentARC/Pixal3D `/opt/data/private/cr/lab/GenPC/models/Pixal3D-weights`,
+  DINOv3 `/opt/data/private/cr/lab/GenPC/models/dinov3-vitl16-pretrain-lvd1689m`,
+  MoGe-2 `/opt/data/private/cr/lab/GenPC/models/moge-2-vitl/model.pt`, and
+  RMBG-2.0 `/opt/data/private/cr/lab/GenPC/models/RMBG-2.0`; Pixal seed 42,
+  1024 resolution, 12 sparse/shape/texture steps, and 100k surface sampling.
+  The inherited Qwen prompt is exactly `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的leather sofa，纯白背景`; negative prompt ` `; true CFG 4.0; 40 steps. The inherited GPT prompt is exactly: “Use case: product-mockup\nAsset type: zero-shot 3-D completion semantic input\nInput image: Image 1 is the edit target and geometric reference.\nPrimary request: Refine this dark leather sofa into a clean, complete semantic product image.\nScene/backdrop: pure white studio background.\nConstraints: preserve exactly the same camera viewpoint, image-space position, projected scale, full sofa length, width, seat depth, backrest height, left armrest contour, right-side seat edge, and the three visible cushion divisions from Image 1. Do not shorten, elongate, rotate, mirror, or reshape the sofa. Improve only sharpness, leather coherence, and clearly implied details. Do not recenter, crop, resize, add/remove cushions or parts, or alter object geometry. No text, watermark, or extra objects.” GPT serving checkpoint, seed, scheduler, CFG, and backend implementation remain `UNKNOWN`.
+- Frozen registration continuation: `scripts/run_camera1_amplified_sim3_refine.py --wide-tilt-search --max-tilt-degrees 0.5`, 32k deterministic Camera-1 subsearch, proper isotropic Sim(3) levels `(.010,.5deg,.010)`, `(.004,.175deg,.004)`, `(.001,.05deg,.001)`, and strict full-point acceptance. It selects 1.099% global shrink and a small x translation, with no additional rotation. No GT/CD/EMD, fusion, point deletion, resampling, non-rigid deformation, or local editing is used. All 100k Pixal points remain.
+- Evidence: Camera-1 objective `.0945947 -> .0902447`; IoU `.771579 -> .784393`; leakage `.223755 -> .209274`; coverage `.992269 -> .989891`. This is an approved visual registration result, not a final benchmark/metric claim.
+
+## 2026-09-04 CST — accepted fixed-route nine-sample Pixal registration batch
+
+- User approval: “现在配准效果我很满意了”. Preserve the fixed no-fallback
+  registration batch as the accepted shared Redwood replication route. It is
+  registration-only: do not overwrite it with fusion, point deletion,
+  resampling, non-rigid deformation, or sample-specific adjustments.
+- Sample ids and exact final outputs:
+  `workspace/pixal_moge_fixed_route_full9_20260904/{01184,05117,05452,06127,06145,06188,06830,07306,09639}/final/{camera1_amplified_registered_100k.ply,camera1_amplified_partial_gray_pixal_red.ply,camera1_amplified_saved_view_projection.png,camera1_amplified_residual.npy,camera1_amplified_info.json}`.
+  All nine final PLYs were checked to contain exactly 100,000 Pixal points.
+  The accepted `07136` companion remains
+  `workspace/pixal_moge_joint_pixel_sim3_final_tilt_20260904/07136/camera1_amplified_registered_100k.ply`
+  and was deliberately not overwritten.
+- Inputs: for every id, hard partial `data/<id>.ply`; saved Camera-1,
+  `point_uv.npy`, semantic `img.png`, and object mask in
+  `workspace/redwood_onestage_rawdepth_512_stage2_20260714/<id>/`; retained
+  Pixal 100k prior, `pixal3d_input.png`, and `pixal3d_metadata.json` in
+  `workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/<id>/`.
+- Models: registration freshly ran MoGe-2
+  `/opt/data/private/cr/lab/GenPC/models/moge-2-vitl/model.pt` and RMBG-2.0
+  `/opt/data/private/cr/lab/GenPC/models/RMBG-2.0` on the retained Pixal input;
+  it did not regenerate Pixal GLBs, semantic images, or GPT images. Inherited
+  Pixal source uses TencentARC/Pixal3D with 100,000 surface samples. The
+  per-sample upstream Qwen/GPT prompts, seeds, schedulers, CFG values, and
+  backend versions were not collected in this batch record: `UNKNOWN`.
+  Therefore regeneration of the *upstream images/GLBs* is not exactly
+  reproducible from this entry; the recorded registration from retained assets
+  is reproducible.
+- Frozen method / parameters: analytic Pixal--MoGe initialization; Camera-1 to
+  Camera-2 foreground bridge; coupled two-edge proper Sim(3); Camera-1 mutual
+  visible pixel-indexed 3-D proper Sim(3) (maximum 10,000 pairs, fixed seed
+  6145, 64 robust trials, fractions `[.125,.25,.50,.75,1.0]`, 4-degree,
+  `[.96,1.04]` scale, and `0.04` partial-diagonal bounds); then Camera-1
+  global schedules `(.006,.30deg,.006),(.002,.10deg,.002),(.0005,.025deg,.0005)`,
+  `(.010,1.00deg,.010),(.004,.35deg,.004),(.001,.10deg,.001)`, and
+  `(.010,.50deg,.010),(.004,.175deg,.004),(.001,.05deg,.001)`. Every stage is
+  applied in sequence; the candidate lattice includes identity, but there is
+  no external no-harm/proposal gate or fallback. Native, bridge, and Camera-1
+  scores are diagnostic only. No GT, CD, EMD, category, or sample-id routing
+  is used.
+- Verification: targeted registration tests pass `13/13`; `py_compile` and
+  `git diff --check` pass. Final Camera-1 objective after the last continuation
+  is respectively `0.078404, 0.029222, 0.045875, 0.077912, 0.047739,
+  0.094383, 0.115850, 0.051641, 0.074690` in the sample-id order above.
