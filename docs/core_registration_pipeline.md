@@ -59,6 +59,26 @@ Shared parameters: pixel schedule `[8,5,3]`, final radius 5, per-step rotation
 cap 3 degrees, isotropic scale `[0.96,1.04]`, translation cap 0.03 partial-bbox
 diagonal, minimum 96 pairs, cycle cap 0.03.
 
+## Fixed Pixal--MoGe registration audit
+
+The current registration-only audit keeps the original complete Pixal prior
+and applies one fixed, zero-shot sequence without proposal rejection:
+
+```text
+Pixal input -> native MoGe -> analytic Pixal--MoGe Sim(3)
+  -> Camera-1/Camera-2 pixel bridge -> coupled two-edge Sim(3)
+  -> Camera-1 visible pixel-indexed 3-D Sim(3)
+  -> small, wide-tilt, and final Camera-1 global Sim(3) continuations
+```
+
+Every local search chooses the minimum of its fixed bounded candidate lattice,
+which includes identity.  Native MoGe evidence, bridged correspondence error,
+and full-resolution Camera-1 2D+3D scores are logged for analysis but never
+gate, reject, or revert a stage.  All transforms are proper rotation +
+isotropic scale + translation; no non-rigid deformation, fusion, GT, CD/EMD,
+or category-specific branch is used.  The full-nine rebuild is being written
+to `workspace/pixal_moge_fixed_route_full9_20260904`.
+
 ## Observation-conditioned surface posterior
 
 `src/observation_conditioned_surface_projection.py` compares identity, smooth
