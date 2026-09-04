@@ -27,6 +27,11 @@ from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
 SHARED_ROOT = ROOT.parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.mainline_paths import redwood_partial_root
+
 SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639")
 
 
@@ -40,6 +45,7 @@ def _paths(sample: str, *, pixal_root: Path, camera_root: Path, partial_root: Pa
         "prior": pixal / "pixal3d_sampled_100k.ply",
         "pixal_input": pixal / "pixal3d_input.png",
         "pixal_metadata": pixal / "pixal3d_metadata.json",
+        "pixal_moge_cache": pixal / "pixal_moge_fp16_observation.npz",
         "camera": camera / "camera.pth",
         "point_uv": camera / "point_uv.npy",
         "source_mask": camera / f"{sample}_moge_to_raw_partial_object_mask.png",
@@ -100,7 +106,7 @@ def main() -> None:
                         default=SHARED_ROOT / "workspace" / "redwood_qwen_gpt_pixal_bidirectional_mainline_20260823")
     parser.add_argument("--camera-root", type=Path,
                         default=SHARED_ROOT / "workspace" / "redwood_onestage_rawdepth_512_stage2_20260714")
-    parser.add_argument("--partial-root", type=Path, default=ROOT / "data" / "redwood" / "partial")
+    parser.add_argument("--partial-root", type=Path, default=redwood_partial_root(ROOT))
     parser.add_argument("--output-root", type=Path,
                         default=ROOT / "workspace" / "pixal_moge_full9_rebuilt_20260904")
     parser.add_argument("--moge-model", type=Path, default=SHARED_ROOT / "models" / "moge-2-vitl" / "model.pt")
@@ -133,13 +139,17 @@ def main() -> None:
             native_ply = paths["native"] / "pixal_native_moge_points.ply"
             native_info = paths["native"] / "pixal_native_moge_info.json"
             if not (_exists(native_ply, resume=args.resume) and _exists(native_info, resume=args.resume)):
-                _run([
+                native_command = [
                     python, "scripts/run_pixal_native_moge_registration.py",
                     "--prior", str(paths["prior"]), "--pixal-metadata", str(paths["pixal_metadata"]),
-                    "--pixal-input", str(paths["pixal_input"]), "--moge-model", str(args.moge_model),
-                    "--rmbg-model", str(args.rmbg_model), "--output-dir", str(paths["native"]),
-                    "--device", "cuda", "--fp16",
-                ], cwd=ROOT, log=paths["native"] / "stage.log", dry_run=args.dry_run,
+                    "--pixal-input", str(paths["pixal_input"]), "--rmbg-model", str(args.rmbg_model),
+                    "--output-dir", str(paths["native"]), "--device", "cuda", "--fp16",
+                ]
+                if paths["pixal_moge_cache"].is_file():
+                    native_command.extend(["--cached-moge-observation", str(paths["pixal_moge_cache"])])
+                else:
+                    native_command.extend(["--moge-model", str(args.moge_model)])
+                _run(native_command, cwd=ROOT, log=paths["native"] / "stage.log", dry_run=args.dry_run,
                      in_process=args.in_process)
             target_mask = paths["native"] / "pixal_input_object_mask.png"
             bridge_transform = paths["bridge"] / "two_camera_pixal_moge_native_moge_to_partial.npy"

@@ -11,6 +11,7 @@ any partial-only refinement are intentionally separate later stages.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import sys
@@ -40,6 +41,14 @@ from src.pixal_moge_analytic_registration import (
 )
 from src.ray_consistent_registration import apply_transform
 from src.saved_camera import draw_projection_overlay
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
 
 
 def native_pixal_moge_observation(
@@ -83,6 +92,55 @@ def native_pixal_moge_observation(
     return foreground.points, foreground.colors, moge_info
 
 
+def cached_native_pixal_moge_observation(
+    cache_path: Path,
+    image_path: Path,
+    rmbg_model: Path,
+    output_dir: Path,
+) -> tuple[np.ndarray, np.ndarray, dict]:
+    """Reuse the FP16 Pixal-input MoGe pass written during Pixal generation."""
+    with np.load(cache_path, allow_pickle=False) as cached:
+        if int(cached["schema_version"]) != 1:
+            raise ValueError(f"Unsupported native MoGe cache: {cache_path}")
+        if str(cached["input_sha256"]) != _sha256(image_path):
+            raise ValueError("Native MoGe cache belongs to a different pixal3d_input.png")
+        points = np.asarray(cached["points"], dtype=np.float64)
+        colors = np.asarray(cached["colors"], dtype=np.float64)
+        pixels = np.asarray(cached["pixel_xy"], dtype=np.float64)
+        intrinsics = np.asarray(cached["intrinsics"], dtype=np.float64)
+        image_hw = [int(value) for value in np.asarray(cached["image_hw"]).tolist()]
+    if not (len(points) == len(colors) == len(pixels)):
+        raise ValueError("Native MoGe cache arrays have inconsistent lengths")
+    rgba_path = output_dir / "pixal_input_rmbg.png"
+    alpha = run_rmbg_mask(image_path, rgba_path, rmbg_model)
+    mask = prepare_object_mask(alpha, alpha_threshold=128, erode_pixels=0)
+    save_mask_png(output_dir / "pixal_input_object_mask.png", mask)
+    foreground = filter_moge_points_by_object_mask(
+        points=points, colors=colors, pixel_xy=pixels, object_mask=mask,
+        alpha_threshold=128, erode_pixels=0,
+    )
+    if len(foreground.points) < 96:
+        raise RuntimeError("Cached Pixal-input MoGe foreground has too few points")
+    info = {
+        "pretrained": "cached_fp16_observation",
+        "image_path": str(image_path),
+        "image_hw": image_hw,
+        "valid_points": int(len(points)),
+        "output_keys": {"intrinsics": intrinsics.tolist()},
+        "camera2_frame": "moge_camera_coordinates_identity",
+        "foreground_points": int(len(foreground.points)),
+        "foreground_mask": str((output_dir / "pixal_input_object_mask.png").resolve()),
+        "rmbg_rgba": str(rgba_path.resolve()),
+        "cached_observation": str(cache_path.resolve()),
+        "pixal3d_moge_contract": {
+            "input": "exact saved pixal3d_input.png after Pixal3D preprocess_image",
+            "inference": "FP16 PIL RGB -> float/255 CHW -> MoGeModel.infer saved during Pixal3D generation",
+            "camera_consistency": "matches historical native Pixal--MoGe registration precision",
+        },
+    }
+    return foreground.points, foreground.colors, info
+
+
 def load_points_and_colors(path: Path) -> tuple[np.ndarray, np.ndarray | None]:
     cloud = o3d.io.read_point_cloud(str(path))
     points = np.asarray(cloud.points, dtype=np.float64)
@@ -101,6 +159,8 @@ def main() -> None:
                         help="Optional foreground MoGe PLY from an earlier identical Pixal input")
     parser.add_argument("--cached-moge-info", type=Path,
                         help="Optional pixal_native_moge_info.json paired with --cached-moge")
+    parser.add_argument("--cached-moge-observation", type=Path,
+                        help="Optional FP16 Pixal-input MoGe cache emitted by run_pixal3d_gpt_batch.py")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--fp16", action="store_true")
@@ -110,12 +170,21 @@ def main() -> None:
     prior, prior_colors = load_points_and_colors(args.prior)
     if (args.cached_moge is None) != (args.cached_moge_info is None):
         parser.error("--cached-moge and --cached-moge-info must be supplied together")
+    if args.cached_moge is not None and args.cached_moge_observation is not None:
+        parser.error("Only one cached MoGe representation may be supplied")
     if args.cached_moge is not None:
         moge, moge_colors = load_points_and_colors(args.cached_moge)
         if moge_colors is None:
             raise ValueError("cached MoGe PLY must retain per-point semantic RGB")
         cached = json.loads(args.cached_moge_info.read_text(encoding="utf-8"))
         moge_info = cached.get("moge", cached)
+        cache_mode = True
+    elif args.cached_moge_observation is not None:
+        if args.rmbg_model is None:
+            parser.error("--rmbg-model is required with --cached-moge-observation")
+        moge, moge_colors, moge_info = cached_native_pixal_moge_observation(
+            args.cached_moge_observation, args.pixal_input, args.rmbg_model, args.output_dir,
+        )
         cache_mode = True
     else:
         if args.moge_model is None or args.rmbg_model is None:

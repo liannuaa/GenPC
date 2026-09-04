@@ -42,7 +42,8 @@
 
 - [x] Move Redwood defaults to `data/redwood/partial` and `data/redwood/gt`
   across semantic generation, fixed registration, input materialisation, and
-  offline evaluation.
+  offline evaluation. The four runtime entry points now share canonical path
+  helpers, preventing a future split between partial and GT defaults.
 - [x] Replace point-by-point Python z-buffer loops with a vectorised
   deterministic rasteriser that preserves the former depth and offset-order
   tie rule exactly. Cache immutable partial-camera projections during each
@@ -57,3 +58,9 @@
   complete registration and decoded Gaussian PLY also remained byte-identical;
   final offline CD-L1×100 was unchanged at `1.1616` (EMD is CUDA-nondeterministic
   at the fourth decimal on an identical PLY). Test suite: 40 passed.
+- [x] Materialize the existing FP16 Pixal-input MoGe observation during a fresh
+  Pixal run and reuse it in native registration after an SHA-256 input check.
+  This removes a later model reload/inference without changing the method. On
+  `01184`, direct and cached native target/registered PLYs were byte-identical;
+  the full fixed registration was also byte-identical when both paths consumed
+  the current `data/redwood/partial` input. Test suite: 40 passed.

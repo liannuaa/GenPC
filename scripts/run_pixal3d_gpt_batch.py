@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import gc
+import hashlib
 import json
 import math
 import os
@@ -156,6 +157,50 @@ def estimate_camera(image_path: Path, model: MoGeModel, image_resolution: int = 
     }
 
 
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+@torch.no_grad()
+def save_native_moge_observation(
+    image_path: Path,
+    model: MoGeModel,
+    cache_path: Path,
+) -> Path:
+    """Persist the exact FP16 MoGe observation used by native registration.
+
+    Pixal camera estimation intentionally remains float32.  The native
+    registration historically uses an FP16 MoGe pass, so this second pass is
+    retained verbatim but is saved here to prevent a later model reload and
+    duplicate inference in the registration runner.
+    """
+    image_rgb = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
+    tensor = torch.from_numpy(image_rgb.astype(np.float32) / 255.0).permute(2, 0, 1).cuda()
+    with torch.autocast(device_type="cuda", dtype=torch.float16):
+        output = model.infer(tensor)
+    points = output["points"].detach().float().cpu().numpy()
+    valid = output["mask"].detach().cpu().numpy().astype(bool)
+    valid &= np.isfinite(points).all(axis=-1)
+    valid &= np.linalg.norm(points, axis=-1) > 1e-8
+    ys, xs = np.where(valid)
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(
+        cache_path,
+        schema_version=np.asarray(1, dtype=np.int64),
+        input_sha256=np.asarray(_sha256(image_path)),
+        image_hw=np.asarray(image_rgb.shape[:2], dtype=np.int64),
+        intrinsics=output["intrinsics"].squeeze().detach().float().cpu().numpy().astype(np.float64),
+        points=points[valid].astype(np.float64),
+        colors=(image_rgb[valid].astype(np.float64) / 255.0).clip(0.0, 1.0),
+        pixel_xy=np.stack((xs, ys), axis=1).astype(np.float64),
+    )
+    return cache_path
+
+
 def scene_geometry(scene: trimesh.Scene | trimesh.Trimesh) -> trimesh.Trimesh:
     if isinstance(scene, trimesh.Trimesh):
         return scene
@@ -272,6 +317,7 @@ def main() -> None:
 
     prepared: dict[str, tuple[Path, dict[str, float]]] = {}
     preprocessed_paths: dict[str, Path] = {}
+    native_moge_caches: dict[str, Path] = {}
     for sample_id in pending_ids:
         input_dir = input_root / sample_id
         output_dir = output_root / sample_id
@@ -288,6 +334,10 @@ def main() -> None:
     moge = MoGeModel.from_pretrained(str(moge_checkpoint.resolve())).cuda().eval()
     for sample_id, processed_path in preprocessed_paths.items():
         prepared[sample_id] = (processed_path, estimate_camera(processed_path, moge))
+        native_moge_caches[sample_id] = save_native_moge_observation(
+            processed_path, moge,
+            output_root / sample_id / "pixal_moge_fp16_observation.npz",
+        )
         print(f"[Camera] {sample_id}: {prepared[sample_id][1]}", flush=True)
     moge.cpu()
     del moge
@@ -343,6 +393,8 @@ def main() -> None:
             "texture_size": args.texture_size,
             "sampler_params": SAMPLER_PARAMS,
             "camera": camera,
+            "native_moge_observation_cache": str(native_moge_caches[sample_id].resolve()),
+            "native_moge_observation_contract": "FP16 MoGe on pixal3d_input.png; consumed by native registration",
             "glb": str(glb_path.resolve()),
             "sampled_ply": str(ply_path.resolve()),
             "elapsed_seconds": time.time() - started,

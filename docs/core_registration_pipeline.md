@@ -23,6 +23,12 @@ Pixal3D outputs a textured complete mesh and a 100k-point prior \(X\); its own
 input image also gives a MoGe reconstruction \(M_2\) in the Pixal camera frame
 \(C_2\).
 
+For an end-to-end run, the FP16 MoGe observation of the already preprocessed
+Pixal input is materialized with the Pixal assets and verified against the
+input-image hash before native registration.  This is an implementation cache:
+it uses the same MoGe tensor contract and does not alter the camera estimate,
+registration objective, or any data-dependent decision.
+
 ## Registration
 
 The registration is deliberately staged so that global pose and local

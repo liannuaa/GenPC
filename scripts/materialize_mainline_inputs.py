@@ -15,8 +15,15 @@ from pathlib import Path
 import shutil
 
 
+import sys
+
 ROOT = Path(__file__).resolve().parents[1]
 SHARED_ROOT = ROOT.parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from src.mainline_paths import redwood_partial_root
+
 SAMPLES = ("01184", "05117", "05452", "06127", "06145", "06188", "06830", "07136", "07306", "09639")
 
 CAMERA_FILES = (
@@ -72,7 +79,7 @@ def main() -> None:
         _copy(mask, camera_target / mask.name); copied.append(f"camera/{mask.name}")
         for name in PIXAL_FILES:
             _copy(pixal_source / name, pixal_target / name); copied.append(f"pixal/{name}")
-        _copy(ROOT / "data" / "redwood" / "partial" / f"{sample}.ply", partial_target); copied.append("partial")
+        _copy(redwood_partial_root(ROOT) / f"{sample}.ply", partial_target); copied.append("partial")
         manifest["samples"][sample] = {"state": "materialized", "files": copied}
     (root / "input_manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     print(json.dumps({"output_root": str(root), "samples": list(SAMPLES)}, indent=2))

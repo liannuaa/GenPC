@@ -1,8 +1,18 @@
-"""Path helpers used by the semantic stage."""
+"""Path helpers shared by the compact mainline."""
 
 from __future__ import annotations
 
 from pathlib import Path
+
+
+def redwood_partial_root(project_root: Path) -> Path:
+    """Canonical location of the moved Redwood partial scans."""
+    return Path(project_root) / "data" / "redwood" / "partial"
+
+
+def redwood_ground_truth_root(project_root: Path) -> Path:
+    """Canonical offline-only location of the moved Redwood ground truth."""
+    return Path(project_root) / "data" / "redwood" / "gt"
 
 
 def sample_dir(cfg, sample: str) -> Path:
