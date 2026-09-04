@@ -10,8 +10,10 @@ from __future__ import annotations
 import math
 
 import cv2
+import fpsample
 import kaolin as kal
 import numpy as np
+import open3d as o3d
 from PIL import Image
 import torch
 from torchvision.utils import save_image
@@ -25,8 +27,8 @@ class DepthPrompting:
     """Generate one saved-view depth image and its Qwen semantic completion."""
 
     def __init__(self, cfg):
-        if str(cfg.depth_projection) != "reference_view":
-            raise ValueError("The mainline requires depth_projection='reference_view'.")
+        if str(cfg.depth_projection) != "view_select":
+            raise ValueError("The mainline requires depth_projection='view_select'.")
         if str(cfg.inpainter) != "cv2" or str(cfg.control_model) != "qwen_edit":
             raise ValueError("The mainline requires OpenCV inpainting and Qwen-Image-Edit.")
         self.cfg = cfg
@@ -55,25 +57,60 @@ class DepthPrompting:
             self.depth2image.close()
         self.depth2image = None
 
-    def _reference_camera(self):
-        eye_direction = np.asarray(self.cfg.reference_eye_direction, dtype=np.float32)
-        eye_direction /= max(np.linalg.norm(eye_direction), 1e-8)
-        camera_up = np.asarray(self.cfg.reference_camera_up, dtype=np.float32)
-        camera_up -= np.dot(camera_up, eye_direction) * eye_direction
-        camera_up /= max(np.linalg.norm(camera_up), 1e-8)
-        viewpoint = eye_direction * float(self.cfg.distance)
-        camera = kal.render.camera.Camera.from_args(
-            eye=torch.tensor(viewpoint, dtype=torch.float32),
-            at=torch.zeros(3, dtype=torch.float32),
-            up=torch.tensor(camera_up, dtype=torch.float32),
+    @staticmethod
+    def _up_for_viewpoint(viewpoint: np.ndarray) -> np.ndarray:
+        """Match the historical Fibonacci-camera convention exactly."""
+        eye = np.asarray(viewpoint, dtype=np.float32)
+        gaze = -eye
+        world_up = np.array([0.0, 1.0, 0.0], dtype=np.float32)
+        if np.allclose(np.cross(gaze, world_up), 0):
+            return np.array([0.0, 0.0, 1.0], dtype=np.float32)
+        side = np.cross(gaze, world_up)
+        up = np.cross(side, gaze)
+        return up / max(np.linalg.norm(up), 1e-8)
+
+    def _camera_for_viewpoint(self, viewpoint: np.ndarray):
+        return kal.render.camera.Camera.from_args(
+            eye=torch.as_tensor(viewpoint, dtype=torch.float32, device=self.device),
+            at=torch.zeros(3, dtype=torch.float32, device=self.device),
+            up=torch.as_tensor(self._up_for_viewpoint(viewpoint), dtype=torch.float32, device=self.device),
             fov=math.pi * float(self.cfg.fovy) / 180.0,
             width=int(self.cfg.cam_res),
             height=int(self.cfg.cam_res),
             device=self.device,
         )
-        return camera, viewpoint
 
-    def _project_reference_view(self, points: torch.Tensor, camera):
+    def _fibonacci_viewpoints(self) -> np.ndarray:
+        count = int(getattr(self.cfg, "view_num", 256))
+        distance = float(self.cfg.distance)
+        golden_angle = math.pi * (3.0 - math.sqrt(5.0))
+        viewpoints = []
+        for index in range(count):
+            y = 1.0 - (index / float(count - 1)) * 2.0
+            horizontal_radius = math.sqrt(max(1.0 - y * y, 0.0))
+            theta = golden_angle * index
+            viewpoints.append((
+                math.cos(theta) * horizontal_radius * distance,
+                y * distance,
+                math.sin(theta) * horizontal_radius * distance,
+            ))
+        return np.asarray(viewpoints, dtype=np.float32)
+
+    @staticmethod
+    def _visible_indices(points: torch.Tensor, viewpoints: np.ndarray, radius: float) -> torch.Tensor:
+        """Hidden-point removal is the only view scorer; it uses no labels or GT."""
+        cloud = o3d.geometry.PointCloud(
+            points=o3d.utility.Vector3dVector(points.detach().cpu().numpy())
+        )
+        masks = []
+        for viewpoint in viewpoints:
+            _, ids = cloud.hidden_point_removal(np.asarray(viewpoint), float(radius))
+            mask = torch.zeros(points.shape[0], dtype=torch.bool, device=points.device)
+            mask[torch.as_tensor(np.asarray(ids), dtype=torch.long, device=points.device)] = True
+            masks.append(mask)
+        return torch.stack(masks, dim=0)
+
+    def _project_view(self, points: torch.Tensor, camera):
         transformed = camera.transform(points)
         xy = transformed[:, :2]
         center = (xy.min(dim=0).values + xy.max(dim=0).values) * .5
@@ -81,6 +118,39 @@ class DepthPrompting:
         uv = (xy - center) / scale
         uv = uv * (1.0 - 2.0 * float(self.cfg.padding)) + .5
         return uv, transformed[:, 2]
+
+    def _select_saved_view(self, points: torch.Tensor):
+        """Choose the frozen zero-shot saved view used by the accepted mainline.
+
+        This is deliberately small: coverage on a deterministic Fibonacci sphere,
+        followed by the historical opposite-view depth tie break.  It replaces the
+        accidental single hard-coded camera introduced during refactoring.
+        """
+        viewpoints = self._fibonacci_viewpoints()
+        sample_count = min(int(getattr(self.cfg, "downsample_num", 10000)), int(points.shape[0]))
+        sample_indices = fpsample.fps_sampling(points.detach().cpu().numpy(), sample_count).astype(np.int64)
+        sample = points[torch.as_tensor(sample_indices, dtype=torch.long, device=points.device)]
+        radius = float(getattr(self.cfg, "removal_radius", 10000.0))
+        coverage = self._visible_indices(sample, viewpoints, radius).sum(dim=1)
+        best_index = int(torch.argmax(coverage).item())
+        chosen = viewpoints[best_index]
+
+        # Preserve the old front/back decision.  It only resolves a view
+        # ambiguity from the partial itself, before any image or prior is used.
+        opposite = -chosen
+        cameras = (self._camera_for_viewpoint(chosen), self._camera_for_viewpoint(opposite))
+        depth_sums = []
+        for camera, viewpoint in zip(cameras, (chosen, opposite)):
+            _, depth = self._project_view(points, camera)
+            visible = self._visible_indices(points, np.asarray([viewpoint]), radius)[0]
+            depth_sums.append(depth[visible].sum())
+        if depth_sums[1] > depth_sums[0]:
+            chosen = opposite
+
+        camera = self._camera_for_viewpoint(chosen)
+        uv, depth = self._project_view(points, camera)
+        visible = self._visible_indices(points, np.asarray([chosen]), radius)[0]
+        return camera, chosen, uv, depth, visible
 
     @staticmethod
     def _paint(img: torch.Tensor, pixels: torch.Tensor, colors: torch.Tensor, radius: int) -> torch.Tensor:
@@ -100,25 +170,33 @@ class DepthPrompting:
         sparse = torch.zeros((3, resolution, resolution), device=self.device)
         temporary = torch.zeros_like(sparse)
         normalized_depth = .1 + .8 * (1.0 - (depths - depths.min()) / (depths.max() - depths.min()).clamp_min(1e-8))
+        # Keep the RGB sparse image only for visibility/mask construction.  The
+        # semantic model must receive the normalized depth raster below; using
+        # RGB here turns the intended depth conditioning into a coloured point
+        # cloud and destroys the saved-view geometry.
         sparse = self._paint(sparse, pixels, colors, int(self.cfg.point_size))
-        _ = self._paint(torch.zeros_like(sparse), pixels, normalized_depth[:, None].expand(-1, 3), int(self.cfg.point_size))
+        sparse_depth = self._paint(
+            torch.zeros_like(sparse),
+            pixels,
+            normalized_depth[:, None].expand(-1, 3),
+            int(self.cfg.point_size),
+        )
         front = self._paint(temporary, pixels, colors, int(self.cfg.point_size) * int(self.cfg.mask_pixel_rate)) != 0
         occupied = sparse != 0
         hole_mask = ((~front).to(torch.int32) * 255 ^ (~occupied).to(torch.int32) * 255).float() / 255.0
-        return sparse, hole_mask
+        return sparse_depth, hole_mask
 
     def _save_depth(self, xyz: torch.Tensor, rgb: torch.Tensor, flag: str):
-        camera, viewpoint = self._reference_camera()
-        uv, depths = self._project_reference_view(xyz, camera)
+        camera, viewpoint, uv, depths, visible = self._select_saved_view(xyz)
         pixels = (uv * int(self.cfg.res)).long().clamp(0, int(self.cfg.res) - 1)
         pixels = torch.stack([pixels[:, 1], pixels[:, 0]], dim=1)
-        sparse, hole_mask = self._rasterise_depth(pixels, depths, rgb)
+        sparse_depth, hole_mask = self._rasterise_depth(pixels[visible], depths[visible], rgb[visible])
         directory = sample_dir(self.cfg, flag)
         directory.mkdir(parents=True, exist_ok=True)
         raw_depth = sample_file(self.cfg, flag, "raw_depth.png")
         depth = sample_file(self.cfg, flag, "depth.png")
-        save_image(sparse, raw_depth)
-        depth_np = (sparse.permute(1, 2, 0).detach().cpu().numpy() * 255).astype(np.uint8)
+        save_image(sparse_depth, raw_depth)
+        depth_np = (sparse_depth.permute(1, 2, 0).detach().cpu().numpy() * 255).astype(np.uint8)
         mask_np = (hole_mask.permute(1, 2, 0).detach().cpu().numpy()[..., 0] * 255).astype(np.uint8)
         inpainted = cv2.inpaint(depth_np, mask_np, 2, cv2.INPAINT_NS)
         save_image(torch.from_numpy(inpainted).permute(2, 0, 1).float() / 255.0, depth)

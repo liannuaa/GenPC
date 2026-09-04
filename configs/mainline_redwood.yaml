@@ -19,10 +19,13 @@ prompt_overrides:
   "07306": "red office trash can"
   "09639": "Ergonomic Chair"
 
-# Frozen saved-view depth setup.
-depth_projection: "reference_view"
-reference_eye_direction: [-0.14270581, -0.75454755, -0.64054122]
-reference_camera_up: [0.39445910, -0.63690607, 0.66238408]
+# Frozen saved-view depth setup.  A deterministic 256-view Fibonacci search
+# selects the coverage-maximising partial view, then resolves its front/back
+# ambiguity from the partial depth itself.
+depth_projection: "view_select"
+view_num: 256
+downsample_num: 10000
+removal_radius: 10000
 distance: 1.6
 fovy: 49.1
 cam_res: 512

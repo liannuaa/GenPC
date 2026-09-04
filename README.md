@@ -8,8 +8,8 @@ methods.
 
 ```text
 partial scan
-  -> fixed saved-view depth + Qwen semantic image
-  -> GPT clarity-only image edit (external; image geometry is frozen)
+  -> deterministic saved-view grayscale depth + Qwen semantic image
+  -> GPT clarity-only image edit (external; prompt recorded with the asset)
   -> Pixal3D GLB + 100k sampled complete prior
   -> native Pixal--MoGe alignment -> two-camera bridge -> small partial refinement
   -> fixed complete-to-partial Sim(3)
@@ -50,10 +50,11 @@ CUDA_VISIBLE_DEVICES=0 $PY scripts/run_semantic_stage.py \
   --partial-root data --samples 01184
 ```
 
-2. Apply the GPT clarity-only edit outside this repository.  Save each result
-as `gpt_image.png` under `workspace/new_run/pixal/<sample>/`.  The Qwen image
-is the geometry authority: preserve camera, pose, scale, silhouette and local
-part layout.
+2. Apply the GPT clarity-only edit outside this repository. Save each result
+as `gpt_image.png` under `workspace/new_run/pixal/<sample>/` and save the exact
+prompt beside it. The Qwen image is the geometry authority: preserve camera,
+pose, silhouette and local part layout. The fixed downstream Sim(3) does not
+assume the edit retained an absolute image scale.
 
 3. Create Pixal3D priors:
 
@@ -65,15 +66,15 @@ CUDA_VISIBLE_DEVICES=0 $PY scripts/run_pixal3d_gpt_batch.py \
 
 4. Put `camera.pth`, `point_uv.npy`, `img.png`, and
 `<sample>_moge_to_raw_partial_object_mask.png` from Stage 1 under
-`workspace/new_run/camera/<sample>/`; put partial scans under
-`workspace/new_run/partial/`.  Then run the fixed registration:
+`workspace/new_run/inputs/camera/<sample>/`; put partial scans under
+`workspace/new_run/inputs/partial/`. Then run the fixed registration:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 $PY scripts/run_fixed_pixal_moge_registration.py \
   --samples 01184 \
   --pixal-root workspace/new_run/pixal \
-  --camera-root workspace/new_run/camera \
-  --partial-root workspace/new_run/partial \
+  --camera-root workspace/new_run/inputs/camera \
+  --partial-root workspace/new_run/inputs/partial \
   --output-root workspace/new_run/registration
 ```
 

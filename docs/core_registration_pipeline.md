@@ -7,12 +7,20 @@ available to registration or editing.
 
 ## Inputs
 
-For a partial point cloud \(P\), the fixed saved view produces a depth image,
-camera \(C_1\), per-point image coordinates \(u_P\), and a Qwen semantic image
-\(I\). A GPT clarity-only edit provides the Pixal input image without changing
-the image geometry. Pixal3D outputs a textured complete mesh and a 100k-point
-prior \(X\); its own input image also gives a MoGe reconstruction \(M_2\) in
-the Pixal camera frame \(C_2\).
+For a partial point cloud \(P\), Camera-1 \(C_1\) is selected deterministically
+from a 256-view Fibonacci sphere: hidden-point-removal coverage is evaluated on
+10k FPS points, and a partial-depth front/back tie-break resolves the selected
+direction. The visible partial points are rasterised as a normalized **grayscale
+depth** image, hole-filled with OpenCV, and completed by Qwen into semantic
+image \(I\). The stage also saves \(C_1\) and per-point image coordinates
+\(u_P\).
+
+A GPT clarity edit of \(I\) provides the Pixal input image. Its prompt is
+recorded with the asset and restricts the edit to material/detail cleanup; the
+following Sim(3) route makes no assumption about its absolute image scale.
+Pixal3D outputs a textured complete mesh and a 100k-point prior \(X\); its own
+input image also gives a MoGe reconstruction \(M_2\) in the Pixal camera frame
+\(C_2\).
 
 ## Registration
 

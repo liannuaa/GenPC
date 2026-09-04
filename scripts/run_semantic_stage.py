@@ -14,6 +14,7 @@ import yaml
 from munch import Munch
 
 ROOT = Path(__file__).resolve().parents[1]
+SHARED_ROOT = ROOT.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -47,7 +48,7 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=ROOT / "configs" / "mainline_redwood.yaml")
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--partial-root", type=Path, default=ROOT / "data")
-    parser.add_argument("--models-root", type=Path, default=ROOT / "models")
+    parser.add_argument("--models-root", type=Path, default=SHARED_ROOT / "models")
     parser.add_argument("--samples", nargs="+", choices=SAMPLES, default=list(SAMPLES))
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
