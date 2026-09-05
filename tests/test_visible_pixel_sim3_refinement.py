@@ -44,6 +44,24 @@ def test_pixel_pair_sim3_candidates_reduce_a_pure_visible_depth_offset():
     assert after < before * .05
 
 
+def test_pixel_pair_sim3_candidates_capture_a_large_visible_depth_translation():
+    y, x = np.mgrid[-6:7, -6:7]
+    partial = np.c_[x.ravel() / 16., y.ravel() / 16., 1. + .01 * x.ravel() * y.ravel()]
+    prior = partial.copy()
+    prior[:, 2] += .28
+    diagonal = float(np.linalg.norm(np.ptp(partial, axis=0)))
+    candidates, info = pixel_pair_residual_candidates(
+        partial, prior, _OrthographicProjector(), diagonal=diagonal,
+        max_pixel_distance=10., trials=64, fractions=(1.0,),
+        max_rotation_deg=30., scale_bounds=(.45, 2.40), max_translation_ratio=1.25,
+    )
+    transform = dict(candidates)["pixel_pair_fraction_1.000"]
+    before = np.linalg.norm(prior - partial, axis=1).mean()
+    after = np.linalg.norm(apply_transform(prior, transform) - partial, axis=1).mean()
+    assert info["robust_fit"]["inlier_ratio"] > .45
+    assert after < before * .20
+
+
 def test_local_camera1_refine_recovers_a_small_visible_translation():
     y, x = np.mgrid[-5:6, -5:6]
     partial = np.c_[x.ravel() / 12., y.ravel() / 12., 1. + .01 * x.ravel() * y.ravel()]

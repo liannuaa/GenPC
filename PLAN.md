@@ -142,3 +142,109 @@
     outputs contain 100,000 points. A no-override 01184 rerun at
     `workspace/fixed_mainline_default_smoke_20260905` reproduced the selected
     registration and decoded PLY byte-for-byte; `pytest -q` passed `44/44`.
+
+## Custom non-orthogonal evaluation — 2026-09-05
+
+- [x] Run the fixed Qwen → GPT → Pixal → registration → Gaussian mainline on
+  the ten renamed custom scans using their regenerated non-orthogonal partial
+  views. Keep all method parameters fixed; read custom GT only after final
+  predictions are frozen for offline reporting.
+  - The initial semantic batch was stopped after an input-camera audit:
+    reselecting a 256-view camera from a sparse partial punctured the depth
+    raster and changed the observation view. The custom batch will use the
+    recorded partial-camera `viewpoint.npy` for Camera-1 depth rasterisation;
+    this is camera metadata only, with no complete-geometry access.
+  - Hydra's original `59° / 27°` partial camera occluded one head. A
+    pre-generation oblique-view diagnostic finally selected `289° / 18°`,
+    which separates all three heads and necks while retaining the complete
+    oblique body; regenerate only this partial and dependent semantic assets
+    before resuming the batch.
+  - The custom category-only prompts were refined before Qwen generation:
+    hydra explicitly requires exactly three distinct heads, while mirrorless
+    camera requires one central lens and a complete camera body. These are
+    category descriptions, not evaluation-time routing or GT supervision.
+  - Pixal startup required a runtime-only namespace isolation because NAF's
+    Torch-Hub checkout imports its own top-level `src` package. This avoids a
+    collision with GenPC+'s `src` package without changing Pixal checkpoints,
+    sampler settings, or exported priors.
+  - Qwen/GPT/Pixal input preparation is complete in
+    `workspace/custom_mainline_oblique_20260905/inputs/`. All ten samples now
+    have the recorded partial-view depth/camera assets, semantic image,
+    geometry-preserving GPT image, Pixal GLB, 100k-point prior, and cached
+    Pixal-input MoGe observation. No custom GT was read during those stages.
+  - Fixed registration and partial-anchored Gaussian decoding completed for
+    all ten samples. Every final prediction contains 100,000 points under
+    `workspace/custom_mainline_oblique_20260905/gaussian/<sample>/decoded/`.
+    The subsequent offline-only 16,384-point audit (seed 6145) is recorded at
+    `workspace/custom_mainline_oblique_20260905/metrics/offline.{json,csv}`:
+    mean CD-L1×100 `13.6373`, mean EMD×100 `12.8285`. GT was first accessed
+    only by this final audit.
+
+## Camera-1 coarse basin recovery diagnostic — 2026-09-05
+
+- [x] Add an optional, globally shared coarse visible-surface Sim(3) stage
+  before the fixed residual continuation. It must use no GT or category route:
+  pixel-indexed visible 3-D pairs propose broad candidates, while a
+  pixel-residual plus saved-view projection objective selects from identity and
+  those candidates. Test it in an isolated output root on the four custom
+  cases whose current Camera-1 score has zero or near-zero 3-D pairs:
+  `single_engine_airplane`, `light_helicopter`,
+  `tyrannosaurus_rex_skeleton`, and `wolf`.
+  - The isolated registration root is
+    `workspace/custom_mainline_oblique_20260905/registration_coarse_basin_20260905`.
+    Each case selected the full shared pixel-residual candidate and restored
+    valid final Camera-1 3-D pairs: `7093`, `4778`, `5287`, and `7057` in the
+    order listed above (the old route had `0`, `0`, `0`, and `221`).
+  - With the unchanged Gaussian edit/decode and the same offline 16,384-point
+    metric seed, CD-L1×100 / EMD×100 changed from
+    `41.0854/38.2824`, `40.8114/29.2885`, `21.2220/22.8760`, and
+    `13.8432/15.5566` to `0.7406/1.5297`, `1.3764/2.5790`,
+    `0.9152/1.9992`, and `3.1437/4.0370`. The four-sample mean is
+    `29.2405/26.5009 → 1.5440/2.5363`. Outputs and the offline comparison
+    are retained under `workspace/custom_coarse_basin_ablation_20260905/`.
+  - The flag remains opt-in pending visual and broader-distribution validation;
+    the frozen default mainline is not silently changed.
+  - [x] Run the same opt-in coarse stage on the remaining six custom samples
+    (`handheld_power_drill`, `mirrorless_camera`, `dragon_character`,
+    `hydra_creature`, `domestic_pig`, `cartoon_fox`) and compare their frozen
+    downstream predictions offline before deciding whether to promote it.
+    - The shared selection chose a non-identity coarse candidate for five
+      samples and identity for `hydra_creature`. With unchanged downstream
+      Gaussian parameters, the six-sample mean changed from CD-L1×100 / EMD×100
+      `3.2352/3.7246` to `3.2925/3.7962`; the largest regressions were still
+      small (`+0.2179/+0.2755` on the handheld drill). Combining this audit
+      with the four diagnosed failures gives `13.6373/12.8351 → 2.5931/3.2922`
+      over all ten custom samples. Results are in
+      `workspace/custom_coarse_basin_remaining6_ablation_20260905/`.
+  - [x] Run the same opt-in stage on the frozen Redwood-10 Qwen/GPT/Pixal
+    inputs and compare its complete offline audit with the accepted fixed
+    baseline before changing the default.
+    - The isolated result is
+      `workspace/redwood_coarse_basin_ablation_20260905/`. The unchanged
+      16,384-point offline audit (seed 6145) is CD-L1×100 / EMD×100
+      `1.5738481/2.4813253`, versus the frozen `1.5682055/2.4785676`:
+      `+0.0056426/+0.0027576` (`+0.36%/+0.11%`). Three samples selected
+      identity; the other seven selected shared pixel-pair fractions. The
+      largest per-sample change is 06188 CD `+0.0365`; no catastrophic
+      regression occurred. Keep the stage opt-in until a further global
+      decision, rather than silently replacing the accepted mainline.
+
+## Default coarse-basin registration promotion — 2026-09-05
+
+- [x] Promote the globally shared broad Camera-1 pixel-Sim(3) basin-capture
+  step to the default registration route at the user's direction. Its
+  identity-inclusive fixed candidate lattice remains the only selection rule;
+  no category/sample route, proposal rejection, or GT/CD/EMD input was added.
+- [x] Update the canonical method documentation and public run instructions
+  to describe the new stage and retain `--no-coarse-basin-recovery` solely as
+  an ablation switch.
+- [x] Run a fresh one-sample no-override registration plus Gaussian smoke
+  path, then verify the manifest reports coarse capture enabled and the final
+  decoded cloud has 100,000 points.
+  - `workspace/default_coarse_mainline_smoke_20260905` ran 01184 without an
+    explicit coarse flag. The registration manifest records `true`, the joint
+    record selected `pixel_pair_fraction_1.000`, and the decoded cloud has
+    100,000 points. Its SHA-256 is
+    `e7cdbd3d256b044f592d495c7feb175d4628cb1e89f395f1c67e7776219cec09`,
+    byte-identical to the corresponding accepted Redwood coarse-ablation
+    output. `pytest -q` passed `45/45`.

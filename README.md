@@ -135,6 +135,12 @@ CUDA_VISIBLE_DEVICES=0 $PY scripts/run_fixed_pixal_moge_registration.py \
   --output-root "$RUN/registration"
 ```
 
+Registration always runs the globally shared broad Camera-1 pixel-Sim(3)
+capture before the narrow residual and continuations. The fixed visible
+2-D+3-D objective selects from identity and five shared residual fractions;
+it does not use a category route or ground truth. Pass
+`--no-coarse-basin-recovery` only for an ablation.
+
 The registered complete prior is:
 
 ```text

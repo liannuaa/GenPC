@@ -69,6 +69,8 @@ def main() -> None:
     parser.add_argument("--camera1-fine-search-points", type=int, default=32_000)
     parser.add_argument("--candidate-workers", type=int, default=8,
                         help="Independent visible-score evaluations per local-search level.")
+    parser.add_argument("--coarse-basin-recovery", action=argparse.BooleanOptionalAction, default=True,
+                        help="Apply the fixed shared broad Camera-1 pixel-Sim(3) capture before residual refinement.")
     parser.add_argument("--device", default="cpu")
     args = parser.parse_args()
 
@@ -115,6 +117,54 @@ def main() -> None:
     active_native = apply_transform(prior_native, delta_q)
     active_bridge = delta_m @ bridge_total
     active_partial = proposed
+
+    # A sparse scan or a large camera-chain discrepancy can leave the strict
+    # 14%-diagonal visible-3D matcher without any pairs. In that case the
+    # narrow residual lattice has no geometric basin to refine. This fixed
+    # capture stage uses the same Camera-1 pixel-indexed surface pairs as the
+    # ordinary residual, but exposes a single shared broad Sim(3) lattice.
+    # Identity remains a candidate; no category or sample-dependent decision
+    # is introduced. Once a finite 3-D score exists, the existing narrow
+    # residual and continuations take over unchanged. This is a fixed mainline
+    # stage; --no-coarse-basin-recovery is retained only for ablation.
+    coarse_record = {
+        "enabled": bool(args.coarse_basin_recovery), "applied": False,
+        "selection": "disabled", "selected_action": "disabled", "search": None, "trials": [],
+        "before": _compact_visible(visible_score(
+            partial, active_partial, partial_projector, diagonal, pixel_radius=5.
+        )),
+        "after": None,
+    }
+    if args.coarse_basin_recovery:
+        coarse_candidates, coarse_search = pixel_pair_residual_candidates(
+            partial, active_partial, partial_projector, diagonal=diagonal,
+            max_pairs=args.pixel_pair_max_points, trials=args.pixel_pair_trials,
+            fractions=(.125, .25, .50, .75, 1.0),
+            max_rotation_deg=30., scale_bounds=(.45, 2.40), max_translation_ratio=1.25,
+        )
+        coarse_trials = []
+        for action, partial_residual in coarse_candidates:
+            candidate = apply_transform(active_partial, partial_residual)
+            native_residual = invert_proper_sim3(active_bridge) @ partial_residual @ active_bridge
+            coarse_trials.append({
+                "action": action, "partial_residual": partial_residual,
+                "native_residual": native_residual,
+                "partial": _compact_visible(visible_score(
+                    partial, candidate, partial_projector, diagonal, pixel_radius=5.
+                )),
+            })
+        selected_coarse = min(coarse_trials, key=lambda item: item["partial"]["objective"])
+        active_partial = apply_transform(active_partial, selected_coarse["partial_residual"])
+        active_native = apply_transform(active_native, selected_coarse["native_residual"])
+        active_total = selected_coarse["partial_residual"] @ active_total
+        coarse_record = {
+            "enabled": True,
+            "applied": bool(selected_coarse["action"] != "identity"),
+            "selection": "minimum_Camera1_visible_2D3D_objective_over_shared_broad_pixel_Sim3_lattice",
+            "selected_action": selected_coarse["action"],
+            "search": coarse_search, "trials": coarse_trials,
+            "before": coarse_record["before"], "after": selected_coarse["partial"],
+        }
 
     # MoGe's successful correction is a robust 3-D fit on pixel-indexed
     # visible surfaces, not a silhouette-only shift.  Apply that exact
@@ -186,6 +236,7 @@ def main() -> None:
         },
         "residuals": {"pixal_native_moge": delta_q, "moge_partial": delta_m,
                       "visible_pixel_partial": selected_pixel["partial_residual"]},
+        "coarse_basin_recovery": coarse_record,
         "visible_pixel_direct_refinement": {
             "applied": bool(pixel_applied),
             "selection": "minimum_Camera1_visible_2D3D_objective_over_fixed_residual_fractions",

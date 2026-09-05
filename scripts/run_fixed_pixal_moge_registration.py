@@ -6,10 +6,11 @@ retained Qwen/GPT/Pixal assets.  It never regenerates semantic images, GLBs, or
 surface priors, and it never reads GT/CD/EMD.  For every sample it applies one
 fixed route:
 
-Pixal-native MoGe -> two-camera bridge -> coupled residual -> pixel-indexed
-visible 3-D Sim(3) -> amplified Camera-1 -> 1-degree wide tilt -> 1-degree
-continuation.  All stages are applied; score records are diagnostic rather
-than proposal gates.
+Pixal-native MoGe -> two-camera bridge -> coupled residual -> broad
+pixel-indexed visible 3-D Sim(3) capture -> narrow visible 3-D Sim(3) ->
+amplified Camera-1 -> 1-degree wide tilt -> 1-degree continuation. All stages
+are applied; fixed objectives choose among the shared candidates without
+proposal gates.
 """
 
 from __future__ import annotations
@@ -120,6 +121,8 @@ def main() -> None:
                         help="Shared wide Camera-1 tilt trust region in degrees.")
     parser.add_argument("--camera1-final-tilt-degrees", type=float, default=1.0,
                         help="Shared final Camera-1 tilt trust region in degrees.")
+    parser.add_argument("--coarse-basin-recovery", action=argparse.BooleanOptionalAction, default=True,
+                        help="Enable the fixed globally shared broad Camera-1 pixel-Sim(3) capture before refinement.")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--in-process", action=argparse.BooleanOptionalAction, default=True,
                         help="Reuse imports between fixed stages; --no-in-process restores subprocess execution.")
@@ -147,6 +150,7 @@ def main() -> None:
             "camera1_search_points": int(args.camera1_search_points),
             "camera1_wide_tilt_degrees": float(args.camera1_wide_tilt_degrees),
             "camera1_final_tilt_degrees": float(args.camera1_final_tilt_degrees),
+            "coarse_basin_recovery": bool(args.coarse_basin_recovery),
         },
     }
     args.output_root.mkdir(parents=True, exist_ok=True)
@@ -189,14 +193,17 @@ def main() -> None:
                      in_process=args.in_process)
             joint_prior = paths["joint"] / "two_camera_joint_registered_100k.ply"
             if not _exists(joint_prior, resume=args.resume):
-                _run([
+                joint_command = [
                     python, "scripts/run_pixal_moge_joint_bundle.py",
                     "--partial", str(paths["partial"]), "--pixal-prior", str(paths["prior"]),
                     "--native-moge", str(native_ply), "--native-info", str(native_info),
                     "--bridge-transform", str(bridge_transform), "--pixel-matches", str(pixel_matches),
                     "--partial-camera", str(paths["camera"]), "--semantic", str(paths["semantic"]),
                     "--output-dir", str(paths["joint"]), "--device", "cpu",
-                ], cwd=ROOT, log=paths["joint"] / "stage.log", dry_run=args.dry_run,
+                ]
+                if args.coarse_basin_recovery:
+                    joint_command.append("--coarse-basin-recovery")
+                _run(joint_command, cwd=ROOT, log=paths["joint"] / "stage.log", dry_run=args.dry_run,
                      in_process=args.in_process)
             amplified_prior = paths["amplified"] / REGISTERED_PRIOR_FILENAME
             if not _exists(amplified_prior, resume=args.resume):

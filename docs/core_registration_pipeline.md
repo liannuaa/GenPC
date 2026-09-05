@@ -39,9 +39,13 @@ input-image hash before native registration.  This is an implementation cache:
 it uses the same MoGe tensor contract and does not alter the camera estimate,
 registration objective, or any data-dependent decision.
 
-For another dataset, the only semantic-stage metadata is an object description
-in the copied YAML configuration's `prompt_overrides` map. Registration and
-Gaussian editing do not consume it; their parameters and route remain fixed.
+For another dataset, the semantic stage needs an object description in the
+copied YAML configuration's `prompt_overrides` map. If a dataset records the
+camera that generated its partial scan, the optional `--viewpoint-root` input
+may provide `<sample>/viewpoint.npy`; this uses that partial-only Camera-1 for
+depth rasterisation rather than reselecting a view. It never reads the complete
+shape. Registration and Gaussian editing do not consume the object description;
+their parameters and route remain fixed.
 
 ## Registration
 
@@ -61,11 +65,22 @@ the native Pixal prior into Camera-1 coordinates, and refines only the
 remaining camera-chain error using saved-view silhouette/depth and visible
 3-D pairs.
 
-3. **Coupled residual and Camera-1 continuation.** A joint residual aligns
-the native MoGe evidence, bridge matches, partial surface, and saved-view
-render. The final continuation applies the fixed three-level Camera-1 update,
-followed by a 1-degree wide tilt and a final 1-degree continuation. Every
-stage is applied; diagnostic scores never reject or route samples.
+3. **Broad Camera-1 basin capture.** The coupled result may still sit outside
+the overlap basin when the Camera-1/Camera-2 bridge has a large monocular
+gauge error. Pixel-indexed visible 3-D pairs propose the same fixed fractions
+of one robust Sim(3) residual: \(1/8,1/4,1/2,3/4,1\), together with identity.
+The proposals use a shared broad trust region (30 degrees, scale
+\([0.45,2.40]\), translation \(1.25\) partial-bbox diagonals). A fixed
+Camera-1 visible 2-D+3-D objective selects one candidate for every sample.
+Thus the stage is a single global capture operation, not a confidence gate,
+category branch, or GT-selected route.
+
+4. **Narrow residual and Camera-1 continuation.** The ordinary pixel Sim(3)
+residual then aligns native MoGe evidence, bridge matches, partial surface,
+and saved-view render inside its original local trust region. The final
+continuation applies the fixed three-level Camera-1 update, followed by a
+1-degree wide tilt and a final 1-degree continuation. Every stage is applied;
+the same deterministic objective selects from each fixed candidate lattice.
 Within a level, the fixed independent candidate scores may run concurrently,
 but they are consumed in their original proposal order and use the same
 deterministic minimum rule.
@@ -79,6 +94,8 @@ Frozen registration search settings:
 | --- | --- |
 | Camera-1 ↔ Camera-2 bridge | 3 px transfer radius; 30,000 deterministic fit matches; 32,000-point local subset |
 | Coupled two-camera residual | 32,000 points; at most 10,000 Camera-1 visible pairs; 64 robust-fit trials |
+| Broad Camera-1 basin capture | identity plus \(1/8,1/4,1/2,3/4,1\) pixel-pair residual fractions; 30 degrees; scale \([0.45,2.40]\); translation 1.25 partial-bbox diagonals |
+| Narrow visible pixel Sim(3) | 32,000 points; at most 10,000 Camera-1 visible pairs; 64 robust-fit trials |
 | Camera-1 continuation | 32,000 points; three standard levels: \((.006,.30^\circ,.006)\), \((.002,.10^\circ,.002)\), \((.0005,.025^\circ,.0005)\) |
 | Wide tilt continuation | \((.010,1.0^\circ,.010)\), \((.004,.35^\circ,.004)\), \((.001,.10^\circ,.001)\) |
 | Final tilt continuation | \((.010,1.0^\circ,.010)\), \((.004,.35^\circ,.004)\), \((.001,.10^\circ,.001)\) |

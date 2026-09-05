@@ -161,3 +161,58 @@ reported CD-L1×100 / EMD×100:
 This improves the prior fixed baseline `1.5820 / 2.5114` on both metrics. The
 metric file is `combo_final100_pixel100/metrics.{csv,json}` and is reporting
 only; it was never read by registration or Gaussian editing.
+
+## 2026-09-05 CST — accepted default broad Camera-1 basin capture
+
+**User approval.** “可以 直接替换冻结主线成为新方案.” The fixed mainline must
+therefore run the broad Camera-1 pixel-Sim(3) basin-capture stage by default.
+It may be disabled only with `--no-coarse-basin-recovery` for an ablation; do
+not restore the former disabled default without a new explicit instruction.
+
+**Outputs.** The accepted Redwood-10 registration audit is
+`workspace/redwood_coarse_basin_ablation_20260905/registration/<id>/final/camera1_amplified_registered_100k.ply`, and the corresponding accepted 100k
+predictions are
+`workspace/redwood_coarse_basin_ablation_20260905/gaussian/<id>/decoded/partial_anchored_gaussian_decoded_100k.ply`, for IDs `01184, 05117, 05452,
+06127, 06145, 06188, 06830, 07136, 07306, 09639`. Offline-only metrics are
+`workspace/redwood_coarse_basin_ablation_20260905/metrics/coarse_basin.{json,csv}`.
+
+**Inputs/models/prompts.** Registration used `data/redwood/partial/<id>.ply`,
+Camera-1 assets under
+`/opt/data/private/cr/lab/GenPC/workspace/redwood_onestage_rawdepth_512_stage2_20260714/<id>/`, and GPT/Pixal assets under
+`/opt/data/private/cr/lab/GenPC/workspace/redwood_qwen_gpt_pixal_bidirectional_mainline_20260823/<id>/`.
+No upstream image or 3-D generation was rerun. The Qwen model is
+`models/Qwen-Image-Edit-2511`; transformer is
+`models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`.
+The full Qwen prompt is exactly `生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的<label>，纯白背景`, with labels `{rubbish bin, red chair, armchair,
+terracotta flower pot with leafy plant, table, red motorcyle, tricycle,
+leather sofa, red office trash can, Ergonomic Chair}` in the ID order above.
+The Qwen negative prompt is exactly ` `; resolution is 512 px, true CFG is
+`4.0`, steps are `40`, input is `raw_depth.png`, and Qwen seed/scheduler/backend
+are `UNKNOWN`. The full GPT clarity prompt is stored beside each retained input
+as `prompt.txt`; GPT model/version, seed, scheduler, CFG and negative prompt
+are `UNKNOWN`. The GPT contract is preserve Qwen camera, pose, scale,
+silhouette and observed part layout; do not rotate, rescale, recenter, mirror,
+add/remove parts, or alter articulated local geometry. Pixal3D uses
+`models/Pixal3D-weights`, DINOv3
+`models/dinov3-vitl16-pretrain-lvd1689m`, MoGe-2
+`models/moge-2-vitl/model.pt`, and RMBG-2.0 `models/RMBG-2.0`; inherited
+Pixal parameters are seed `42`, 1024 cascade, 12 sparse/shape/texture steps,
+guidance `7.5/7.5/1.0`, 300k decimation, 2048 texture, and 100k surface samples.
+
+**Frozen route and parameters.** After native Pixal--MoGe alignment and the
+two-camera bridge/coupled residual, every sample scores identity and shared
+pixel-pair Sim(3) residual fractions `1/8, 1/4, 1/2, 3/4, 1` using a 30-degree,
+scale `[0.45,2.40]`, translation `1.25` partial-bbox-diagonal capture region.
+The winning transform feeds the unchanged narrow pixel residual, 32k-point
+Camera-1 standard/wide/final continuations (wide/final `1.0°`), and the
+existing Gaussian edit/decode: 1.0 px saved/virtual matches, six 384-px views,
+`.075` anchor/displacement caps, 8-neighbor/1.8-edge graph, `.0015` screening,
+six `.01` protection views, `.10` exclusion, remote gain `1.0`, and CG
+`1e-5/240`. No GT/CD/EMD/category/sample-specific decision is used in inference.
+
+**Offline-only evidence.** With 16,384 points and seed `6145`, the new route
+reports mean CD-L1×100 / EMD×100 `1.5738481 / 2.4813253` compared with the
+previous frozen route's `1.5682055 / 2.4785676` (`+0.36% / +0.11%`). This
+small bounded regression was accepted to make the mainline robust to the large
+wrong-basin failures independently observed on custom scans; offline metrics
+remain reporting-only and do not control inference.
