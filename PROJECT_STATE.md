@@ -170,11 +170,11 @@ It may be disabled only with `--no-coarse-basin-recovery` for an ablation; do
 not restore the former disabled default without a new explicit instruction.
 
 **Outputs.** The accepted Redwood-10 registration audit is
-`workspace/redwood_coarse_basin_ablation_20260905/registration/<id>/final/camera1_amplified_registered_100k.ply`, and the corresponding accepted 100k
+`workspace/mainline_results_20260905/redwood/registration/<id>/final/camera1_amplified_registered_100k.ply`, and the corresponding accepted 100k
 predictions are
-`workspace/redwood_coarse_basin_ablation_20260905/gaussian/<id>/decoded/partial_anchored_gaussian_decoded_100k.ply`, for IDs `01184, 05117, 05452,
+`workspace/mainline_results_20260905/redwood/gaussian/<id>/decoded/partial_anchored_gaussian_decoded_100k.ply`, for IDs `01184, 05117, 05452,
 06127, 06145, 06188, 06830, 07136, 07306, 09639`. Offline-only metrics are
-`workspace/redwood_coarse_basin_ablation_20260905/metrics/coarse_basin.{json,csv}`.
+`workspace/mainline_results_20260905/redwood/metrics/coarse_basin.{json,csv}`.
 
 **Inputs/models/prompts.** Registration used `data/redwood/partial/<id>.ply`,
 Camera-1 assets under

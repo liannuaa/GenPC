@@ -1,0 +1,119 @@
+{
+  "sample_id": "hydra_creature",
+  "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/hydra_creature.glb",
+  "seed": 3615916379,
+  "normalization": {
+    "source_bounds": [
+      [
+        -0.6431383370651673,
+        -0.0030946730875670656,
+        -2.1510906501615636
+      ],
+      [
+        0.6431383370651673,
+        1.8472788588565832,
+        1.731624717154546
+      ]
+    ],
+    "source_center": [
+      0.0,
+      0.922092092884508,
+      -0.2097329665035088
+    ],
+    "source_max_extent": 3.8827153673161097,
+    "normalization": "(point - source_center) / source_max_extent",
+    "normalized_bounds": [
+      [
+        -0.1656413814102811,
+        -0.23828343786415682,
+        -0.5
+      ],
+      [
+        0.1656413814102811,
+        0.23828343786415684,
+        0.5
+      ]
+    ]
+  },
+  "camera": {
+    "azimuth_degrees": 289.0,
+    "elevation_degrees": 18.0,
+    "eye": [
+      0.31120317447380214,
+      0.3105833280449131,
+      -0.9037996444740641
+    ],
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "fov_degrees": 50.0,
+    "frame_fill": 0.82,
+    "camera_distance": 1.0050687622314558,
+    "image_size": 1024,
+    "intrinsic": [
+      [
+        1096.9152898406392,
+        0.0,
+        511.5
+      ],
+      [
+        0.0,
+        1096.9152898406392,
+        511.5
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "extrinsic_world_to_camera": [
+      [
+        -0.945518575599317,
+        0.0,
+        -0.3255681544571563,
+        5.888594353866714e-17
+      ],
+      [
+        0.10060609255454908,
+        -0.9510565162951535,
+        -0.2921813083573824,
+        -2.6594251129613025e-17
+      ],
+      [
+        -0.30963371479466556,
+        -0.3090169943749474,
+        0.8992416026018422,
+        1.0050687622314558
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "visible_surface_points": 54326,
+    "sampler": "Open3D RaycastingScene pinhole"
+  },
+  "depth_valid_pixels": 27306,
+  "gt_points": 16384,
+  "partial_points": 16384,
+  "outputs": {
+    "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/gt_data/hydra_creature_gt.ply",
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/hydra_creature_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/depth.png",
+    "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/camera.json"
+  },
+  "category": "hydra creature",
+  "resampled_partial": {
+    "view": "fixed non-orthogonal pinhole",
+    "seed": 614505,
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/hydra_creature_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/depth.png"
+  }
+}

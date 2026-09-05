@@ -4,14 +4,17 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gc
 import hashlib
+import importlib.machinery
 import json
 import math
 import os
 from pathlib import Path
 import sys
 import time
+import types
 
 os.environ.setdefault("ATTN_BACKEND", "xformers")
 os.environ.setdefault("SPARSE_ATTN_BACKEND", "xformers")
@@ -99,6 +102,51 @@ def build_image_conditioner(
     return model
 
 
+@contextlib.contextmanager
+def isolated_naf_src_namespace():
+    """Let Torch Hub import NAF's own ``src`` package without clobbering ours.
+
+    The GenPC+ package is imported as ``src`` before Pixal is initialized.
+    NAF's cached Torch-Hub repository uses the same top-level package name, so
+    importing it normally resolves to GenPC+ and fails at ``src.model``. The
+    isolation lasts only while NAF is constructed; the instantiated module
+    keeps its class references afterwards and the project namespace is restored
+    before registration code can run.
+    """
+    module_names = [name for name in tuple(sys.modules) if name == "src" or name.startswith("src.")]
+    saved_modules = {name: sys.modules.pop(name) for name in module_names}
+    naf_src = Path(torch.hub.get_dir()) / "valeoai_NAF_main" / "src"
+    if not naf_src.is_dir():
+        raise FileNotFoundError(
+            "NAF Torch-Hub source is missing from the local cache: "
+            f"{naf_src}. Initialize Pixal3D once with network access first."
+        )
+    # NAF's ``src`` has no __init__.py, so otherwise Python combines it as a
+    # namespace package then selects GenPC+'s regular package of the same name.
+    # A short-lived explicit package makes its absolute ``src.*`` imports
+    # resolve to NAF deterministically.
+    naf_package = types.ModuleType("src")
+    naf_package.__path__ = [str(naf_src)]
+    naf_package.__package__ = "src"
+    naf_package.__spec__ = importlib.machinery.ModuleSpec("src", loader=None, is_package=True)
+    sys.modules["src"] = naf_package
+    try:
+        yield
+    finally:
+        for name in tuple(sys.modules):
+            if name == "src" or name.startswith("src."):
+                del sys.modules[name]
+        sys.modules.update(saved_modules)
+
+
+def load_naf_without_src_collision(extractor: DinoV3ProjFeatureExtractor) -> None:
+    """Load one Pixal NAF branch while preserving GenPC+'s module namespace."""
+    if not getattr(extractor, "use_naf_upsample", False):
+        return
+    with isolated_naf_src_namespace():
+        extractor._load_naf()
+
+
 def init_pipeline(model_path: Path, dino_path: Path, rmbg_path: Path) -> Pixal3DImageTo3DPipeline:
     config_name = prepare_local_pipeline_config(model_path, rmbg_path)
     print(f"[Pipeline] Loading local checkpoints from {model_path}", flush=True)
@@ -114,7 +162,7 @@ def init_pipeline(model_path: Path, dino_path: Path, rmbg_path: Path) -> Pixal3D
         "image_cond_model_shape_1024",
         "image_cond_model_tex_1024",
     ):
-        getattr(pipeline, attr)._load_naf()
+        load_naf_without_src_collision(getattr(pipeline, attr))
     print("[Pipeline] Local Pixal3D and NAF initialization passed", flush=True)
     return pipeline
 

@@ -1,0 +1,198 @@
+[
+  {
+    "case_id": "custom/handheld_power_drill/single_scan/partial_0",
+    "partial_path": "/opt/data/private/cr/lab/GenPC/data/custom/handheld_power_drill/partial_data/single_scan/handheld_power_drill_partial.ply",
+    "condition": {
+      "type": "text",
+      "value": "a complete 3D object"
+    },
+    "coordinate_schema": {
+      "name": "custom",
+      "row_vector_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "case_id": "custom/mirrorless_camera/single_scan/partial_0",
+    "partial_path": "/opt/data/private/cr/lab/GenPC/data/custom/mirrorless_camera/partial_data/single_scan/mirrorless_camera_partial.ply",
+    "condition": {
+      "type": "text",
+      "value": "a complete 3D object"
+    },
+    "coordinate_schema": {
+      "name": "custom",
+      "row_vector_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "case_id": "custom/single_engine_airplane/single_scan/partial_0",
+    "partial_path": "/opt/data/private/cr/lab/GenPC/data/custom/single_engine_airplane/partial_data/single_scan/single_engine_airplane_partial.ply",
+    "condition": {
+      "type": "text",
+      "value": "a complete 3D object"
+    },
+    "coordinate_schema": {
+      "name": "custom",
+      "row_vector_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "case_id": "custom/hydra_creature/single_scan/partial_0",
+    "partial_path": "/opt/data/private/cr/lab/GenPC/data/custom/hydra_creature/partial_data/single_scan/hydra_creature_partial.ply",
+    "condition": {
+      "type": "text",
+      "value": "a complete 3D object"
+    },
+    "coordinate_schema": {
+      "name": "custom",
+      "row_vector_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "case_id": "custom/domestic_pig/single_scan/partial_0",
+    "partial_path": "/opt/data/private/cr/lab/GenPC/data/custom/domestic_pig/partial_data/single_scan/domestic_pig_partial.ply",
+    "condition": {
+      "type": "text",
+      "value": "a complete 3D object"
+    },
+    "coordinate_schema": {
+      "name": "custom",
+      "row_vector_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "case_id": "custom/light_helicopter/single_scan/partial_0",
+    "partial_path": "/opt/data/private/cr/lab/GenPC/data/custom/light_helicopter/partial_data/single_scan/light_helicopter_partial.ply",
+    "condition": {
+      "type": "text",
+      "value": "a complete 3D object"
+    },
+    "coordinate_schema": {
+      "name": "custom",
+      "row_vector_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  },
+  {
+    "case_id": "custom/wolf/single_scan/partial_0",
+    "partial_path": "/opt/data/private/cr/lab/GenPC/data/custom/wolf/partial_data/single_scan/wolf_partial.ply",
+    "condition": {
+      "type": "text",
+      "value": "a complete 3D object"
+    },
+    "coordinate_schema": {
+      "name": "custom",
+      "row_vector_matrix": [
+        [
+          1.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          1.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          1.0
+        ]
+      ]
+    }
+  }
+]

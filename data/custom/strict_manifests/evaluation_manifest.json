@@ -1,0 +1,30 @@
+[
+  {
+    "case_id": "custom/handheld_power_drill/single_scan/partial_0",
+    "ground_truth_path": "/opt/data/private/cr/lab/GenPC/data/custom/handheld_power_drill/gt_data/handheld_power_drill_gt.ply"
+  },
+  {
+    "case_id": "custom/mirrorless_camera/single_scan/partial_0",
+    "ground_truth_path": "/opt/data/private/cr/lab/GenPC/data/custom/mirrorless_camera/gt_data/mirrorless_camera_gt.ply"
+  },
+  {
+    "case_id": "custom/single_engine_airplane/single_scan/partial_0",
+    "ground_truth_path": "/opt/data/private/cr/lab/GenPC/data/custom/single_engine_airplane/gt_data/single_engine_airplane_gt.ply"
+  },
+  {
+    "case_id": "custom/hydra_creature/single_scan/partial_0",
+    "ground_truth_path": "/opt/data/private/cr/lab/GenPC/data/custom/hydra_creature/gt_data/hydra_creature_gt.ply"
+  },
+  {
+    "case_id": "custom/domestic_pig/single_scan/partial_0",
+    "ground_truth_path": "/opt/data/private/cr/lab/GenPC/data/custom/domestic_pig/gt_data/domestic_pig_gt.ply"
+  },
+  {
+    "case_id": "custom/light_helicopter/single_scan/partial_0",
+    "ground_truth_path": "/opt/data/private/cr/lab/GenPC/data/custom/light_helicopter/gt_data/light_helicopter_gt.ply"
+  },
+  {
+    "case_id": "custom/wolf/single_scan/partial_0",
+    "ground_truth_path": "/opt/data/private/cr/lab/GenPC/data/custom/wolf/gt_data/wolf_gt.ply"
+  }
+]

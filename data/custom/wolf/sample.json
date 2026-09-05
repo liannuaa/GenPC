@@ -1,0 +1,119 @@
+{
+  "sample_id": "wolf",
+  "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/wolf.glb",
+  "seed": 3099724346,
+  "normalization": {
+    "source_bounds": [
+      [
+        -0.21780077740700368,
+        -1.1112302315296423,
+        -1.279134363042158
+      ],
+      [
+        0.21780164715799558,
+        1.33678406891358,
+        0.004700455296511764
+      ]
+    ],
+    "source_center": [
+      4.3487549594711794e-07,
+      0.11277691869196882,
+      -0.6372169538728232
+    ],
+    "source_max_extent": 2.448014300443222,
+    "normalization": "(point - source_center) / source_max_extent",
+    "normalized_bounds": [
+      [
+        -0.0889705637107863,
+        -0.5,
+        -0.2622196320720485
+      ],
+      [
+        0.0889705637107863,
+        0.5,
+        0.2622196320720485
+      ]
+    ]
+  },
+  "camera": {
+    "azimuth_degrees": 277.0,
+    "elevation_degrees": -18.0,
+    "eye": [
+      0.15980466171769336,
+      -0.42606024362745565,
+      -1.301504525834182
+    ],
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "fov_degrees": 50.0,
+    "frame_fill": 0.82,
+    "camera_distance": 1.3787599108885682,
+    "image_size": 1024,
+    "intrinsic": [
+      [
+        1096.9152898406392,
+        0.0,
+        511.5
+      ],
+      [
+        0.0,
+        1096.9152898406392,
+        511.5
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "extrinsic_world_to_camera": [
+      [
+        -0.992546151641322,
+        0.0,
+        -0.12186934340514768,
+        8.549342009868942e-18
+      ],
+      [
+        -0.037659698205507054,
+        -0.9510565162951535,
+        0.30671362855862205,
+        -5.5488855261430525e-17
+      ],
+      [
+        -0.1159046331820775,
+        0.3090169943749474,
+        0.9439674852421569,
+        1.378759910888568
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "visible_surface_points": 88305,
+    "sampler": "Open3D RaycastingScene pinhole"
+  },
+  "depth_valid_pixels": 38090,
+  "gt_points": 16384,
+  "partial_points": 16384,
+  "outputs": {
+    "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/gt_data/wolf_gt.ply",
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/wolf_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/depth.png",
+    "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/camera.json"
+  },
+  "category": "wolf",
+  "resampled_partial": {
+    "view": "fixed non-orthogonal pinhole",
+    "seed": 614510,
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/wolf_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/depth.png"
+  }
+}

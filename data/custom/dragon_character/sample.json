@@ -1,0 +1,112 @@
+{
+  "case_id": "custom_glb/dragon_character/single_scan/partial_0",
+  "case_key": "dragon_character",
+  "dataset": "custom_glb",
+  "category": "dragon character",
+  "category_source": "source GLB filename: dragon_character.glb",
+  "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/dragon_character.glb",
+  "strict_zero_shot": true,
+  "ground_truth_used_for_inference": false,
+  "dataset_construction": {
+    "complete": "normalized source GLB surface sample",
+    "partial": "single visible-surface scan via Open3D hidden-point removal",
+    "seed": 20260903,
+    "surface_points": 100000,
+    "partial_points": 16384,
+    "sensor": "Open3D RaycastingScene pinhole",
+    "sensor_camera": [
+      -0.0012594476575039848,
+      1.9772903191025941,
+      -4.217245584829526
+    ],
+    "sensor_radius": 4.7521207478043435,
+    "sensor_fov_deg": 50.0,
+    "sensor_resolution": 1024,
+    "visible_surface_points": 22719,
+    "returned_points": 16384
+  },
+  "qwen_prompt": "\u751f\u6210\u4e00\u5f20\u56fe\u50cf\uff0c\u53c2\u8003\u56fe1\u906e\u6321\u60c5\u51b5\u4e0b\u7684\u6df1\u5ea6\u56fe\uff0c\u5e76\u9075\u5faa\u4ee5\u4e0b\u63cf\u8ff0\uff1a\u5b8c\u6574\u7684dragon character\uff0c\u7eaf\u767d\u80cc\u666f\u3002\u4e25\u683c\u4fdd\u6301\u56fe1\u4e2d\u7269\u4f53\u7684\u76f8\u673a\u89c6\u89d2\u3001\u65b9\u5411\u3001\u4e2d\u5fc3\u4f4d\u7f6e\u3001\u5360\u5c4f\u5c3a\u5bf8\u3001\u5916\u8f6e\u5ed3\u3001\u53ef\u89c1\u5c40\u90e8\u7ed3\u6784\u548c\u5404\u90e8\u5206\u6bd4\u4f8b\uff1b\u53ea\u8865\u5168\u771f\u6b63\u7f3a\u5931\u6216\u906e\u6321\u7684\u533a\u57df\uff0c\u4e0d\u5f97\u65cb\u8f6c\u3001\u7f29\u653e\u3001\u62c9\u4f38\u3001\u91cd\u65b0\u5c45\u4e2d\u3001\u955c\u50cf\u6216\u6539\u6210\u5e38\u89c1\u7c7b\u522b\u6a21\u677f\u3002",
+  "outputs": {
+    "gt_complete": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/gt_data/dragon_character_gt.ply",
+    "source_partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/partial_data/single_scan/dragon_character_partial.ply",
+    "partial": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/partial_input.ply",
+    "partial_normalized_method_frame": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/partial_normalized_method_frame.ply",
+    "depth": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/depth.png",
+    "raw_depth": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/raw_depth.png",
+    "camera": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/camera.pth",
+    "point_uv": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/point_uv.npy",
+    "qwen_image": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/qwen_image.png",
+    "gpt_image": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/gpt_image.png"
+  },
+  "camera": {
+    "azimuth_degrees": 129.0,
+    "elevation_degrees": -19.0,
+    "eye": [
+      -0.8729910844622683,
+      -0.47765008223330335,
+      1.0780542078829063
+    ],
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "fov_degrees": 50.0,
+    "frame_fill": 0.82,
+    "camera_distance": 1.4671277755335863,
+    "image_size": 1024,
+    "intrinsic": [
+      [
+        1096.9152898406392,
+        0.0,
+        511.5
+      ],
+      [
+        0.0,
+        1096.9152898406392,
+        511.5
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "extrinsic_world_to_camera": [
+      [
+        0.777145961456971,
+        -0.0,
+        0.6293203910498373,
+        5.784604607852143e-17
+      ],
+      [
+        0.20488667827635168,
+        -0.9455185755993167,
+        -0.2530139764153787,
+        6.567218813500575e-17
+      ],
+      [
+        0.5950341197410473,
+        0.3255681544571567,
+        -0.7348059425095568,
+        1.4671277755335863
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "visible_surface_points": 253744,
+    "sampler": "Open3D RaycastingScene pinhole"
+  },
+  "partial_points": 16384,
+  "resampled_partial": {
+    "view": "fixed non-orthogonal pinhole",
+    "seed": 614504,
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/partial_data/single_scan/dragon_character_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/partial_data/single_scan/depth.png"
+  }
+}

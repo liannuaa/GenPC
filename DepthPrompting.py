@@ -186,8 +186,31 @@ class DepthPrompting:
         hole_mask = ((~front).to(torch.int32) * 255 ^ (~occupied).to(torch.int32) * 255).float() / 255.0
         return sparse_depth, hole_mask
 
-    def _save_depth(self, xyz: torch.Tensor, rgb: torch.Tensor, flag: str):
-        camera, viewpoint, uv, depths, visible = self._select_saved_view(xyz)
+    def _save_depth(
+        self,
+        xyz: torch.Tensor,
+        rgb: torch.Tensor,
+        flag: str,
+        *,
+        viewpoint_override: np.ndarray | None = None,
+    ):
+        """Rasterise a partial scan from the saved or supplied Camera-1 view.
+
+        A dataset may carry the camera that originally generated its partial
+        scan. Reusing that *partial-only* view avoids an unrelated
+        view-selection ambiguity, while still rasterising only observed points.
+        Normal Redwood inputs omit the override and retain the frozen
+        saved-view selection exactly.
+        """
+        if viewpoint_override is None:
+            camera, viewpoint, uv, depths, visible = self._select_saved_view(xyz)
+        else:
+            viewpoint = np.asarray(viewpoint_override, dtype=np.float32).reshape(3)
+            camera = self._camera_for_viewpoint(viewpoint)
+            uv, depths = self._project_view(xyz, camera)
+            # These points were obtained from this camera. Keeping all observed
+            # points avoids a second visibility pass puncturing a sparse scan.
+            visible = torch.ones(xyz.shape[0], dtype=torch.bool, device=xyz.device)
         pixels = (uv * int(self.cfg.res)).long().clamp(0, int(self.cfg.res) - 1)
         pixels = torch.stack([pixels[:, 1], pixels[:, 0]], dim=1)
         sparse_depth, hole_mask = self._rasterise_depth(pixels[visible], depths[visible], rgb[visible])
@@ -206,10 +229,19 @@ class DepthPrompting:
         torch.save(camera, sample_file(self.cfg, flag, "camera.pth"))
         return raw_depth
 
-    def getImage(self, xyz: torch.Tensor, flag: str, rgb: torch.Tensor, *, depth_gen: bool = True, img_gen: bool = True) -> None:
+    def getImage(
+        self,
+        xyz: torch.Tensor,
+        flag: str,
+        rgb: torch.Tensor,
+        *,
+        depth_gen: bool = True,
+        img_gen: bool = True,
+        viewpoint_override: np.ndarray | None = None,
+    ) -> None:
         if not depth_gen or not img_gen:
             raise ValueError("The mainline semantic stage always produces both depth and semantic images.")
-        raw_depth = self._save_depth(xyz, rgb, flag)
+        raw_depth = self._save_depth(xyz, rgb, flag, viewpoint_override=viewpoint_override)
         editor = self._load_qwen()
         input_size = int(self.cfg.depth_image_input_res)
         image = Image.open(raw_depth).convert("RGB").resize((input_size, input_size), Image.Resampling.LANCZOS)

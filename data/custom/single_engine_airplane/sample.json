@@ -1,0 +1,119 @@
+{
+  "sample_id": "single_engine_airplane",
+  "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/single_engine_airplane.glb",
+  "seed": 1005054087,
+  "normalization": {
+    "source_bounds": [
+      [
+        -5.07496287596183,
+        -1.2092593275955466,
+        -2.952584697959537
+      ],
+      [
+        5.07496287596183,
+        1.2353799150922384,
+        5.132396044047027
+      ]
+    ],
+    "source_center": [
+      0.0,
+      0.013060293748345941,
+      1.089905673043745
+    ],
+    "source_max_extent": 10.14992575192366,
+    "normalization": "(point - source_center) / source_max_extent",
+    "normalized_bounds": [
+      [
+        -0.5,
+        -0.12042645938688101,
+        -0.3982778268340663
+      ],
+      [
+        0.5,
+        0.12042645938688101,
+        0.3982778268340663
+      ]
+    ]
+  },
+  "camera": {
+    "azimuth_degrees": 239.0,
+    "elevation_degrees": 23.0,
+    "eye": [
+      -0.6146898190470664,
+      0.5066039981830188,
+      -1.0230156538497845
+    ],
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "fov_degrees": 50.0,
+    "frame_fill": 0.82,
+    "camera_distance": 1.2965539759828117,
+    "image_size": 1024,
+    "intrinsic": [
+      [
+        1096.9152898406392,
+        0.0,
+        511.5
+      ],
+      [
+        0.0,
+        1096.9152898406392,
+        511.5
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "extrinsic_world_to_camera": [
+      [
+        -0.8571673007021121,
+        0.0,
+        0.5150380749100545,
+        3.0952047388321914e-17
+      ],
+      [
+        -0.20124140822454872,
+        -0.9205048534524404,
+        -0.3349219467074409,
+        8.454138484061473e-17
+      ],
+      [
+        0.4740950476675067,
+        -0.39073112848927377,
+        0.7890266605170216,
+        1.2965539759828117
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "visible_surface_points": 74935,
+    "sampler": "Open3D RaycastingScene pinhole"
+  },
+  "depth_valid_pixels": 45346,
+  "gt_points": 16384,
+  "partial_points": 16384,
+  "outputs": {
+    "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/gt_data/single_engine_airplane_gt.ply",
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/single_engine_airplane_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/depth.png",
+    "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/camera.json"
+  },
+  "category": "single engine airplane",
+  "resampled_partial": {
+    "view": "fixed non-orthogonal pinhole",
+    "seed": 614503,
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/single_engine_airplane_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/depth.png"
+  }
+}

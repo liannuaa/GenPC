@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import sys
 
+import numpy as np
 import torch
 import yaml
 from munch import Munch
@@ -46,6 +47,16 @@ def main() -> None:
     parser.add_argument("--output-root", type=Path, required=True)
     parser.add_argument("--partial-root", type=Path, default=redwood_partial_root(ROOT))
     parser.add_argument("--models-root", type=Path, default=SHARED_ROOT / "models")
+    parser.add_argument(
+        "--viewpoint-root",
+        type=Path,
+        default=None,
+        help=(
+            "Optional directory with <sample>/viewpoint.npy from the camera that "
+            "generated each partial scan. When supplied, semantic depth is rasterised "
+            "from that partial-only camera rather than reselecting a view."
+        ),
+    )
     parser.add_argument("--samples", nargs="+", default=list(REDWOOD10_SAMPLE_IDS),
                         help="Sample identifiers; add prompt_overrides in the config for new objects.")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
@@ -79,7 +90,24 @@ def main() -> None:
             points, colors = load_partial(partial)
             xyz = torch.from_numpy(points).to(cfg.device)
             rgb = torch.from_numpy(colors).to(cfg.device)
-            editor.getImage(xyz=xyz, flag=sample, rgb=rgb, depth_gen=True, img_gen=True)
+            viewpoint = None
+            viewpoint_source = "saved_view_selection"
+            if args.viewpoint_root is not None:
+                viewpoint_path = args.viewpoint_root / sample / "viewpoint.npy"
+                if not viewpoint_path.is_file():
+                    raise FileNotFoundError(
+                        f"Missing partial-camera viewpoint for {sample}: {viewpoint_path}"
+                    )
+                viewpoint = np.load(viewpoint_path).astype(np.float32)
+                viewpoint_source = str(viewpoint_path.resolve())
+            editor.getImage(
+                xyz=xyz,
+                flag=sample,
+                rgb=rgb,
+                depth_gen=True,
+                img_gen=True,
+                viewpoint_override=viewpoint,
+            )
             semantic = sample_file(cfg, sample, "img.png")
             alpha = run_rmbg_mask(
                 semantic,
@@ -87,7 +115,11 @@ def main() -> None:
                 args.models_root / cfg.models.rmbg_model_path,
             )
             save_mask_png(sample_file(cfg, sample, f"{sample}_moge_to_raw_partial_object_mask.png"), alpha)
-            manifest["samples"][sample] = {"state": "complete", "semantic": str(sample_file(cfg, sample, "img.png"))}
+            manifest["samples"][sample] = {
+                "state": "complete",
+                "semantic": str(sample_file(cfg, sample, "img.png")),
+                "viewpoint_source": viewpoint_source,
+            }
             del xyz, rgb, points, colors
             gc.collect()
             if torch.cuda.is_available():

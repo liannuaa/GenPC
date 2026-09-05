@@ -1,0 +1,791 @@
+{
+  "format": "redwood_style_custom_single_scan_v1",
+  "source": "GLB surface sampling + random pinhole depth + backprojection",
+  "point_count": 16384,
+  "image_size": 512,
+  "max_image_size": 2048,
+  "fov_degrees": 50.0,
+  "frame_fill": 0.82,
+  "visible_fit_iterations": 2,
+  "min_border_fraction": 0.02,
+  "base_seed": 6145,
+  "samples": [
+    {
+      "sample_id": "handheld_power_drill",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/handheld_power_drill.glb",
+      "seed": 172580607,
+      "normalization": {
+        "source_bounds": [
+          [
+            -0.40404435992240906,
+            0.37726736068725586,
+            -0.17013445496559143
+          ],
+          [
+            0.20363059639930725,
+            1.2201955318450928,
+            0.1402270793914795
+          ]
+        ],
+        "source_center": [
+          -0.1002068817615509,
+          0.7987314462661743,
+          -0.01495368778705597
+        ],
+        "source_max_extent": 0.8429281711578369,
+        "normalization": "(point - source_center) / source_max_extent",
+        "normalized_bounds": [
+          [
+            -0.3604547677455249,
+            -0.5,
+            -0.18409726058316553
+          ],
+          [
+            0.3604547677455249,
+            0.5,
+            0.18409726058316553
+          ]
+        ]
+      },
+      "camera": {
+        "azimuth_degrees": 68.0,
+        "elevation_degrees": -24.0,
+        "eye": [
+          0.4642553638515414,
+          -0.5517783427414655,
+          1.1490723476969493
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_degrees": 50.0,
+        "frame_fill": 0.82,
+        "camera_distance": 1.356598556178365,
+        "image_size": 1024,
+        "intrinsic": [
+          [
+            1096.9152898406392,
+            0.0,
+            511.5
+          ],
+          [
+            0.0,
+            1096.9152898406392,
+            511.5
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "extrinsic_world_to_camera": [
+          [
+            0.9271838545667874,
+            0.0,
+            -0.37460659341591196,
+            -2.508664764441439e-17
+          ],
+          [
+            -0.1523662282800492,
+            -0.9135454576426008,
+            -0.37711964852057606,
+            -4.400057366836083e-17
+          ],
+          [
+            -0.342220151818075,
+            0.4067366430758002,
+            -0.8470245987390465,
+            1.3565985561783647
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "visible_surface_points": 266525,
+        "sampler": "Open3D RaycastingScene pinhole"
+      },
+      "depth_valid_pixels": 49833,
+      "gt_points": 16384,
+      "partial_points": 16384,
+      "outputs": {
+        "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/gt_data/handheld_power_drill_gt.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/handheld_power_drill_partial.ply",
+        "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/depth.npy",
+        "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/camera.json"
+      }
+    },
+    {
+      "sample_id": "mirrorless_camera",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/mirrorless_camera.glb",
+      "seed": 1754847500,
+      "normalization": {
+        "source_bounds": [
+          [
+            -0.0541640967130661,
+            -0.04561230167746544,
+            -0.07260333746671677
+          ],
+          [
+            0.0541641041636467,
+            0.04561230167746544,
+            0.07260333746671677
+          ]
+        ],
+        "source_center": [
+          3.725290298461914e-09,
+          0.0,
+          0.0
+        ],
+        "source_max_extent": 0.14520667493343353,
+        "normalization": "(point - source_center) / source_max_extent",
+        "normalized_bounds": [
+          [
+            -0.3730138470782188,
+            -0.31411986878960824,
+            -0.5
+          ],
+          [
+            0.3730138470782188,
+            0.31411986878960824,
+            0.5
+          ]
+        ]
+      },
+      "camera": {
+        "azimuth_degrees": 31.0,
+        "elevation_degrees": 28.0,
+        "eye": [
+          1.0616403117399793,
+          0.6585460811696925,
+          0.637897854896696
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_degrees": 50.0,
+        "frame_fill": 0.82,
+        "camera_distance": 1.402739022704197,
+        "image_size": 1024,
+        "intrinsic": [
+          [
+            1096.9152898406392,
+            0.0,
+            511.5
+          ],
+          [
+            0.0,
+            1096.9152898406392,
+            511.5
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "extrinsic_world_to_camera": [
+          [
+            0.5150380749100542,
+            0.0,
+            -0.8571673007021123,
+            -2.2314273376776822e-17
+          ],
+          [
+            0.4024156722295843,
+            -0.882947592858927,
+            0.2417957299222598,
+            -1.0533873106940337e-16
+          ],
+          [
+            -0.7568338048323141,
+            -0.4694715627858908,
+            -0.45475162847252804,
+            1.4027390227041971
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "visible_surface_points": 398935,
+        "sampler": "Open3D RaycastingScene pinhole"
+      },
+      "depth_valid_pixels": 107362,
+      "gt_points": 16384,
+      "partial_points": 16384,
+      "outputs": {
+        "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/gt_data/mirrorless_camera_gt.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/mirrorless_camera_partial.ply",
+        "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/depth.npy",
+        "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/camera.json"
+      }
+    },
+    {
+      "sample_id": "single_engine_airplane",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/single_engine_airplane.glb",
+      "seed": 1005054087,
+      "normalization": {
+        "source_bounds": [
+          [
+            -5.07496287596183,
+            -1.2092593275955466,
+            -2.952584697959537
+          ],
+          [
+            5.07496287596183,
+            1.2353799150922384,
+            5.132396044047027
+          ]
+        ],
+        "source_center": [
+          0.0,
+          0.013060293748345941,
+          1.089905673043745
+        ],
+        "source_max_extent": 10.14992575192366,
+        "normalization": "(point - source_center) / source_max_extent",
+        "normalized_bounds": [
+          [
+            -0.5,
+            -0.12042645938688101,
+            -0.3982778268340663
+          ],
+          [
+            0.5,
+            0.12042645938688101,
+            0.3982778268340663
+          ]
+        ]
+      },
+      "camera": {
+        "azimuth_degrees": 239.0,
+        "elevation_degrees": 23.0,
+        "eye": [
+          -0.6146898190470664,
+          0.5066039981830188,
+          -1.0230156538497845
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_degrees": 50.0,
+        "frame_fill": 0.82,
+        "camera_distance": 1.2965539759828117,
+        "image_size": 1024,
+        "intrinsic": [
+          [
+            1096.9152898406392,
+            0.0,
+            511.5
+          ],
+          [
+            0.0,
+            1096.9152898406392,
+            511.5
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "extrinsic_world_to_camera": [
+          [
+            -0.8571673007021121,
+            0.0,
+            0.5150380749100545,
+            3.0952047388321914e-17
+          ],
+          [
+            -0.20124140822454872,
+            -0.9205048534524404,
+            -0.3349219467074409,
+            8.454138484061473e-17
+          ],
+          [
+            0.4740950476675067,
+            -0.39073112848927377,
+            0.7890266605170216,
+            1.2965539759828117
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "visible_surface_points": 74935,
+        "sampler": "Open3D RaycastingScene pinhole"
+      },
+      "depth_valid_pixels": 45346,
+      "gt_points": 16384,
+      "partial_points": 16384,
+      "outputs": {
+        "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/gt_data/single_engine_airplane_gt.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/single_engine_airplane_partial.ply",
+        "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/depth.npy",
+        "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/single_engine_airplane/partial_data/single_scan/camera.json"
+      }
+    },
+    {
+      "sample_id": "hydra_creature",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/hydra_creature.glb",
+      "seed": 3615916379,
+      "normalization": {
+        "source_bounds": [
+          [
+            -0.6431383370651673,
+            -0.0030946730875670656,
+            -2.1510906501615636
+          ],
+          [
+            0.6431383370651673,
+            1.8472788588565832,
+            1.731624717154546
+          ]
+        ],
+        "source_center": [
+          0.0,
+          0.922092092884508,
+          -0.2097329665035088
+        ],
+        "source_max_extent": 3.8827153673161097,
+        "normalization": "(point - source_center) / source_max_extent",
+        "normalized_bounds": [
+          [
+            -0.1656413814102811,
+            -0.23828343786415682,
+            -0.5
+          ],
+          [
+            0.1656413814102811,
+            0.23828343786415684,
+            0.5
+          ]
+        ]
+      },
+      "camera": {
+        "azimuth_degrees": 289.0,
+        "elevation_degrees": 18.0,
+        "eye": [
+          0.31120317447380214,
+          0.3105833280449131,
+          -0.9037996444740641
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_degrees": 50.0,
+        "frame_fill": 0.82,
+        "camera_distance": 1.0050687622314558,
+        "image_size": 1024,
+        "intrinsic": [
+          [
+            1096.9152898406392,
+            0.0,
+            511.5
+          ],
+          [
+            0.0,
+            1096.9152898406392,
+            511.5
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "extrinsic_world_to_camera": [
+          [
+            -0.945518575599317,
+            0.0,
+            -0.3255681544571563,
+            5.888594353866714e-17
+          ],
+          [
+            0.10060609255454908,
+            -0.9510565162951535,
+            -0.2921813083573824,
+            -2.6594251129613025e-17
+          ],
+          [
+            -0.30963371479466556,
+            -0.3090169943749474,
+            0.8992416026018422,
+            1.0050687622314558
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "visible_surface_points": 54326,
+        "sampler": "Open3D RaycastingScene pinhole"
+      },
+      "depth_valid_pixels": 27306,
+      "gt_points": 16384,
+      "partial_points": 16384,
+      "outputs": {
+        "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/gt_data/hydra_creature_gt.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/hydra_creature_partial.ply",
+        "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/depth.npy",
+        "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/hydra_creature/partial_data/single_scan/camera.json"
+      }
+    },
+    {
+      "sample_id": "domestic_pig",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/domestic_pig.glb",
+      "seed": 2440591877,
+      "normalization": {
+        "source_bounds": [
+          [
+            -0.4895935654640198,
+            3.6977537226243397e-09,
+            -0.22529607999561746
+          ],
+          [
+            0.4897766709327698,
+            0.6673583989271064,
+            0.22526546248174792
+          ]
+        ],
+        "source_center": [
+          9.1552734375e-05,
+          0.33367920131243006,
+          -1.5308756934770407e-05
+        ],
+        "source_max_extent": 0.9793702363967896,
+        "normalization": "(point - source_center) / source_max_extent",
+        "normalized_bounds": [
+          [
+            -0.5,
+            -0.3407079214928143,
+            -0.2300261564691973
+          ],
+          [
+            0.5,
+            0.34070792149281426,
+            0.2300261564691973
+          ]
+        ]
+      },
+      "camera": {
+        "azimuth_degrees": 197.0,
+        "elevation_degrees": -22.0,
+        "eye": [
+          -1.1071030557762327,
+          -0.4677365311075897,
+          -0.3384753716874329
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_degrees": 50.0,
+        "frame_fill": 0.82,
+        "camera_distance": 1.248607310518635,
+        "image_size": 1024,
+        "intrinsic": [
+          [
+            1096.9152898406392,
+            0.0,
+            511.5
+          ],
+          [
+            0.0,
+            1096.9152898406392,
+            511.5
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "extrinsic_world_to_camera": [
+          [
+            -0.29237170472273677,
+            0.0,
+            0.9563047559630354,
+            -1.728867671618869e-17
+          ],
+          [
+            0.35823806689874776,
+            -0.9271838545667874,
+            0.10952436831738734,
+            -1.0675493830223866e-17
+          ],
+          [
+            0.8866703297743582,
+            0.374606593415912,
+            0.2710823241510897,
+            1.2486073105186353
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "visible_surface_points": 251912,
+        "sampler": "Open3D RaycastingScene pinhole"
+      },
+      "depth_valid_pixels": 79192,
+      "gt_points": 16384,
+      "partial_points": 16384,
+      "outputs": {
+        "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/gt_data/domestic_pig_gt.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/domestic_pig_partial.ply",
+        "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/depth.npy",
+        "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/camera.json"
+      }
+    },
+    {
+      "sample_id": "light_helicopter",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/light_helicopter.glb",
+      "seed": 424663156,
+      "normalization": {
+        "source_bounds": [
+          [
+            -6.547803776831927,
+            -1.3007248127093196,
+            -9.619473632036204
+          ],
+          [
+            6.403366510866192,
+            3.4287246453215534,
+            7.397662667184648
+          ]
+        ],
+        "source_center": [
+          -0.07221863298286735,
+          1.063999916306117,
+          -1.1109054824257778
+        ],
+        "source_max_extent": 17.01713629922085,
+        "normalization": "(point - source_center) / source_max_extent",
+        "normalized_bounds": [
+          [
+            -0.38053318901521355,
+            -0.13896137913191114,
+            -0.5
+          ],
+          [
+            0.38053318901521355,
+            0.13896137913191114,
+            0.5
+          ]
+        ]
+      },
+      "camera": {
+        "azimuth_degrees": 311.0,
+        "elevation_degrees": 17.0,
+        "eye": [
+          0.6578239989738326,
+          0.3065531767706851,
+          -0.7567399459312832
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_degrees": 50.0,
+        "frame_fill": 0.82,
+        "camera_distance": 1.048504940180162,
+        "image_size": 1024,
+        "intrinsic": [
+          [
+            1096.9152898406392,
+            0.0,
+            511.5
+          ],
+          [
+            0.0,
+            1096.9152898406392,
+            511.5
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "extrinsic_world_to_camera": [
+          [
+            -0.7547095802227722,
+            0.0,
+            -0.656059028990507,
+            8.052677125855906e-17
+          ],
+          [
+            0.19181309670469793,
+            -0.9563047559630355,
+            -0.22065572654031299,
+            -3.1021229231125006e-17
+          ],
+          [
+            -0.6273923696161129,
+            -0.29237170472273677,
+            0.7217323609379032,
+            1.048504940180162
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "visible_surface_points": 95363,
+        "sampler": "Open3D RaycastingScene pinhole"
+      },
+      "depth_valid_pixels": 18069,
+      "gt_points": 16384,
+      "partial_points": 16384,
+      "outputs": {
+        "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/light_helicopter/gt_data/light_helicopter_gt.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/light_helicopter/partial_data/single_scan/light_helicopter_partial.ply",
+        "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/light_helicopter/partial_data/single_scan/depth.npy",
+        "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/light_helicopter/partial_data/single_scan/depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/light_helicopter/partial_data/single_scan/camera.json"
+      }
+    },
+    {
+      "sample_id": "wolf",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/wolf.glb",
+      "seed": 3099724346,
+      "normalization": {
+        "source_bounds": [
+          [
+            -0.21780077740700368,
+            -1.1112302315296423,
+            -1.279134363042158
+          ],
+          [
+            0.21780164715799558,
+            1.33678406891358,
+            0.004700455296511764
+          ]
+        ],
+        "source_center": [
+          4.3487549594711794e-07,
+          0.11277691869196882,
+          -0.6372169538728232
+        ],
+        "source_max_extent": 2.448014300443222,
+        "normalization": "(point - source_center) / source_max_extent",
+        "normalized_bounds": [
+          [
+            -0.0889705637107863,
+            -0.5,
+            -0.2622196320720485
+          ],
+          [
+            0.0889705637107863,
+            0.5,
+            0.2622196320720485
+          ]
+        ]
+      },
+      "camera": {
+        "azimuth_degrees": 277.0,
+        "elevation_degrees": -18.0,
+        "eye": [
+          0.15980466171769336,
+          -0.42606024362745565,
+          -1.301504525834182
+        ],
+        "target": [
+          0.0,
+          0.0,
+          0.0
+        ],
+        "fov_degrees": 50.0,
+        "frame_fill": 0.82,
+        "camera_distance": 1.3787599108885682,
+        "image_size": 1024,
+        "intrinsic": [
+          [
+            1096.9152898406392,
+            0.0,
+            511.5
+          ],
+          [
+            0.0,
+            1096.9152898406392,
+            511.5
+          ],
+          [
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "extrinsic_world_to_camera": [
+          [
+            -0.992546151641322,
+            0.0,
+            -0.12186934340514768,
+            8.549342009868942e-18
+          ],
+          [
+            -0.037659698205507054,
+            -0.9510565162951535,
+            0.30671362855862205,
+            -5.5488855261430525e-17
+          ],
+          [
+            -0.1159046331820775,
+            0.3090169943749474,
+            0.9439674852421569,
+            1.378759910888568
+          ],
+          [
+            0.0,
+            0.0,
+            0.0,
+            1.0
+          ]
+        ],
+        "visible_surface_points": 88305,
+        "sampler": "Open3D RaycastingScene pinhole"
+      },
+      "depth_valid_pixels": 38090,
+      "gt_points": 16384,
+      "partial_points": 16384,
+      "outputs": {
+        "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/gt_data/wolf_gt.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/wolf_partial.ply",
+        "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/depth.npy",
+        "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/wolf/partial_data/single_scan/camera.json"
+      }
+    }
+  ]
+}

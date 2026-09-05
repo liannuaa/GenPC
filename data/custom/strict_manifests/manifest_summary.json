@@ -1,0 +1,10 @@
+{
+  "cases": 7,
+  "datasets": [
+    "custom"
+  ],
+  "generic_condition": "a complete 3D object",
+  "inference_manifest": "data/custom/strict_manifests/inference_manifest.json",
+  "evaluation_manifest": "data/custom/strict_manifests/evaluation_manifest.json",
+  "gt_present_in_inference_manifest": false
+}

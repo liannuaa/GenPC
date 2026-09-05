@@ -168,15 +168,15 @@
     collision with GenPC+'s `src` package without changing Pixal checkpoints,
     sampler settings, or exported priors.
   - Qwen/GPT/Pixal input preparation is complete in
-    `workspace/custom_mainline_oblique_20260905/inputs/`. All ten samples now
+    `workspace/mainline_results_20260905/custom/full_pipeline/inputs/`. All ten samples now
     have the recorded partial-view depth/camera assets, semantic image,
     geometry-preserving GPT image, Pixal GLB, 100k-point prior, and cached
     Pixal-input MoGe observation. No custom GT was read during those stages.
   - Fixed registration and partial-anchored Gaussian decoding completed for
     all ten samples. Every final prediction contains 100,000 points under
-    `workspace/custom_mainline_oblique_20260905/gaussian/<sample>/decoded/`.
+    `workspace/mainline_results_20260905/custom/full_pipeline/gaussian/<sample>/decoded/`.
     The subsequent offline-only 16,384-point audit (seed 6145) is recorded at
-    `workspace/custom_mainline_oblique_20260905/metrics/offline.{json,csv}`:
+    `workspace/mainline_results_20260905/custom/full_pipeline/metrics/offline.{json,csv}`:
     mean CD-L1×100 `13.6373`, mean EMD×100 `12.8285`. GT was first accessed
     only by this final audit.
 
@@ -191,7 +191,7 @@
   `single_engine_airplane`, `light_helicopter`,
   `tyrannosaurus_rex_skeleton`, and `wolf`.
   - The isolated registration root is
-    `workspace/custom_mainline_oblique_20260905/registration_coarse_basin_20260905`.
+    `workspace/mainline_results_20260905/custom/full_pipeline/registration_coarse_basin_20260905`.
     Each case selected the full shared pixel-residual candidate and restored
     valid final Camera-1 3-D pairs: `7093`, `4778`, `5287`, and `7057` in the
     order listed above (the old route had `0`, `0`, `0`, and `221`).
@@ -201,7 +201,7 @@
     `13.8432/15.5566` to `0.7406/1.5297`, `1.3764/2.5790`,
     `0.9152/1.9992`, and `3.1437/4.0370`. The four-sample mean is
     `29.2405/26.5009 → 1.5440/2.5363`. Outputs and the offline comparison
-    are retained under `workspace/custom_coarse_basin_ablation_20260905/`.
+    are retained under `workspace/mainline_results_20260905/custom/coarse_basin_hard4/`.
   - The flag remains opt-in pending visual and broader-distribution validation;
     the frozen default mainline is not silently changed.
   - [x] Run the same opt-in coarse stage on the remaining six custom samples
@@ -215,12 +215,12 @@
       small (`+0.2179/+0.2755` on the handheld drill). Combining this audit
       with the four diagnosed failures gives `13.6373/12.8351 → 2.5931/3.2922`
       over all ten custom samples. Results are in
-      `workspace/custom_coarse_basin_remaining6_ablation_20260905/`.
+      `workspace/mainline_results_20260905/custom/coarse_basin_remaining6/`.
   - [x] Run the same opt-in stage on the frozen Redwood-10 Qwen/GPT/Pixal
     inputs and compare its complete offline audit with the accepted fixed
     baseline before changing the default.
     - The isolated result is
-      `workspace/redwood_coarse_basin_ablation_20260905/`. The unchanged
+      `workspace/mainline_results_20260905/redwood/`. The unchanged
       16,384-point offline audit (seed 6145) is CD-L1×100 / EMD×100
       `1.5738481/2.4813253`, versus the frozen `1.5682055/2.4785676`:
       `+0.0056426/+0.0027576` (`+0.36%/+0.11%`). Three samples selected
@@ -248,3 +248,36 @@
     `e7cdbd3d256b044f592d495c7feb175d4628cb1e89f395f1c67e7776219cec09`,
     byte-identical to the corresponding accepted Redwood coarse-ablation
     output. `pytest -q` passed `45/45`.
+
+## GPT-visual unknown-camera selection diagnostic — 2026-09-05
+
+- [x] For an uncalibrated ScanSalon partial, render an orbit atlas solely for
+  GPT-5.6 Terra visual inspection. The agent must choose the final continuous
+  observation direction from semantic recognisability, not from a
+  geometry-scored/PCA candidate selector. Save the selected Camera-1, readable
+  extrinsics, depth raster, per-point UVs, and rationale; first validate on
+  `data/custom/wolf/partial_data/single_scan/wolf_partial.ply`.
+  - GPT selected the semantic side view `(azimuth, elevation) = (0°, 10°)`.
+    The output root is `workspace/gpt_visual_view_diagnostic/wolf/`; it retains
+    the 24-view inspection atlas, full target-aware `camera.pth`, readable
+    `semantic_view_selection.json`, raw/filled depth, foreground mask, and
+    per-point UVs. All 16,384 points are forward-facing in the stored camera;
+    the mainline-identical sparse-depth raster has 6,482 observed pixels and
+    only infills its local support ring. The original ScanSalon car
+    probe was intentionally abandoned because it has only 796 points, below
+    the new 1,000-point ScanSalon quality floor.
+
+## GPT-visual saved-depth Redwood/Custom diagnostic — 2026-09-05
+
+- [x] Apply the same GPT-visual, unscored view selection to Redwood-10 and
+  Custom-10 partials in an isolated output root. Preserve the frozen mainline
+  depth rasterisation exactly after the continuous direction is selected; do
+  not overwrite accepted Camera-1, semantic, Pixal, registration, or Gaussian
+  outputs.
+  - All 20 outputs are in
+    `workspace/gpt_visual_depth_redwood_custom_20260905/{redwood,custom}/<sample>/`.
+    Each directory contains the visual-only orbit atlas, GPT selection record,
+    full target-aware camera, raw/final depth, inpaint mask, and per-point UVs.
+    The selection source is explicitly logged as GPT-5.6 Terra visual
+    inspection with no geometry-score ranking. Dataset-level selected-depth
+    boards and CSV summaries are at the output root for manual review.

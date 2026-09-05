@@ -1,0 +1,119 @@
+{
+  "sample_id": "handheld_power_drill",
+  "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/handheld_power_drill.glb",
+  "seed": 172580607,
+  "normalization": {
+    "source_bounds": [
+      [
+        -0.40404435992240906,
+        0.37726736068725586,
+        -0.17013445496559143
+      ],
+      [
+        0.20363059639930725,
+        1.2201955318450928,
+        0.1402270793914795
+      ]
+    ],
+    "source_center": [
+      -0.1002068817615509,
+      0.7987314462661743,
+      -0.01495368778705597
+    ],
+    "source_max_extent": 0.8429281711578369,
+    "normalization": "(point - source_center) / source_max_extent",
+    "normalized_bounds": [
+      [
+        -0.3604547677455249,
+        -0.5,
+        -0.18409726058316553
+      ],
+      [
+        0.3604547677455249,
+        0.5,
+        0.18409726058316553
+      ]
+    ]
+  },
+  "camera": {
+    "azimuth_degrees": 68.0,
+    "elevation_degrees": -24.0,
+    "eye": [
+      0.4642553638515414,
+      -0.5517783427414655,
+      1.1490723476969493
+    ],
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "fov_degrees": 50.0,
+    "frame_fill": 0.82,
+    "camera_distance": 1.356598556178365,
+    "image_size": 1024,
+    "intrinsic": [
+      [
+        1096.9152898406392,
+        0.0,
+        511.5
+      ],
+      [
+        0.0,
+        1096.9152898406392,
+        511.5
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "extrinsic_world_to_camera": [
+      [
+        0.9271838545667874,
+        0.0,
+        -0.37460659341591196,
+        -2.508664764441439e-17
+      ],
+      [
+        -0.1523662282800492,
+        -0.9135454576426008,
+        -0.37711964852057606,
+        -4.400057366836083e-17
+      ],
+      [
+        -0.342220151818075,
+        0.4067366430758002,
+        -0.8470245987390465,
+        1.3565985561783647
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "visible_surface_points": 266525,
+    "sampler": "Open3D RaycastingScene pinhole"
+  },
+  "depth_valid_pixels": 49833,
+  "gt_points": 16384,
+  "partial_points": 16384,
+  "outputs": {
+    "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/gt_data/handheld_power_drill_gt.ply",
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/handheld_power_drill_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/depth.png",
+    "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/camera.json"
+  },
+  "category": "handheld power drill",
+  "resampled_partial": {
+    "view": "fixed non-orthogonal pinhole",
+    "seed": 614501,
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/handheld_power_drill_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/handheld_power_drill/partial_data/single_scan/depth.png"
+  }
+}

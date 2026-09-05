@@ -1,0 +1,119 @@
+{
+  "sample_id": "mirrorless_camera",
+  "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/mirrorless_camera.glb",
+  "seed": 1754847500,
+  "normalization": {
+    "source_bounds": [
+      [
+        -0.0541640967130661,
+        -0.04561230167746544,
+        -0.07260333746671677
+      ],
+      [
+        0.0541641041636467,
+        0.04561230167746544,
+        0.07260333746671677
+      ]
+    ],
+    "source_center": [
+      3.725290298461914e-09,
+      0.0,
+      0.0
+    ],
+    "source_max_extent": 0.14520667493343353,
+    "normalization": "(point - source_center) / source_max_extent",
+    "normalized_bounds": [
+      [
+        -0.3730138470782188,
+        -0.31411986878960824,
+        -0.5
+      ],
+      [
+        0.3730138470782188,
+        0.31411986878960824,
+        0.5
+      ]
+    ]
+  },
+  "camera": {
+    "azimuth_degrees": 31.0,
+    "elevation_degrees": 28.0,
+    "eye": [
+      1.0616403117399793,
+      0.6585460811696925,
+      0.637897854896696
+    ],
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "fov_degrees": 50.0,
+    "frame_fill": 0.82,
+    "camera_distance": 1.402739022704197,
+    "image_size": 1024,
+    "intrinsic": [
+      [
+        1096.9152898406392,
+        0.0,
+        511.5
+      ],
+      [
+        0.0,
+        1096.9152898406392,
+        511.5
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "extrinsic_world_to_camera": [
+      [
+        0.5150380749100542,
+        0.0,
+        -0.8571673007021123,
+        -2.2314273376776822e-17
+      ],
+      [
+        0.4024156722295843,
+        -0.882947592858927,
+        0.2417957299222598,
+        -1.0533873106940337e-16
+      ],
+      [
+        -0.7568338048323141,
+        -0.4694715627858908,
+        -0.45475162847252804,
+        1.4027390227041971
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "visible_surface_points": 398935,
+    "sampler": "Open3D RaycastingScene pinhole"
+  },
+  "depth_valid_pixels": 107362,
+  "gt_points": 16384,
+  "partial_points": 16384,
+  "outputs": {
+    "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/gt_data/mirrorless_camera_gt.ply",
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/mirrorless_camera_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/depth.png",
+    "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/camera.json"
+  },
+  "category": "mirrorless camera",
+  "resampled_partial": {
+    "view": "fixed non-orthogonal pinhole",
+    "seed": 614502,
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/mirrorless_camera_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/mirrorless_camera/partial_data/single_scan/depth.png"
+  }
+}

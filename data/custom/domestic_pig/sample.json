@@ -1,0 +1,119 @@
+{
+  "sample_id": "domestic_pig",
+  "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/domestic_pig.glb",
+  "seed": 2440591877,
+  "normalization": {
+    "source_bounds": [
+      [
+        -0.4895935654640198,
+        3.6977537226243397e-09,
+        -0.22529607999561746
+      ],
+      [
+        0.4897766709327698,
+        0.6673583989271064,
+        0.22526546248174792
+      ]
+    ],
+    "source_center": [
+      9.1552734375e-05,
+      0.33367920131243006,
+      -1.5308756934770407e-05
+    ],
+    "source_max_extent": 0.9793702363967896,
+    "normalization": "(point - source_center) / source_max_extent",
+    "normalized_bounds": [
+      [
+        -0.5,
+        -0.3407079214928143,
+        -0.2300261564691973
+      ],
+      [
+        0.5,
+        0.34070792149281426,
+        0.2300261564691973
+      ]
+    ]
+  },
+  "camera": {
+    "azimuth_degrees": 197.0,
+    "elevation_degrees": -22.0,
+    "eye": [
+      -1.1071030557762327,
+      -0.4677365311075897,
+      -0.3384753716874329
+    ],
+    "target": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "fov_degrees": 50.0,
+    "frame_fill": 0.82,
+    "camera_distance": 1.248607310518635,
+    "image_size": 1024,
+    "intrinsic": [
+      [
+        1096.9152898406392,
+        0.0,
+        511.5
+      ],
+      [
+        0.0,
+        1096.9152898406392,
+        511.5
+      ],
+      [
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "extrinsic_world_to_camera": [
+      [
+        -0.29237170472273677,
+        0.0,
+        0.9563047559630354,
+        -1.728867671618869e-17
+      ],
+      [
+        0.35823806689874776,
+        -0.9271838545667874,
+        0.10952436831738734,
+        -1.0675493830223866e-17
+      ],
+      [
+        0.8866703297743582,
+        0.374606593415912,
+        0.2710823241510897,
+        1.2486073105186353
+      ],
+      [
+        0.0,
+        0.0,
+        0.0,
+        1.0
+      ]
+    ],
+    "visible_surface_points": 251912,
+    "sampler": "Open3D RaycastingScene pinhole"
+  },
+  "depth_valid_pixels": 79192,
+  "gt_points": 16384,
+  "partial_points": 16384,
+  "outputs": {
+    "gt": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/gt_data/domestic_pig_gt.ply",
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/domestic_pig_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/depth.png",
+    "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/camera.json"
+  },
+  "category": "domestic pig",
+  "resampled_partial": {
+    "view": "fixed non-orthogonal pinhole",
+    "seed": 614506,
+    "partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/domestic_pig_partial.ply",
+    "depth_npy": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/depth.npy",
+    "depth_png": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/domestic_pig/partial_data/single_scan/depth.png"
+  }
+}

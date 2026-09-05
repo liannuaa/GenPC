@@ -1,0 +1,130 @@
+{
+  "format": "redwood_style_custom_glb_single_scan_v2",
+  "strict_zero_shot": true,
+  "ground_truth_used_for_inference": false,
+  "cases": [
+    {
+      "case_id": "custom_glb/dragon_character/single_scan/partial_0",
+      "case_key": "dragon_character",
+      "dataset": "custom_glb",
+      "category": "dragon character",
+      "category_source": "renamed physical type: dragon_character.glb",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/dragon_character.glb",
+      "strict_zero_shot": true,
+      "ground_truth_used_for_inference": false,
+      "dataset_construction": {
+        "complete": "normalized source GLB surface sample",
+        "partial": "single visible-surface scan via fixed non-orthogonal Open3D pinhole",
+        "seed": 20260903,
+        "surface_points": 100000,
+        "partial_points": 16384,
+        "sensor": "Open3D RaycastingScene pinhole",
+        "sensor_camera": [
+          -0.8729910844622683,
+          -0.47765008223330335,
+          1.0780542078829063
+        ],
+        "sensor_radius": 4.7521207478043435,
+        "sensor_fov_deg": 50.0,
+        "sensor_resolution": 1024,
+        "visible_surface_points": 253744,
+        "returned_points": 16384
+      },
+      "qwen_prompt": "\u751f\u6210\u4e00\u5f20\u56fe\u50cf\uff0c\u53c2\u8003\u56fe1\u906e\u6321\u60c5\u51b5\u4e0b\u7684\u6df1\u5ea6\u56fe\uff0c\u5e76\u9075\u5faa\u4ee5\u4e0b\u63cf\u8ff0\uff1a\u5b8c\u6574\u7684dragon character\uff0c\u7eaf\u767d\u80cc\u666f\u3002\u4e25\u683c\u4fdd\u6301\u56fe1\u4e2d\u7269\u4f53\u7684\u76f8\u673a\u89c6\u89d2\u3001\u65b9\u5411\u3001\u4e2d\u5fc3\u4f4d\u7f6e\u3001\u5360\u5c4f\u5c3a\u5bf8\u3001\u5916\u8f6e\u5ed3\u3001\u53ef\u89c1\u5c40\u90e8\u7ed3\u6784\u548c\u5404\u90e8\u5206\u6bd4\u4f8b\uff1b\u53ea\u8865\u5168\u771f\u6b63\u7f3a\u5931\u6216\u906e\u6321\u7684\u533a\u57df\uff0c\u4e0d\u5f97\u65cb\u8f6c\u3001\u7f29\u653e\u3001\u62c9\u4f38\u3001\u91cd\u65b0\u5c45\u4e2d\u3001\u955c\u50cf\u6216\u6539\u6210\u5e38\u89c1\u7c7b\u522b\u6a21\u677f\u3002",
+      "outputs": {
+        "gt_complete": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/gt_data/dragon_character_gt.ply",
+        "source_partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/partial_data/single_scan/dragon_character_partial.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/partial_input.ply",
+        "partial_normalized_method_frame": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/partial_normalized_method_frame.ply",
+        "depth": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/partial_data/single_scan/depth.png",
+        "raw_depth": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/raw_depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/dragon_character/partial_data/single_scan/camera.json",
+        "point_uv": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/point_uv.npy",
+        "qwen_image": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/qwen_image.png",
+        "gpt_image": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/dragon_character/gpt_image.png"
+      }
+    },
+    {
+      "case_id": "custom_glb/tyrannosaurus_rex_skeleton/single_scan/partial_0",
+      "case_key": "tyrannosaurus_rex_skeleton",
+      "dataset": "custom_glb",
+      "category": "tyrannosaurus rex skeleton",
+      "category_source": "renamed physical type: tyrannosaurus_rex_skeleton.glb",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/tyrannosaurus_rex_skeleton.glb",
+      "strict_zero_shot": true,
+      "ground_truth_used_for_inference": false,
+      "dataset_construction": {
+        "complete": "normalized source GLB surface sample",
+        "partial": "single visible-surface scan via fixed non-orthogonal Open3D pinhole",
+        "seed": 20261912,
+        "surface_points": 100000,
+        "partial_points": 16384,
+        "sensor": "Open3D RaycastingScene pinhole",
+        "sensor_camera": [
+          -1.1277091363756322,
+          0.549886846409915,
+          0.34477528275127917
+        ],
+        "sensor_radius": 3.185973805261847,
+        "sensor_fov_deg": 50.0,
+        "sensor_resolution": 1024,
+        "visible_surface_points": 51111,
+        "returned_points": 16384
+      },
+      "qwen_prompt": "\u751f\u6210\u4e00\u5f20\u56fe\u50cf\uff0c\u53c2\u8003\u56fe1\u906e\u6321\u60c5\u51b5\u4e0b\u7684\u6df1\u5ea6\u56fe\uff0c\u5e76\u9075\u5faa\u4ee5\u4e0b\u63cf\u8ff0\uff1a\u5b8c\u6574\u7684tyrannosaurus rex skeleton\uff0c\u7eaf\u767d\u80cc\u666f\u3002\u4e25\u683c\u4fdd\u6301\u56fe1\u4e2d\u7269\u4f53\u7684\u76f8\u673a\u89c6\u89d2\u3001\u65b9\u5411\u3001\u4e2d\u5fc3\u4f4d\u7f6e\u3001\u5360\u5c4f\u5c3a\u5bf8\u3001\u5916\u8f6e\u5ed3\u3001\u53ef\u89c1\u5c40\u90e8\u7ed3\u6784\u548c\u5404\u90e8\u5206\u6bd4\u4f8b\uff1b\u53ea\u8865\u5168\u771f\u6b63\u7f3a\u5931\u6216\u906e\u6321\u7684\u533a\u57df\uff0c\u4e0d\u5f97\u65cb\u8f6c\u3001\u7f29\u653e\u3001\u62c9\u4f38\u3001\u91cd\u65b0\u5c45\u4e2d\u3001\u955c\u50cf\u6216\u6539\u6210\u5e38\u89c1\u7c7b\u522b\u6a21\u677f\u3002",
+      "outputs": {
+        "gt_complete": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/tyrannosaurus_rex_skeleton/gt_data/tyrannosaurus_rex_skeleton_gt.ply",
+        "source_partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/tyrannosaurus_rex_skeleton/partial_data/single_scan/tyrannosaurus_rex_skeleton_partial.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/tyrannosaurus_rex_skeleton/partial_input.ply",
+        "partial_normalized_method_frame": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/tyrannosaurus_rex_skeleton/partial_normalized_method_frame.ply",
+        "depth": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/tyrannosaurus_rex_skeleton/partial_data/single_scan/depth.png",
+        "raw_depth": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/tyrannosaurus_rex_skeleton/raw_depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/tyrannosaurus_rex_skeleton/partial_data/single_scan/camera.json",
+        "point_uv": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/tyrannosaurus_rex_skeleton/point_uv.npy",
+        "qwen_image": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/tyrannosaurus_rex_skeleton/qwen_image.png",
+        "gpt_image": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/tyrannosaurus_rex_skeleton/gpt_image.png"
+      }
+    },
+    {
+      "case_id": "custom_glb/cartoon_fox/single_scan/partial_0",
+      "case_key": "cartoon_fox",
+      "dataset": "custom_glb",
+      "category": "cartoon fox",
+      "category_source": "renamed physical type: cartoon_fox.glb",
+      "source_glb": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/glb/cartoon_fox.glb",
+      "strict_zero_shot": true,
+      "ground_truth_used_for_inference": false,
+      "dataset_construction": {
+        "complete": "normalized source GLB surface sample",
+        "partial": "single visible-surface scan via fixed non-orthogonal Open3D pinhole",
+        "seed": 20262921,
+        "surface_points": 100000,
+        "partial_points": 16384,
+        "sensor": "Open3D RaycastingScene pinhole",
+        "sensor_camera": [
+          0.39560909564795377,
+          -0.6599525370061256,
+          1.2939790463962524
+        ],
+        "sensor_radius": 4.918348784530133,
+        "sensor_fov_deg": 50.0,
+        "sensor_resolution": 1024,
+        "visible_surface_points": 236075,
+        "returned_points": 16384
+      },
+      "qwen_prompt": "\u751f\u6210\u4e00\u5f20\u56fe\u50cf\uff0c\u53c2\u8003\u56fe1\u906e\u6321\u60c5\u51b5\u4e0b\u7684\u6df1\u5ea6\u56fe\uff0c\u5e76\u9075\u5faa\u4ee5\u4e0b\u63cf\u8ff0\uff1a\u5b8c\u6574\u7684stylized cartoon fox character cute fox\uff0c\u7eaf\u767d\u80cc\u666f\u3002\u4e25\u683c\u4fdd\u6301\u56fe1\u4e2d\u7269\u4f53\u7684\u76f8\u673a\u89c6\u89d2\u3001\u65b9\u5411\u3001\u4e2d\u5fc3\u4f4d\u7f6e\u3001\u5360\u5c4f\u5c3a\u5bf8\u3001\u5916\u8f6e\u5ed3\u3001\u53ef\u89c1\u5c40\u90e8\u7ed3\u6784\u548c\u5404\u90e8\u5206\u6bd4\u4f8b\uff1b\u53ea\u8865\u5168\u771f\u6b63\u7f3a\u5931\u6216\u906e\u6321\u7684\u533a\u57df\uff0c\u4e0d\u5f97\u65cb\u8f6c\u3001\u7f29\u653e\u3001\u62c9\u4f38\u3001\u91cd\u65b0\u5c45\u4e2d\u3001\u955c\u50cf\u6216\u6539\u6210\u5e38\u89c1\u7c7b\u522b\u6a21\u677f\u3002",
+      "outputs": {
+        "gt_complete": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/cartoon_fox/gt_data/cartoon_fox_gt.ply",
+        "source_partial": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/cartoon_fox/partial_data/single_scan/cartoon_fox_partial.ply",
+        "partial": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/cartoon_fox/partial_input.ply",
+        "partial_normalized_method_frame": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/cartoon_fox/partial_normalized_method_frame.ply",
+        "depth": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/cartoon_fox/partial_data/single_scan/depth.png",
+        "raw_depth": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/cartoon_fox/raw_depth.png",
+        "camera": "/opt/data/private/cr/lab/GenPC/.codex-worktrees/agent_genpc_plus/data/custom/cartoon_fox/partial_data/single_scan/camera.json",
+        "point_uv": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/cartoon_fox/point_uv.npy",
+        "qwen_image": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/cartoon_fox/qwen_image.png",
+        "gpt_image": "/opt/data/private/cr/lab/GenPC/workspace/custom_glb_redwood_mainline_20260903/cartoon_fox/gpt_image.png"
+      }
+    }
+  ]
+}
