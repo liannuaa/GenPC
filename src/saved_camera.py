@@ -13,7 +13,7 @@ from src.zbuffer import zbuffer_depth_with_indices
 
 
 class SavedCameraProjector:
-    """Project raw-frame points with the saved DepthPrompting camera."""
+    """Project raw-frame points with the saved ``src.depth_prompting`` camera."""
 
     def __init__(self, camera, center_xy, scale_xy, *, padding, image_shape, device="cpu"):
         self.camera = camera

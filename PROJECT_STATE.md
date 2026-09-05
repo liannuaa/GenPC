@@ -216,3 +216,105 @@ previous frozen route's `1.5682055 / 2.4785676` (`+0.36% / +0.11%`). This
 small bounded regression was accepted to make the mainline robust to the large
 wrong-basin failures independently observed on custom scans; offline metrics
 remain reporting-only and do not control inference.
+
+## 2026-09-05 CST — accepted scene wrapper single-instance registration POC
+
+**User approval.** The user judged the registered scene mug as “配得确实不错”.
+Keep this POC as the verified scene-coordinate-frame reference; do not change
+the direct-RGB semantic contract, shared-Pixal-MoGe partial definition, or
+textured-mesh export without a new scene audit.
+
+**Sample and outputs.** `coffee_mug_0` from
+`data/scene_samples/scene_3.png`. Inputs and all produced assets are under
+`workspace/scene3_gpt_mask_poc/run/`: source mask/crop
+`masks/coffee_mug_0.png` and `instances/coffee_mug_0/masked_crop.png`, partial
+`inputs/partial/coffee_mug_0.ply`, frozen direct semantic
+`inputs/camera/coffee_mug_0/img.png` (identical to
+`inputs/pixal/coffee_mug_0/gpt_image.png` after 512px aspect-preserving white
+padding), Pixal GLB `inputs/pixal/coffee_mug_0/pixal3d.glb`, final registration
+`registration/coffee_mug_0/final/camera1_amplified_registered_100k.ply`, and
+registered textured-mesh outputs
+`scene_meshes/coffee_mug_0_registered_mesh.glb` and
+`scene_meshes/completed_scene_registered_meshes.glb`.
+
+**Generation contract.** GPT direct semantic prompt, verbatim:
+`Starting only from this isolated RGB scene crop, produce exactly one complete plain white ceramic coffee mug on a pure white square background. Preserve the observed camera viewpoint, silhouette, aspect ratio, material, colour, and every visible structural detail. Complete only genuinely occluded or missing portions; do not rotate, resize disproportionately, or redesign the object. Do not output a depth map or add props, text, people, floor, wall, shadows, or a second object.`
+Negative prompt: `NONE`. GPT model/version, seed, scheduler, CFG, and internal
+generation resolution: `UNKNOWN`. The mask prompt is saved verbatim in
+`gpt_image_actions.json`. No depth-to-semantic/Qwen step was run; the scene
+partial is a 1-pixel-eroded GPT-mask subset of the single scene Pixal-MoGe
+observation. The final POC predates the later generic stronger pose-lock text,
+but preserves the accepted direct-RGB/no-rotation contract.
+
+**Models and fixed post-processing.** Pixal metadata is preserved in
+`inputs/pixal/coffee_mug_0/pixal3d_metadata.json`: Pixal3D
+`models/Pixal3D-weights`, DINOv3
+`models/dinov3-vitl16-pretrain-lvd1689m`, MoGe-2
+`models/moge-2-vitl/model.pt`, RMBG-2.0 `models/RMBG-2.0`; seed `42`, 1024px,
+12 sparse/shape/texture steps, guidance `7.5/7.5/1.0`, 300k decimation, 2048
+texture, and 100k sampled points. Registration is the fixed two-camera
+Pixal-MoGe Camera-1 continuation recorded in
+`registration/batch_manifest.json`: no proposal gate, broad basin recovery
+enabled, 32k Camera-1 points, and wide/final tilt trust regions `1.0°`.
+The GLB is transformed only by the cumulative final registration Sim(3);
+there is no point fusion, Gaussian edit, point deletion, GT, CD, or EMD use.
+
+## 2026-09-05 CST — accepted five-scene direct-GPT textured mesh delivery
+
+**User approval.** “ok 效果很好”. Preserve the isolated scene pipeline and
+its shared scene-MoGe coordinate frame. In particular, do not reintroduce a
+depth-shift trust-region cap or alter object-level mainline code without a new
+scene audit.
+
+**Samples and final outputs.** The accepted delivery root is
+`workspace/final_scene_meshes_20260905/`, with source image, final textured
+GLB, collision/placement manifest, and verbatim GPT action record in each of
+`scene_1` through `scene_5`. The final files are
+`scene_<n>/completed_scene_registered_meshes.glb`. Scene 3 is the previously
+accepted seven-instance scene output copied from
+`workspace/scene3_all_instances_mesh_erosion5_20260905/run/scene_meshes_scene_moge_collision_exact_20260905/`;
+scenes 1, 2, 4, and 5 were run in
+`workspace/scene_batch_all_instances_20260905/`. The delivery contains 4, 4,
+7, 7, and 5 textured instance meshes for scenes 1--5 respectively. All GLB
+nodes have identity transforms because every placement Sim(3) is baked into
+the textured mesh vertices. `scene_5` additionally records the user-corrected
+full left blue upholstered armchair mask in
+`scene_5/scene5_instance_board_corrected.png`.
+For reproducibility, the delivery also retains `scene_<n>/run/` for all five
+scenes: scene-MoGe/context, masks, crops, frozen GPT RGB, Camera-1/Pixal
+inputs, Pixal mesh/100k sample/native-MoGe artifacts, registration/bridge
+transforms, and logs. A file-level audit verified this complete chain for
+every 4/4/7/7/5-instance scene.
+
+**Inputs, prompts, and models.** Inputs are exactly
+`data/scene_samples/scene_<n>.png`. There is no Qwen/depth-to-semantic step:
+one shared scene MoGe observation is inferred directly from each RGB input,
+then a 5-pixel-eroded GPT instance mask extracts each visible object partial.
+The complete per-instance mask and semantic prompts are copied verbatim in
+each delivery `gpt_image_actions.json`. In literal template form, for an exact
+recorded label `<label>`, the mask prompt is:
+`Segment exactly one visible <label> in this scene. Preserve the source image pixel grid and output a binary mask at the exact same resolution: pure white for pixels belonging to this <label>, pure black for everything else. Do not include shadows, floor, wall, adjacent objects, or background. Do not redraw the object.`
+The direct completion prompt is:
+`Starting only from this isolated RGB scene crop, produce exactly one complete <label> on a pure white square background. POSE LOCK: the crop is the only camera reference. Preserve the exact observed object direction, left/right relation, yaw, pitch, roll, image-plane angle, perspective/foreshortening, silhouette, aspect ratio, material, colour, and visible structural details. Complete only genuinely occluded or missing portions behind the observed view. Never canonicalize it into a frontal, side, top-down, symmetric, catalog, or product-shot viewpoint; do not rotate, mirror, re-pose, resize disproportionately, or redesign it. Do not output a depth map or add props, text, people, floor, wall, shadows, or a second object.`
+The exact `<label>` substitutions and asset paths are in those records. GPT
+image model/version, seed, scheduler, CFG, negative prompt, and raw output
+resolution are `UNKNOWN`; the installed Camera-1 and Pixal image is
+aspect-preserving white-padded to 512 px. Pixal uses
+`models/Pixal3D-weights`, DINOv3
+`models/dinov3-vitl16-pretrain-lvd1689m`, MoGe-2
+`models/moge-2-vitl/model.pt`, and RMBG-2.0 `models/RMBG-2.0`; seed `42`,
+1024 cascade, 12 sparse/shape/texture steps, guidance `7.5/7.5/1.0`, and
+100k-face decimation target. No GT, CD, or EMD is read during scene inference.
+
+**Frozen post-processing.** Each complete textured Pixal mesh undergoes only
+native Pixal--MoGe alignment plus the camera-2 → scene-MoGe bridge and a
+common table-world transform. No point fusion, Gaussian editing, or mesh-face
+pruning occurs. Exact `python-fcl` contact detection then moves only the
+scene-MoGe-farther object along the original scene camera's positive depth
+direction by the smallest collision-free distance; there is no object-scale
+movement cap or lateral/table-normal adjustment. The re-exported scene 2 and
+scene 4 reports have zero remaining pairs after shifts of `2.977501` for the
+tent and `2.115/.318/.43575` for the coffee table/left side table/right side
+table. Scene 1, scene 3, and scene 5 already report zero remaining FCL pairs.
+The full project test suite passed `60/60` after the unbounded minimal-depth
+solver change.

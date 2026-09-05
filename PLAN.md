@@ -1,5 +1,81 @@
 # Active plan
 
+## Scene-level instance completion — 2026-09-05
+
+- [x] Keep the frozen single-object GenPC+ path unchanged and add an isolated
+  scene wrapper under `src/scene_completion/` plus one public scene runner.
+- [x] Use the same Pixal MoGe-2 inference contract on an RGB scene image to
+  establish one shared camera-coordinate visible scene cloud.  Consume
+  auditable GPT instance masks to extract object **MoGe partials** in that
+  frame. Verified on the coffee-mug preparation smoke at
+  `workspace/scene3_gpt_mask_poc/run`: 107,203 mask-indexed scene-MoGe points.
+  - The scene default uses a 5-pixel mask erosion before this extraction so
+    unstable MoGe edge points cannot dominate downstream registration.
+- [x] Use direct GPT RGB semantic completion from every masked scene crop—no
+  depth-to-semantic stage—then run unchanged Pixal per instance. Camera-1
+  metadata is materialised only to estimate the camera-2 Pixal-input MoGe →
+  camera-1 scene-MoGe bridge; the two MoGe observations are never treated as
+  the same camera frame.
+  - The direct-GPT → Pixal smoke completed for `coffee_mug_0` under
+    `workspace/scene3_gpt_mask_poc/run/`; Camera-1 and Pixal consume the same
+    pose-locked direct GPT semantic image.
+- [x] Stop scene registration after native Pixal--MoGe alignment and the
+  pixel-indexed camera-2 → camera-1 bridge. Do not run joint, amplified,
+  wide-tilt, final Camera-1 residual, Gaussian fusion, or point decoding.
+  Compose each textured `pixal3d.glb` using the bridge's original-Pixal →
+  scene-partial Sim(3), which preserves the scene partial's original position
+  and scale rather than leaving meshes in object-local frames.
+  - Verified all seven `scene_3` instances at
+    `workspace/scene3_all_instances_mesh_erosion5_20260905/run/registration_bridge_only_20260905`.
+    The separate scene output is
+    `workspace/scene3_all_instances_mesh_erosion5_20260905/run/scene_meshes_bridge_only_20260905/`.
+    Every bridge-placed complete bbox centre is near its corresponding
+    scene-partial centre; the merged GLB is 60 MB and no duplicate transformed
+    instance GLBs are written by default. Scene Pixal generation now exposes a
+    conservative explicit 100k-face target. `pytest -q` passed 55 tests.
+  - Final GLB composition now follows the reference `3D-Reconstruction`
+    convention exactly: apply the full scene transform to each mesh's vertices
+    first, then construct a `trimesh.Scene` from those baked textured meshes.
+    This preserves independent PBR materials without leaving nested GLTF node
+    transforms for a downstream viewer to miss. Verified output:
+    `workspace/scene3_all_instances_mesh_erosion5_20260905/run/scene_meshes_baked_scene_nodes_20260905/`;
+    all seven final scene nodes have identity transforms, while their vertices
+    retain distinct shared-scene positions. `pytest -q` passed 57 tests.
+  - Add an exact, scene-only mesh collision refinement after all meshes are in
+    the common table-world frame. It retains Sim(3), texture, and image-plane
+    placement; for each actual FCL collision it moves only the instance that
+    is farther according to its source scene-MoGe mask-anchor depth, along the
+    original camera's positive depth direction by the minimum collision-free
+    amount. The rule therefore does not depend on category or generated-prior
+    mesh centre. On `scene_3`, the only initial pair
+    was mouse--keyboard; `black_mouse_0` moved `0.070359375` while all six
+    other instances stayed fixed. The final textured GLB at
+    `workspace/scene3_all_instances_mesh_erosion5_20260905/run/scene_meshes_scene_moge_collision_exact_20260905/`
+    has zero exact FCL collision pairs. `pytest -q` passed 59 tests.
+  - [x] Run the same scene-image → textured-scene-mesh route on the remaining
+    four source scenes at `workspace/scene_batch_all_instances_20260905/`.
+    The frozen direct-GPT inputs and scene-MoGe partials produced 20 Pixal
+    instances, then native bridge placements and baked final GLBs:
+    `scene_{1,2,4,5}/run/scene_meshes/completed_scene_registered_meshes.glb`.
+    Verification confirms 4/4/7/5 textured geometries respectively and
+    identity GLB nodes, so all object coordinates are baked in the shared
+    scene frame. The corrected `scene_5/left_armchair_0` uses the user's
+    revised full-chair mask.
+    - Exact collision refinement now clears every detected pair in all four
+      scenes. The previous `.5` object-scale cap was removed: the solver
+      brackets and bisects the smallest collision-free translation along the
+      original scene camera's positive depth axis, without arbitrary lateral
+      movement. On the re-exported outputs, `scene_2/camping_tent_0` moves
+      `2.977501`; `scene_4` moves `coffee_table_0`/`left_side_table_0`/
+      `right_side_table_0` by `2.115`/`.318`/`.43575`. All four final GLBs
+      have zero remaining exact FCL collision pairs.
+  - [x] Publish the scene method alongside the object mainline. The root
+    README, method specification, documentation index, and dedicated
+    `docs/scene_completion.md` now define the scene-MoGe/GPT/Pixal route,
+    the external saved-GPT asset contract, bridge-only registration boundary,
+    textured GLB assembly, unbounded minimum camera-depth collision resolution,
+    and the complete reproducibility bundle layout.
+
 ## Mainline consolidation — 2026-09-04
 
 - [x] Preserve the accepted implementation before pruning.
@@ -281,3 +357,38 @@
     The selection source is explicitly logged as GPT-5.6 Terra visual
     inspection with no geometry-score ranking. Dataset-level selected-depth
     boards and CSV summaries are at the output root for manual review.
+
+## Scene registration throughput — 2026-09-05
+
+- [x] Add an opt-in, sample-independent multi-process scheduler to the fixed
+  registration runner. It must preserve each sample's frozen stage order and
+  numerical route; only independent samples may execute concurrently. Start
+  with a conservative two-worker default for the scene wrapper on the 24GB
+  GPU, retain one worker as the exact serial ablation, and validate equality
+  on completed/resumed scene outputs before promoting the option.
+  - `--sample-workers 2` uses two isolated child processes. Object mode keeps
+    its native-MoGe → bridge → joint → amplified → wide-tilt → final sequence;
+    scene mode intentionally stops after its native-MoGe → camera-2-to-camera-1
+    bridge. Single-object mode remains serial by default.
+  - Resume scheduling over the seven completed `scene_3` instances preserved
+    every final PLY SHA-256. A full two-object concurrent smoke run at
+    `workspace/scene3_all_instances_mesh_erosion5_20260905/parallel_registration_smoke`
+    used 12.7GB on the 24GB GPU, completed both independent registrations in
+    about 60.3 seconds (per-object artifact span), and reproduced the serial
+    final PLYs byte-for-byte for both the mug and mouse.
+
+## Scene-3 complete textured-mesh reconstruction — 2026-09-05
+
+- [x] Run the direct-RGB scene wrapper across all seven visible `scene_3`
+  instances using shared Pixal-MoGe partials, direct pose-locked GPT semantic
+  assets, fixed registration, and no point/Gaussian fusion.
+  - The retained output is
+    `workspace/scene3_all_instances_mesh_erosion5_20260905/run/`. It contains
+    all scene masks/partials/cameras/direct semantic assets, seven Pixal GLBs,
+    seven final registered 100k PLYs, seven individually transformed textured
+    GLBs, and `scene_meshes/completed_scene_registered_meshes.glb`.
+  - For every instance, applying the cumulative saved Sim(3) to its Pixal
+    100k samples reproduced its final registered PLY with maximum absolute
+    coordinate error at most `8.882e-16`. This verifies that the merged scene
+    is precisely the registered mesh composition, not an additional pose
+    estimate or a lossy fusion stage.

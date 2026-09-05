@@ -10,6 +10,8 @@ registration routes, per-sample selectors, or training code.
   in this repository.
 - [Method](core_registration_pipeline.md) defines the fixed Qwen/GPT/Pixal,
   two-camera Sim(3), and partial-anchored Gaussian procedure.
+- [Scene-level completion](scene_completion.md) documents the separate GPT-mask
+  wrapper that uses scene-MoGe partials and exports registered textured meshes.
 
 The shared runner contract lives in `src/mainline_paths.py`: it defines the
 Redwood-10 default IDs, the canonical `data/redwood/{partial,gt}` locations,

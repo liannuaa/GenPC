@@ -101,6 +101,12 @@ Frozen registration search settings:
 | Final tilt continuation | \((.010,1.0^\circ,.010)\), \((.004,.35^\circ,.004)\), \((.001,.10^\circ,.001)\) |
 | Candidate scoring | 8 independent CPU workers; proposal order and deterministic minimum selection are preserved |
 
+The registration runner also accepts `--sample-workers N` to execute only
+independent samples in separate processes. Each sample still performs the
+native-MoGe, bridge, joint, amplified, wide-tilt, and final stages in that
+unchanged order. This is a throughput-only option (`1` is the serial default);
+it never batches point clouds into one objective or changes frozen parameters.
+
 ## Partial-anchored Gaussian edit
 
 Registration cannot remove genuine prior/scan shape disagreement. The final
@@ -136,6 +142,25 @@ Frozen shared edit parameters:
 
 The final prediction is
 `gaussian/<sample>/decoded/partial_anchored_gaussian_decoded_100k.ply`.
+
+## Scene-level wrapper
+
+The optional scene wrapper is not an alternative registration method. It runs
+Pixal MoGe-2 once on an RGB scene, uses saved Codex GPT binary instance masks
+to extract scene-frame partials, and uses each such mask-indexed MoGe subset as
+the instance partial. A direct GPT RGB semantic completion—not a
+depth-to-semantic stage—provides the Pixal input and Camera-1 semantic image.
+Because the partials remain in the shared Pixal MoGe camera coordinate system,
+scene mode stops after native Pixal--MoGe alignment and the camera-2 →
+scene-camera bridge; it deliberately does *not* run the object mainline's
+joint/amplified/wide-tilt/final Camera-1 continuation. The resulting Sim(3)
+already maps each Pixal mesh into the shared scene frame. It is baked into each
+textured GLB's vertices and the meshes are composed without Gaussian fusion or
+mesh pruning. Exact FCL contact detection then moves only the scene-MoGe-farther
+mesh along the original camera-depth axis by the smallest collision-free
+amount—without a scale-based displacement cap or a lateral adjustment. See
+[Scene-level completion](scene_completion.md) for the complete artifact
+contract.
 
 ## Evaluation firewall
 

@@ -24,6 +24,7 @@ selection, category-specific parameter sets, or per-sample fallback branch.
 - [Installation](docs/installation.md)
 - [External model assets](docs/models.md)
 - [Fixed method and frozen parameters](docs/core_registration_pipeline.md)
+- [Scene-level instance completion](docs/scene_completion.md)
 - [Documentation index](docs/README.md)
 
 ## Repository layout
@@ -38,6 +39,7 @@ scripts/run_fixed_pixal_moge_registration.py
                                     fixed Pixal–MoGe–partial registration
 scripts/run_mainline_gaussian.py    partial-anchored edit and 100k decode
 scripts/evaluate_mainline_redwood.py offline CD-L1/EMD only
+scripts/run_scene_completion.py     separate scene-level instance wrapper
 ```
 
 ## Data contract
@@ -181,6 +183,24 @@ CUDA_VISIBLE_DEVICES=0 $PY scripts/evaluate_mainline_redwood.py \
 
 The evaluator is never called by inference and cannot affect image generation,
 Pixal3D, registration, or Gaussian-edit parameters.
+
+## Scene-level RGB completion
+
+The object mainline above remains unchanged.  For one RGB scene image,
+[`scripts/run_scene_completion.py`](scripts/run_scene_completion.py) provides
+an isolated instance wrapper: one shared Pixal MoGe scene cloud is split by
+saved GPT binary masks, each crop receives a pose-locked direct GPT semantic
+completion, and Pixal generates one textured mesh per object. Native
+Pixal--MoGe plus the two-camera bridge returns every mesh to the shared scene
+frame; the meshes are then composed directly into a textured GLB. There is no
+Qwen depth completion, Gaussian point fusion, or GT use in this route.
+
+The wrapper also detects exact mesh contacts with `python-fcl`. It preserves
+each mesh's rotation, scale, and image-plane position, moving only the
+scene-MoGe-farther mesh along the source camera's depth axis by the smallest
+collision-free amount. See [Scene-level instance completion](docs/scene_completion.md)
+for the manifest, saved-GPT asset contract, commands, and complete artifact
+layout.
 
 ## Reproducibility and scope
 

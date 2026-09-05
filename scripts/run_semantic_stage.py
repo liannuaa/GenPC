@@ -19,7 +19,7 @@ SHARED_ROOT = ROOT.parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from DepthPrompting import DepthPrompting
+from src.depth_prompting import DepthPrompting
 from src.mainline_data import load_partial
 from src.mainline_paths import REDWOOD10_SAMPLE_IDS, redwood_partial_root, sample_file
 from src.moge_pixel_bridge import run_rmbg_mask, save_mask_png

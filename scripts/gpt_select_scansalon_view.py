@@ -26,7 +26,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from DepthPrompting import DepthPrompting
+from src.depth_prompting import DepthPrompting
 from src.mainline_data import load_partial
 from src.zbuffer import zbuffer_depth_with_indices
 
