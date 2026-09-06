@@ -318,3 +318,73 @@ tent and `2.115/.318/.43575` for the coffee table/left side table/right side
 table. Scene 1, scene 3, and scene 5 already report zero remaining FCL pairs.
 The full project test suite passed `60/60` after the unbounded minimal-depth
 solver change.
+
+## 2026-09-07 CST — accepted bounded agentic Redwood-10 probe
+
+**User approval.** The user judged the ten-sample agentic result as “效果非常好”.
+Keep this isolated feasibility result, its explicit front/back re-plan for
+07306, and the fixed conservative local-edit trust region unchanged unless a
+new audit is requested. This is not the frozen object-mainline baseline.
+
+**Samples and outputs.** Inputs are exactly `data/redwood/partial/<id>.ply`
+for `01184, 05117, 05452, 06127, 06145, 06188, 06830, 07136, 07306, 09639`.
+The accepted ten-sample metric summary is
+`workspace/agentic_prior_adaptation_probe_20260906/redwood10_corrected_view/offline_metrics/redwood10_conservative_07306_summary.json`:
+offline CD-L1x100 `1.5834`, EMDx100 `2.3504` at 16,384 points, metric seed
+6145. GT was read only by this completed offline audit. The nine original
+per-sample trace roots are `workspace/agentic_prior_adaptation_probe_20260906/<id>/`.
+The user-approved 07306 front-facing re-plan is
+`workspace/agentic_prior_adaptation_probe_20260906/07306_front_view_replan/`;
+its final conservative decoded 100k PLY is
+`gaussian/07306/decoded/partial_anchored_gaussian_decoded_100k.ply`.
+The direct trace initially accepted the pre-edit registered carrier, but the
+reported ten-sample summary intentionally substitutes this audited conservative
+07306 decode. All final clouds contain 100,000 slots.
+
+**Observation and prompt contract.** The planner selected the bounded
+partial-only convex-hull candidate `base` for all samples except 07306. The
+07306 rear-view failure was retained separately; the accepted retry selected
+the explicit antipodal `opposite_180` candidate before any semantic/prior
+tool was run. Qwen received `raw_depth.png` and the following prompts,
+verbatim (negative prompt: `' '` for every sample):
+```
+01184: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的rubbish bin，纯白背景
+05117: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red chair，纯白背景
+05452: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的armchair，纯白背景
+06127: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的terracotta flower pot with leafy plant，纯白背景
+06145: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的table，纯白背景
+06188: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red motorcyle，纯白背景
+06830: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的tricycle，纯白背景
+07136: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的leather sofa，纯白背景
+07306: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的red office trash can，纯白背景
+09639: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的Ergonomic Chair，纯白背景
+```
+Each exact `qwen_edit_prompt.txt`, depth raster, semantic image, camera,
+pixel UV map, Pixal input, registration trace, and state-hashed decision is
+stored under its corresponding probe root. Qwen uses
+`models/Qwen-Image-Edit-2511` plus
+`models/nunchaku-qwen-image-edit/nunchaku_qwen_image_2511_balance_int4.safetensors`,
+40 steps, true CFG 4.0, 512px Camera-1 semantic output, and 1024px native
+stage-1 generation. Qwen seed/scheduler: `UNKNOWN` (no explicit seed was
+passed). No GPT clarity edit was used in this isolated probe.
+
+**Prior, registration, and adaptation.** Pixal uses
+`models/Pixal3D-weights`, DINOv3
+`models/dinov3-vitl16-pretrain-lvd1689m`, MoGe-2
+`models/moge-2-vitl/model.pt`, and RMBG-2.0 `models/RMBG-2.0`; Pixal seed
+42, 1024px input, 12 sparse/shape/texture steps, guidance `7.5/7.5/1.0`, and
+100k sampled carrier. Every trace uses the bounded native Pixal--MoGe,
+pixel-indexed two-camera bridge, joint proper Sim(3), and three-stage
+Camera-1 residual continuation; all continuous variables remain in these
+deterministic executors. Gaussian adaptation is used only where stated in the
+trace: historic 01184 uses the prior `.075` trial, 09639 uses `.020`, and the
+accepted 07306 retry uses `.020` anchor/displacement ratios, 1px saved/virtual
+pixel support, six virtual views, six prior-protection views, and 100k-slot
+collision-free decode. The 07306 editable Gaussian motion is capped at 2% of
+the partial diagonal; it anchors 26.427% of carrier slots while retaining the
+complete unobserved prior support. No decision used GT, CD, or EMD.
+
+**Approved constraints.** Do not overwrite the failed rear-view 07306 trace;
+it is the auditable counterexample for observation re-planning. Do not
+silently promote this probe over the frozen object mainline, and do not loosen
+the agent-local 2% trust region without a cross-sample wheel/detail audit.

@@ -392,3 +392,56 @@
     coordinate error at most `8.882e-16`. This verifies that the merged scene
     is precisely the registered mesh composition, not an additional pose
     estimate or a lossy fusion stage.
+
+## Isolated agentic prior-adaptation validation — 2026-09-06
+
+- [x] Create a clean `codex/agentic-01184-probe` worktree from the accepted
+  `best_register` baseline. Implement a state-hashed, bounded decision loop
+  that lets a high-level planner choose only discrete tools while retaining
+  the frozen geometric executors.
+- [x] Complete an end-to-end, no-GT pilot for Redwood `01184`. The planner
+  selected the partial-only base view, depth-conditioned semantic completion,
+  native prior generation, cross-camera global alignment, residual Sim(3),
+  one prior-protected local adaptation, then acceptance. The accepted output
+  is `workspace/agentic_prior_adaptation_probe_20260906/01184/final/agent_selected_100k.ply`.
+  Its verifier record is stored with the state trace; CD/EMD was not exposed
+  to any decision.
+- [x] Expand the same isolated controller to the remaining Redwood-10 samples
+  (`05117`, `05452`, `06127`, `06145`, `06188`, `06830`, `07136`, `07306`,
+  and `09639`). All tool decisions are state-hashed and no GT/CD/EMD was
+  exposed before `ACCEPT`.
+  - The first `07306` trace exposed a real agent failure: the legacy
+    convex-hull saved-view tie-break selected the semantic rear. A separate,
+    immutable retry at
+    `workspace/agentic_prior_adaptation_probe_20260906/07306_front_view_replan/`
+    retained the antipodal `opposite_180` view as an explicit agent action.
+    Its no-GT verifier energy fell from `0.18598` (old rear trace) to
+    `0.10856` after the identical global/residual Sim(3) executors. Its
+    offline-only accepted result is CD-L1x100 `3.1593`, EMDx100 `3.3834`,
+    compared with `22.9567/26.8012` for the rejected rear interpretation.
+  - The ten accepted traces, with this corrected `07306` substituted and no
+    post-acceptance metric feedback, are recorded under
+    `workspace/agentic_prior_adaptation_probe_20260906/redwood10_corrected_view/`.
+    Their offline audit is CD-L1x100 `1.59054`, EMDx100 `2.35776`.
+- [x] Diagnose why the corrected `07306` still looked less surface-tight than
+  the retained static mainline result. The front-view registered prior is not
+  the problem: its partial-to-prior 1% coverage is `88.35%`, higher than the
+  retained mainline registration's `85.17%`. The controller accepted too
+  early because its original verifier used only rendered overlap. The static
+  Gaussian decode instead raises its own coverage to `99.25%` through
+  collision-free one-to-one partial anchors.
+  - A conservative fixed 2% agent-side edit on the corrected `07306` trace
+    increases coverage to `97.83%`, yields CD-L1x100 `3.0876` and EMDx100
+    `3.3050`, retains all 100k prior slots, and caps editable-Gaussian motion
+    at 2% of the partial diagonal. These metrics are offline-only and were
+    not used to select the action.
+- [ ] Re-run the bounded planner with the new general observed-surface support
+  diagnostic. It records partial-to-prior 1%/2% coverage and p90/p95 distance
+  ratios, then *recommends* (but does not force) `ADAPT_LOCAL` only when the
+  residual lies inside the globally fixed 2% trust region; otherwise it
+  recommends upstream re-planning. This closes the early-acceptance gap
+  without a `07306`-specific route. Validate it first on `01184` (thin wheel
+  protection) and corrected `07306`, then reassess all ten traces.
+- Risk: this is a bounded feasibility study, not yet evidence that an MLLM
+  planner improves a fixed pipeline. Any eventual paper claim must report a
+  static-executor control and must not relabel static outputs as agent outputs.
