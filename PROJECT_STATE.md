@@ -328,24 +328,25 @@ new audit is requested. This is not the frozen object-mainline baseline.
 
 **Samples and outputs.** Inputs are exactly `data/redwood/partial/<id>.ply`
 for `01184, 05117, 05452, 06127, 06145, 06188, 06830, 07136, 07306, 09639`.
-The accepted ten-sample metric summary is
-`workspace/agentic_prior_adaptation_probe_20260906/redwood10_corrected_view/offline_metrics/redwood10_conservative_07306_summary.json`:
-offline CD-L1x100 `1.5834`, EMDx100 `2.3504` at 16,384 points, metric seed
-6145. GT was read only by this completed offline audit. The nine original
-per-sample trace roots are `workspace/agentic_prior_adaptation_probe_20260906/<id>/`.
-The user-approved 07306 front-facing re-plan is
-`workspace/agentic_prior_adaptation_probe_20260906/07306_front_view_replan/`;
-its final conservative decoded 100k PLY is
-`gaussian/07306/decoded/partial_anchored_gaussian_decoded_100k.ply`.
+The consolidated ten-sample metric summary is
+`workspace/agentic_redwood10_final_20260907/metrics/redwood10_offline.json`:
+offline CD-L1x100 `1.5834`, EMDx100 `2.3454` at 16,384 points, metric seed
+6145. GT was read only by this completed offline audit. All complete per-sample
+traces are retained under `workspace/agentic_redwood10_final_20260907/samples/<id>/`,
+with the selected predictions collected in
+`workspace/agentic_redwood10_final_20260907/final_predictions/`. The
+user-approved 07306 front-facing re-plan is retained as
+`workspace/agentic_redwood10_final_20260907/samples/07306/`; its selected
+conservative decoded 100k PLY is `final/agent_selected_100k.ply`.
 The direct trace initially accepted the pre-edit registered carrier, but the
 reported ten-sample summary intentionally substitutes this audited conservative
 07306 decode. All final clouds contain 100,000 slots.
 
 **Observation and prompt contract.** The planner selected the bounded
 partial-only convex-hull candidate `base` for all samples except 07306. The
-07306 rear-view failure was retained separately; the accepted retry selected
-the explicit antipodal `opposite_180` candidate before any semantic/prior
-tool was run. Qwen received `raw_depth.png` and the following prompts,
+accepted 07306 re-plan selected the explicit antipodal `opposite_180`
+candidate before any semantic/prior tool was run. Qwen received `raw_depth.png`
+and the following prompts,
 verbatim (negative prompt: `' '` for every sample):
 ```
 01184: 生成一张图像，参考图1遮挡情况下的深度图，并遵循以下描述：完整的rubbish bin，纯白背景
@@ -384,7 +385,8 @@ collision-free decode. The 07306 editable Gaussian motion is capped at 2% of
 the partial diagonal; it anchors 26.427% of carrier slots while retaining the
 complete unobserved prior support. No decision used GT, CD, or EMD.
 
-**Approved constraints.** Do not overwrite the failed rear-view 07306 trace;
-it is the auditable counterexample for observation re-planning. Do not
-silently promote this probe over the frozen object mainline, and do not loosen
-the agent-local 2% trust region without a cross-sample wheel/detail audit.
+**Approved constraints.** The old rejected rear-view 07306 trace was retired
+during consolidation; do not overwrite the delivered front-facing re-plan.
+Do not silently promote this probe over the frozen object mainline, and do not
+loosen the agent-local 2% trust region without a cross-sample wheel/detail
+audit.

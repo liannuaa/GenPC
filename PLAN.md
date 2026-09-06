@@ -403,7 +403,7 @@
   selected the partial-only base view, depth-conditioned semantic completion,
   native prior generation, cross-camera global alignment, residual Sim(3),
   one prior-protected local adaptation, then acceptance. The accepted output
-  is `workspace/agentic_prior_adaptation_probe_20260906/01184/final/agent_selected_100k.ply`.
+  is `workspace/agentic_redwood10_final_20260907/samples/01184/final/agent_selected_100k.ply`.
   Its verifier record is stored with the state trace; CD/EMD was not exposed
   to any decision.
 - [x] Expand the same isolated controller to the remaining Redwood-10 samples
@@ -411,18 +411,18 @@
   and `09639`). All tool decisions are state-hashed and no GT/CD/EMD was
   exposed before `ACCEPT`.
   - The first `07306` trace exposed a real agent failure: the legacy
-    convex-hull saved-view tie-break selected the semantic rear. A separate,
-    immutable retry at
-    `workspace/agentic_prior_adaptation_probe_20260906/07306_front_view_replan/`
-    retained the antipodal `opposite_180` view as an explicit agent action.
+    convex-hull saved-view tie-break selected the semantic rear. The retained
+    front-facing re-plan at
+    `workspace/agentic_redwood10_final_20260907/samples/07306/` selected the
+    antipodal `opposite_180` view as an explicit agent action.
     Its no-GT verifier energy fell from `0.18598` (old rear trace) to
     `0.10856` after the identical global/residual Sim(3) executors. Its
     offline-only accepted result is CD-L1x100 `3.1593`, EMDx100 `3.3834`,
     compared with `22.9567/26.8012` for the rejected rear interpretation.
   - The ten accepted traces, with this corrected `07306` substituted and no
-    post-acceptance metric feedback, are recorded under
-    `workspace/agentic_prior_adaptation_probe_20260906/redwood10_corrected_view/`.
-    Their offline audit is CD-L1x100 `1.59054`, EMDx100 `2.35776`.
+    post-acceptance metric feedback, are consolidated under
+    `workspace/agentic_redwood10_final_20260907/`. A fresh offline audit at
+    16,384 points reports CD-L1x100 `1.58338`, EMDx100 `2.34539`.
 - [x] Diagnose why the corrected `07306` still looked less surface-tight than
   the retained static mainline result. The front-view registered prior is not
   the problem: its partial-to-prior 1% coverage is `88.35%`, higher than the
