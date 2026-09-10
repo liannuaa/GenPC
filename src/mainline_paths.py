@@ -17,6 +17,7 @@ REDWOOD10_SAMPLE_IDS = (
 
 REGISTERED_PRIOR_FILENAME = "camera1_amplified_registered_100k.ply"
 GAUSSIAN_PREDICTION_FILENAME = "partial_anchored_gaussian_decoded_100k.ply"
+TRELLIS_PREDICTION_FILENAME = "complete_100k.ply"
 
 
 def redwood_partial_root(project_root: Path) -> Path:
@@ -57,6 +58,21 @@ def locate_gaussian_prediction(prediction_root: Path, sample: str) -> Path:
     if canonical.is_file():
         return canonical
     return Path(prediction_root) / str(sample) / GAUSSIAN_PREDICTION_FILENAME
+
+
+def trellis_prediction_path(run_root: Path, sample: str) -> Path:
+    """Canonical fusion-free prediction produced by the object mainline."""
+    return Path(run_root) / "final" / str(sample) / TRELLIS_PREDICTION_FILENAME
+
+
+def locate_mainline_prediction(prediction_root: Path, sample: str) -> Path:
+    """Locate the current prediction while accepting a direct ``final`` root."""
+    root = Path(prediction_root)
+    canonical = trellis_prediction_path(root, sample)
+    if canonical.is_file():
+        return canonical
+    direct = root / str(sample) / TRELLIS_PREDICTION_FILENAME
+    return direct if direct.is_file() else canonical
 
 
 def sample_dir(cfg, sample: str) -> Path:

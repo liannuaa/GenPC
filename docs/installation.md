@@ -4,9 +4,8 @@
 
 The released mainline was tested on Linux with Python 3.10, CUDA 12.6,
 PyTorch 2.6.0, and a 24 GB NVIDIA GPU. Pixal3D runs in low-VRAM mode at the
-frozen 1024 cascade resolution. Registration and Gaussian editing can use CPU
-for their numerical work, but Qwen, Pixal3D, MoGe, RMBG, and metric evaluation
-require CUDA.
+frozen 1024 cascade resolution. Qwen, Pixal3D, MoGe, RMBG, differentiable
+registration, TRELLIS, and metric evaluation require CUDA.
 
 The exact Python package set is defined in `pyproject.toml`. Do not substitute
 the Qwen `diffusers==0.36.0` and `transformers==4.57.6` pins with the newer
@@ -33,11 +32,23 @@ For the Pixal stage, install the supplemental Python packages as well:
 
 ```bash
 python -m pip install '.[pixal]'
+python -m pip install '.[differentiable-registration]'
 ```
 
 Then follow the external [Pixal3D installation guide](models.md#pixal3d) for
 its TRELLIS.2 / O-Voxel runtime setup. Set `PIXAL3D_SOURCE` to that checkout
 before running `scripts/run_pixal3d_gpt_batch.py`.
+
+Create a separate environment for the official TRELLIS checkout. Its exact
+CUDA packages should follow the upstream repository rather than being mixed
+into `genpc`; the object runner accepts the interpreter explicitly:
+
+```bash
+python scripts/run_object_mainline.py ... \
+  --trellis-python /path/to/trellis-env/bin/python \
+  --trellis-repo /path/to/TRELLIS \
+  --trellis-model /path/to/TRELLIS-image-large
+```
 
 ## Optional offline CD/EMD extensions
 
@@ -57,8 +68,8 @@ Gaussian editing.
 
 ## Verify the codebase
 
-Unit tests exercise deterministic registration, projection, and Gaussian
-editing primitives without model weights:
+Unit tests exercise deterministic registration, projection, condition
+materialization, and artifact contracts without model weights:
 
 ```bash
 python -m pytest -q

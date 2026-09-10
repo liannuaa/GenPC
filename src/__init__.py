@@ -1,1 +1,1 @@
-"""Reusable implementation modules for the fixed GenPC+ mainline."""
+"""Reusable implementation modules for the GenPC++ mainline."""

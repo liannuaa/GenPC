@@ -60,6 +60,8 @@ def main() -> None:
     parser.add_argument("--collection-root", type=Path, required=True)
     parser.add_argument("--samples", nargs="+", required=True)
     parser.add_argument("--decision-name", default="03_generate_prior.json")
+    parser.add_argument("--cache-key", default="initial",
+                        help="Execution-cache namespace; use a new key after an upstream replan.")
     args = parser.parse_args()
 
     collection = args.collection_root.resolve()
@@ -73,7 +75,10 @@ def main() -> None:
         if decision.action != GENERATE_PRIOR:
             raise ValueError(f"{sample}: batch Pixal runner only accepts {GENERATE_PRIOR}")
 
-    cache_root = collection / "_shared_pixal_execution"
+    cache_key = str(args.cache_key).strip()
+    if not cache_key or any(part in {"", ".", ".."} for part in Path(cache_key).parts):
+        raise ValueError("--cache-key must be a non-empty relative namespace")
+    cache_root = collection / "_shared_pixal_execution" / cache_key
     cache_input = cache_root / "input"
     cache_output = cache_root / "output"
     for sample, root in roots:

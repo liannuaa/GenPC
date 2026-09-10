@@ -3,12 +3,15 @@ from pathlib import Path
 from src.mainline_paths import (
     GAUSSIAN_PREDICTION_FILENAME,
     REGISTERED_PRIOR_FILENAME,
+    TRELLIS_PREDICTION_FILENAME,
     gaussian_prediction_path,
     locate_gaussian_prediction,
+    locate_mainline_prediction,
     locate_registered_prior,
     redwood_ground_truth_root,
     redwood_partial_root,
     registered_prior_path,
+    trellis_prediction_path,
 )
 
 
@@ -37,3 +40,15 @@ def test_gaussian_prediction_keeps_legacy_flat_fallback(tmp_path: Path) -> None:
     canonical.parent.mkdir(parents=True)
     canonical.touch()
     assert locate_gaussian_prediction(tmp_path, "01184") == canonical
+
+
+def test_current_mainline_prediction_uses_fusion_free_final_directory(tmp_path: Path) -> None:
+    canonical = trellis_prediction_path(tmp_path, "01184")
+    assert canonical == tmp_path / "final" / "01184" / TRELLIS_PREDICTION_FILENAME
+    assert locate_mainline_prediction(tmp_path, "01184") == canonical
+
+    direct_root = tmp_path / "published"
+    direct = direct_root / "01184" / TRELLIS_PREDICTION_FILENAME
+    direct.parent.mkdir(parents=True)
+    direct.touch()
+    assert locate_mainline_prediction(direct_root, "01184") == direct

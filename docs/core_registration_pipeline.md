@@ -1,169 +1,168 @@
-# Fixed Pixal--MoGe--partial registration and Gaussian completion
+# Fusion-free object completion and registration
 
-This is the canonical method specification for the public GenPC+ mainline.
-Installation and upstream checkpoints are documented in
-[Installation](installation.md) and [Model assets](models.md). All parameters
-below are shared across every input; Redwood-10 is only the released evaluation
-layout. No ground truth, CD, EMD, category-specific path, or sample-specific
-router is available to registration or editing.
+This document is the canonical specification of the current GenPC++ object
+mainline. The scene-level wrapper is documented separately. Historical
+Gaussian fusion, PosteriorAdapter, axis-stretch, SDS, and sample-specific
+recovery experiments are not part of this route.
 
-## Scope and notation
+## 1. Problem and inference firewall
 
-Let \(P\) be an observed partial point cloud, \(X\) the 100k-point Pixal
-prior, \(C_1\) the saved partial-camera view, and \(C_2\) the Pixal-input
-camera. The method estimates only proper isotropic Sim(3) transforms during
-registration. Local scan/prior disagreement is handled later by the bounded
-Gaussian edit; it is not hidden inside a non-rigid registration module.
+Given a partial point cloud \(P\), the method predicts a complete 100k-point
+cloud \(X^*\). Inference may use the partial-derived camera, depth, semantic
+images, generated priors, and their diagnostic residuals. It must not read
+ground truth, CD, EMD, or dataset-specific geometry rules.
 
-## Inputs
+All transforms are proper isotropic similarities,
 
-For a partial point cloud \(P\) under `data/redwood/partial` (with offline
-ground truth under `data/redwood/gt`), Camera-1 \(C_1\) is selected deterministically
-from a 256-view Fibonacci sphere: hidden-point-removal coverage is evaluated on
-10k FPS points, and a partial-depth front/back tie-break resolves the selected
-direction. The visible partial points are rasterised as a normalized **grayscale
-depth** image, hole-filled with OpenCV, and completed by Qwen into semantic
-image \(I\). The stage also saves \(C_1\) and per-point image coordinates
-\(u_P\).
+\[
+T(x)=sRx+t,\qquad R\in SO(3),\;s>0.
+\]
 
-A GPT clarity edit of \(I\) provides the Pixal input image. Its prompt is
-recorded with the asset and restricts the edit to material/detail cleanup; the
-following Sim(3) route makes no assumption about its absolute image scale.
-Pixal3D outputs a textured complete mesh and a 100k-point prior \(X\); its own
-input image also gives a MoGe reconstruction \(M_2\) in the Pixal camera frame
-\(C_2\).
+The object name is used only as an image-generation prompt. Registration has
+one shared configuration across categories and datasets.
 
-For an end-to-end run, the FP16 MoGe observation of the already preprocessed
-Pixal input is materialized with the Pixal assets and verified against the
-input-image hash before native registration.  This is an implementation cache:
-it uses the same MoGe tensor contract and does not alter the camera estimate,
-registration objective, or any data-dependent decision.
+## 2. Observation and initial complete prior
 
-For another dataset, the semantic stage needs an object description in the
-copied YAML configuration's `prompt_overrides` map. If a dataset records the
-camera that generated its partial scan, the optional `--viewpoint-root` input
-may provide `<sample>/viewpoint.npy`; this uses that partial-only Camera-1 for
-depth rasterisation rather than reselecting a view. It never reads the complete
-shape. Registration and Gaussian editing do not consume the object description;
-their parameters and route remain fixed.
+The saved-view stage selects a deterministic partial-derived camera, rasterizes
+its grayscale depth and stores `camera.pth` plus the point/pixel map. Qwen
+completes that observation into a semantic RGB image. An external clarity edit
+may improve appearance but must retain the saved camera, foreground location,
+silhouette, scale, pose, and articulation.
 
-## Registration
+Pixal3D converts the image into a textured GLB and an ordered 100k-point
+carrier. Its native MoGe camera observation is retained. The existing
+Pixal--MoGe--partial two-camera procedure estimates an initial Sim(3): native
+Pixal-to-MoGe placement, a pixel-indexed bridge to the physical Camera-1
+partial, and broad-to-narrow visible 2D+3D refinement. This initial prior is
+not the final prediction; it supplies complete topology, texture, and a stable
+camera frame for residual reasoning.
 
-The registration is deliberately staged so that global pose and local
-partial-scan correction do not compete.
+## 3. Camera-consistent posterior image conditions
 
-1. **Native Pixal--MoGe alignment.** Pixal export metadata supplies its camera
-convention and a deterministic analytic initial transform. A small proper
-Sim(3) refinement optimizes rendered silhouette, visible depth, boundary and
-3-D agreement between \(X\) and the MoGe cloud \(M_2\). It produces the
-native Pixal-frame observation and avoids an unconstrained global PCA search.
+The registered textured prior is rendered in FRONT, SIDE, and BACK orbit views
+defined relative to Camera-1. The same cameras project the physical partial.
+For every view, the method records prior RGB, the shared low-frequency target,
+partial depth, and remaining local residual.
 
-2. **Two-camera bridge.** The same semantic image is used to form a MoGe cloud
-in the saved partial camera. Pixel-indexed correspondences connect
-\(u_P\) to this cloud. The bridge estimates a proper isotropic Sim(3), carries
-the native Pixal prior into Camera-1 coordinates, and refines only the
-remaining camera-chain error using saved-view silhouette/depth and visible
-3-D pairs.
+The residual is decomposed once in 3D:
 
-3. **Broad Camera-1 basin capture.** The coupled result may still sit outside
-the overlap basin when the Camera-1/Camera-2 bridge has a large monocular
-gauge error. Pixel-indexed visible 3-D pairs propose the same fixed fractions
-of one robust Sim(3) residual: \(1/8,1/4,1/2,3/4,1\), together with identity.
-The proposals use a shared broad trust region (30 degrees, scale
-\([0.45,2.40]\), translation \(1.25\) partial-bbox diagonals). A fixed
-Camera-1 visible 2-D+3-D objective selects one candidate for every sample.
-Thus the stage is a single global capture operation, not a confidence gate,
-category branch, or GT-selected route.
+\[
+d_i = p_i-x_{\nu(i)} = d_i^{\mathrm{low}}+d_i^{\mathrm{local}},
+\]
 
-4. **Narrow residual and Camera-1 continuation.** The ordinary pixel Sim(3)
-residual then aligns native MoGe evidence, bridge matches, partial surface,
-and saved-view render inside its original local trust region. The final
-continuation applies the fixed three-level Camera-1 update, followed by a
-1-degree wide tilt and a final 1-degree continuation. Every stage is applied;
-the same deterministic objective selects from each fixed candidate lattice.
-Within a level, the fixed independent candidate scores may run concurrently,
-but they are consumed in their original proposal order and use the same
-deterministic minimum rule.
+where \(\nu(i)\) is the current prior support of partial sample \(p_i\).
+\(d^{\mathrm{low}}\) is a smooth graph field anchored strongly in already
+consistent regions; \(d^{\mathrm{local}}\) is computed only after subtracting
+that field. Thresholds are derived from median point spacing and residual
+quantiles, not class or part labels.
 
-The final registered complete body is
-`registration/<sample>/final/camera1_amplified_registered_100k.ply`.
+Image editing is deliberately split into two auditable actions:
 
-Frozen registration search settings:
+1. one joint three-view edit applies only the shared low-frequency change;
+2. one residual-only edit per view corrects locally supported contours without
+   repeating the global change.
 
-| Stage | Shared setting |
+The prompts require connected geometry and protection of unsupported regions.
+A deterministic framing operation then restores each edited foreground to the
+original view centre and isotropic image scale. These normalized images are
+the registration conditions.
+
+## 4. Complete-prior regeneration
+
+TRELLIS-image-large receives the three edited images and generates one new
+complete mesh and Gaussian asset. The fixed release settings are:
+
+| Setting | Value |
 | --- | --- |
-| Camera-1 ↔ Camera-2 bridge | 3 px transfer radius; 30,000 deterministic fit matches; 32,000-point local subset |
-| Coupled two-camera residual | 32,000 points; at most 10,000 Camera-1 visible pairs; 64 robust-fit trials |
-| Broad Camera-1 basin capture | identity plus \(1/8,1/4,1/2,3/4,1\) pixel-pair residual fractions; 30 degrees; scale \([0.45,2.40]\); translation 1.25 partial-bbox diagonals |
-| Narrow visible pixel Sim(3) | 32,000 points; at most 10,000 Camera-1 visible pairs; 64 robust-fit trials |
-| Camera-1 continuation | 32,000 points; three standard levels: \((.006,.30^\circ,.006)\), \((.002,.10^\circ,.002)\), \((.0005,.025^\circ,.0005)\) |
-| Wide tilt continuation | \((.010,1.0^\circ,.010)\), \((.004,.35^\circ,.004)\), \((.001,.10^\circ,.001)\) |
-| Final tilt continuation | \((.010,1.0^\circ,.010)\), \((.004,.35^\circ,.004)\), \((.001,.10^\circ,.001)\) |
-| Candidate scoring | 8 independent CPU workers; proposal order and deterministic minimum selection are preserved |
+| mode | stochastic multi-image |
+| seed | 42 |
+| sparse sampler | 12 steps, CFG 7.5 |
+| structured-latent sampler | 12 steps, CFG 3.0 |
+| exported carrier | 100,000 mesh-surface samples |
 
-The registration runner also accepts `--sample-workers N` to execute only
-independent samples in separate processes. Each sample still performs the
-native-MoGe, bridge, joint, amplified, wide-tilt, and final stages in that
-unchanged order. This is a throughput-only option (`1` is the serial default);
-it never batches point clouds into one objective or changes frozen parameters.
+The official multi-image API consumes image embeddings but no camera
+extrinsics. Consequently, FRONT/SIDE/BACK provide shape evidence rather than
+an assumed calibrated coordinate frame in the exported TRELLIS asset. The
+subsequent registration explicitly recovers that frame.
 
-## Partial-anchored Gaussian edit
+## 5. TRELLIS-to-partial registration
 
-Registration cannot remove genuine prior/scan shape disagreement. The final
-stage interprets the 100k registered Pixal samples as Gaussian means. It does
-not concatenate point clouds or discard unobserved Pixal support.
+Registration uses two complementary evidence sources: the edited views capture
+semantic orientation and complete silhouette, while Camera-1 supplies physical
+depth and visible 3D support.
 
-- Saved Camera-1 and six signed-PCA virtual views supply only positive,
-  mutual pixel-overlap correspondences. Missing partial pixels are not treated
-  as empty space.
-- Collision-free partial matches are fixed Dirichlet controls on a kNN graph
-  over the Pixal means. A screened harmonic solve propagates their displacement
-  along local surface structure.
-- Six self-renders of the original Pixal prior softly protect unobserved
-  geometry. Components without controls remain unchanged.
-- The decoder replaces at most one Pixal slot per partial anchor, so every
-  final cloud retains exactly 100,000 slots and the complete prior remains the
-  body carrier.
+### 5.1 Semantic basin capture
 
-Frozen shared edit parameters:
+For each edited condition, a finite yaw/pitch/roll render set is compared with
+the regenerated asset using appearance features, spatial features, silhouette,
+aspect ratio, and coarse RGB layout. A joint shortlist selects a proper shared
+orientation whose three proposals are mutually consistent.
 
-| Parameter | Value |
-| --- | ---: |
-| saved/virtual match radius | 1.0 px |
-| virtual views / resolution | 6 / 384 |
-| anchor residual cap | 0.075 partial-bbox diagonal |
-| displacement cap | 0.075 partial-bbox diagonal |
-| graph neighbors / edge ratio | 8 / 1.8 |
-| graph screening | 0.0015 |
-| self-protection views / weight | 6 / 0.01 |
-| protection exclusion radius | 0.10 partial-bbox diagonal |
-| remote gain | 1.0 |
-| CG tolerance / iterations | 1e-5 / 240 |
+Starting from that basin, the official NVIDIA `nvdiffrast` rasterizer and
+PyTorch3D SO(3) maps optimize one shared object Sim(3). Small side/back orbit
+residuals are nuisance variables that absorb image-generation camera drift;
+they are not applied to the physical object. Camera-1/front remains the gauge.
+The fixed continuation is:
 
-The final prediction is
-`gaussian/<sample>/decoded/partial_anchored_gaussian_decoded_100k.ply`.
+| Pass | Resolution | Steps | Purpose |
+| --- | ---: | ---: | --- |
+| semantic capture | 128 | 420 | enter the correct complete-shape basin |
+| Camera-1 capture | 256 | 400 | one partial-to-prior inverse Sim(3), then rendered refinement |
+| camera polish | 256 | 500 | small shared-object and nuisance-orbit refinement |
 
-## Scene-level wrapper
+Per-pass object trust regions use the shared defaults: 3 degrees rotation,
+1.025 scale ratio, and 0.02 partial-diagonal translation. The Camera-1 inverse
+capture is bounded by 6 degrees, 1.08 scale ratio, and 0.06 diagonal
+translation.
 
-The optional scene wrapper is not an alternative registration method. It runs
-Pixal MoGe-2 once on an RGB scene, uses saved Codex GPT binary instance masks
-to extract scene-frame partials, and uses each such mask-indexed MoGe subset as
-the instance partial. A direct GPT RGB semantic completion—not a
-depth-to-semantic stage—provides the Pixal input and Camera-1 semantic image.
-Because the partials remain in the shared Pixal MoGe camera coordinate system,
-scene mode stops after native Pixal--MoGe alignment and the camera-2 →
-scene-camera bridge; it deliberately does *not* run the object mainline's
-joint/amplified/wide-tilt/final Camera-1 continuation. The resulting Sim(3)
-already maps each Pixal mesh into the shared scene frame. It is baked into each
-textured GLB's vertices and the meshes are composed without Gaussian fusion or
-mesh pruning. Exact FCL contact detection then moves only the scene-MoGe-farther
-mesh along the original camera-depth axis by the smallest collision-free
-amount—without a scale-based displacement cap or a lateral adjustment. See
-[Scene-level completion](scene_completion.md) for the complete artifact
-contract.
+### 5.2 Physical Camera-1 residual Sim(3)
 
-## Evaluation firewall
+The final stage retains all partial support instead of discarding a fixed
+high-residual fraction. It searches a bounded residual proper Sim(3) and scores
+each candidate with robust partial-to-prior distance plus the saved Camera-1
+depth/visible-surface objective. The accepted shared bounds are 22 degrees,
+1.14 scale ratio, and 0.18 partial diagonal; population 5, 14 iterations, seed
+6145, and visible-objective weight 1.2. Semantic silhouette has zero weight in
+this last pass because Camera-1 physical evidence is the authority.
 
-`scripts/evaluate_mainline_redwood.py` is an offline utility. It may read
-ground truth only after predictions are frozen. Its CD-L1/EMD values must not
-change registration, edit parameters, candidate selection, or routing.
+The optimization never uses GT or complete-cloud metrics. It transforms every
+one of the 100k regenerated prior samples and outputs
+`final/<sample>/complete_100k.ply`.
+
+## 6. What is intentionally absent
+
+The current prediction is the registered regenerated prior. There is no point
+concatenation, voxel fusion, point deletion, local Gaussian edit, non-rigid
+warp, or metric-selected fallback. This keeps complete support and makes the
+method boundary clear while the regeneration and registration stages are
+validated across datasets.
+
+## 7. Artifact contract
+
+For a run root and sample `<id>`:
+
+```text
+inputs/partial/<id>.ply
+inputs/camera/<id>/{depth.png,img.png,camera.pth,point_uv.npy,...}
+inputs/pixal/<id>/{gpt_image.png,prompt.txt,pixal3d.glb,pixal3d_sampled_100k.ply,...}
+pixal_registration/<id>/final/camera1_amplified_registered_100k.ply
+multiview/<id>/render/
+multiview/<id>/evidence/
+multiview/<id>/edits/
+multiview/<id>/conditions/{front,side,back}.png
+trellis/<id>/{trellis_mesh_raw.glb,trellis_gaussian.ply,trellis_mesh_sampled_100k.ply}
+trellis_registration/<id>/{semantic_capture,camera_capture,camera_polish,final}/
+final/<id>/complete_100k.ply
+manifests/<id>.json
+```
+
+`scripts/run_object_mainline.py` owns this contract and resumes at file-level
+checkpoints. Its manifest records available input/output hashes, commands,
+`ground_truth_used=false`, and `fusion_used=false`.
+
+## 8. Offline evaluation
+
+`scripts/evaluate_mainline_redwood.py` is a separate process that locates only
+published `complete_100k.ply` predictions. It is run after inference is frozen;
+its outputs cannot alter view choice, image editing, generation, registration,
+or stopping.

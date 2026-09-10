@@ -16,20 +16,38 @@ from typing import Any
 
 
 SELECT_VIEW = "SELECT_VIEW"
+REPLAN_VIEW = "REPLAN_VIEW"
+RESTORE_ATTEMPT = "RESTORE_ATTEMPT"
+RESCUE_GLOBAL = "RESCUE_GLOBAL"
 COMPLETE_SEMANTIC = "COMPLETE_SEMANTIC"
+REFINE_SEMANTIC = "REFINE_SEMANTIC"
+SELECT_CONDITIONING_IMAGE = "SELECT_CONDITIONING_IMAGE"
 GENERATE_PRIOR = "GENERATE_PRIOR"
 ALIGN_GLOBAL = "ALIGN_GLOBAL"
 REFINE_ALIGNMENT = "REFINE_ALIGNMENT"
 ADAPT_LOCAL = "ADAPT_LOCAL"
+ADAPT_AXIS_SCALE = "ADAPT_AXIS_SCALE"
+REOBSERVE = "REOBSERVE"
+REGENERATE_PRIOR = "REGENERATE_PRIOR"
+UPDATE_POSTERIOR = "UPDATE_POSTERIOR"
 ACCEPT = "ACCEPT"
 
 ACTION_NAMES = (
     SELECT_VIEW,
+    REPLAN_VIEW,
+    RESTORE_ATTEMPT,
+    RESCUE_GLOBAL,
     COMPLETE_SEMANTIC,
+    REFINE_SEMANTIC,
+    SELECT_CONDITIONING_IMAGE,
     GENERATE_PRIOR,
     ALIGN_GLOBAL,
     REFINE_ALIGNMENT,
     ADAPT_LOCAL,
+    ADAPT_AXIS_SCALE,
+    REOBSERVE,
+    REGENERATE_PRIOR,
+    UPDATE_POSTERIOR,
     ACCEPT,
 )
 
@@ -39,11 +57,31 @@ ACTION_NAMES = (
 ALLOWED_ACTIONS = {
     "view_candidates": (SELECT_VIEW,),
     "semantic_pending": (COMPLETE_SEMANTIC,),
-    "prior_pending": (GENERATE_PRIOR,),
+    # The semantic completion is the Camera-1 geometric observation.  A
+    # planner may submit one explicit, pose-locked external clarity edit as
+    # the Pixal conditioning image before prior generation.  The artifact is
+    # state-bound and recorded; the planner never edits geometry directly.
+    "prior_pending": (REFINE_SEMANTIC, GENERATE_PRIOR),
+    # A clarity edit is a single, explicit observation-preparation action.
+    # Its conditioning role remains a discrete decision: the planner can keep
+    # the camera-aligned Qwen image if the candidate violates observed depth.
+    "conditioning_diagnosis": (SELECT_CONDITIONING_IMAGE,),
+    "prior_ready": (GENERATE_PRIOR,),
     "global_alignment_pending": (ALIGN_GLOBAL,),
-    "alignment_diagnosis": (REFINE_ALIGNMENT, ADAPT_LOCAL, ACCEPT),
-    "adaptation_diagnosis": (ADAPT_LOCAL, ACCEPT),
-    "final_diagnosis": (ADAPT_LOCAL, ACCEPT),
+    # Bad global registration is evidence about the observation, not a reason
+    # to force local deformation. A replan selects one of the finite,
+    # partial-only saved views and restarts only the upstream branch.
+    "alignment_diagnosis": (RESCUE_GLOBAL, REPLAN_VIEW, RESTORE_ATTEMPT, REFINE_ALIGNMENT, ADAPT_LOCAL, ACCEPT),
+    "rescue_diagnosis": (REPLAN_VIEW, RESTORE_ATTEMPT, REFINE_ALIGNMENT, ACCEPT),
+    "adaptation_diagnosis": (REPLAN_VIEW, RESTORE_ATTEMPT, ADAPT_AXIS_SCALE, ADAPT_LOCAL, ACCEPT),
+    # A supported camera-axis scale is a whole-carrier initializer and must
+    # precede local Gaussian editing. The alternative action applies the
+    # ordinary local edit directly when scale evidence is absent.
+    "final_diagnosis": (REPLAN_VIEW, RESTORE_ATTEMPT, ACCEPT),
+    "axis_scale_diagnosis": (REPLAN_VIEW, RESTORE_ATTEMPT, ACCEPT),
+    # Compact posterior-agent contract.  Continuous pose, scale, transport,
+    # and deformation parameters are intentionally absent from the action.
+    "posterior_diagnosis": (REOBSERVE, REGENERATE_PRIOR, UPDATE_POSTERIOR, ACCEPT),
     "accepted": (),
 }
 
@@ -151,6 +189,12 @@ class AgentDecision:
             raise ValueError("agent decision requires a non-empty rationale")
         if not self.planner:
             raise ValueError("agent decision must identify the planner")
+        if self.action == REFINE_SEMANTIC and not str(self.arguments.get("source", "")).strip():
+            raise ValueError("REFINE_SEMANTIC requires an explicit external source image")
+        if self.action == SELECT_CONDITIONING_IMAGE and self.arguments.get("source") not in {"qwen", "clarity"}:
+            raise ValueError("SELECT_CONDITIONING_IMAGE source must be qwen or clarity")
+        if self.action == UPDATE_POSTERIOR and self.arguments:
+            raise ValueError("UPDATE_POSTERIOR does not accept agent-selected numerical parameters")
 
     def as_dict(self) -> dict[str, Any]:
         return {

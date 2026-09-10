@@ -164,6 +164,16 @@ def main() -> None:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--fp16", action="store_true")
+    parser.add_argument(
+        "--refine",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "Apply silhouette/depth residual correction after the analytic "
+            "camera initialization. Use --no-refine to inspect the pure "
+            "camera-derived Pixal-to-MoGe result."
+        ),
+    )
     args = parser.parse_args()
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
@@ -199,32 +209,48 @@ def main() -> None:
     pixal_metadata = json.loads(args.pixal_metadata.read_text(encoding="utf-8"))
     camera = pixal_metadata["camera"]
     analytic_initial = analytic_pixal_to_moge_initial(prior, moge, float(camera["distance"]))
-    mask_translation_step, mask_translation_info = visible_mask_translation_step(
-        moge, apply_transform(prior, analytic_initial), projector
+    analytic_registered = apply_transform(prior, analytic_initial)
+    analytic_score = pixal_moge_render_score(
+        moge, analytic_registered, projector,
+        moge_colors=moge_colors, prior_colors=prior_colors,
     )
-    initial = mask_translation_step @ analytic_initial
-    registered, transform, trace = local_pixal_moge_refine(
-        prior, moge, projector, initial, moge_colors=moge_colors, prior_colors=prior_colors
-    )
-    depth_step, depth_info = visible_ray_depth_scale_step(moge, registered, projector)
-    depth_choices = []
-    for fraction in (0.0, .5, .75, 1.0):
-        candidate_step = np.eye(4, dtype=np.float64)
-        candidate_step[:3, :3] *= 1.0 + float(fraction) * (float(depth_step[0, 0]) - 1.0)
-        candidate = apply_transform(registered, candidate_step)
-        score = pixal_moge_render_score(
-            moge, candidate, projector, moge_colors=moge_colors, prior_colors=prior_colors
+    if args.refine:
+        mask_translation_step, mask_translation_info = visible_mask_translation_step(
+            moge, analytic_registered, projector
         )
-        depth_choices.append((score, fraction, candidate_step, candidate))
-    depth_score, selected_depth_fraction, selected_depth_step, registered = min(
-        depth_choices, key=lambda item: item[0]["objective"]
-    )
-    depth_info["selected_fraction"] = selected_depth_fraction
-    depth_info["selected_score"] = depth_score
-    depth_info["candidate_scores"] = [
-        {"fraction": fraction, "score": score} for score, fraction, _, _ in depth_choices
-    ]
-    transform = selected_depth_step @ transform
+        initial = mask_translation_step @ analytic_initial
+        registered, transform, trace = local_pixal_moge_refine(
+            prior, moge, projector, initial,
+            moge_colors=moge_colors, prior_colors=prior_colors,
+        )
+        depth_step, depth_info = visible_ray_depth_scale_step(moge, registered, projector)
+        depth_choices = []
+        for fraction in (0.0, .5, .75, 1.0):
+            candidate_step = np.eye(4, dtype=np.float64)
+            candidate_step[:3, :3] *= 1.0 + float(fraction) * (float(depth_step[0, 0]) - 1.0)
+            candidate = apply_transform(registered, candidate_step)
+            score = pixal_moge_render_score(
+                moge, candidate, projector,
+                moge_colors=moge_colors, prior_colors=prior_colors,
+            )
+            depth_choices.append((score, fraction, candidate_step, candidate))
+        depth_score, selected_depth_fraction, selected_depth_step, registered = min(
+            depth_choices, key=lambda item: item[0]["objective"]
+        )
+        depth_info["selected_fraction"] = selected_depth_fraction
+        depth_info["selected_score"] = depth_score
+        depth_info["candidate_scores"] = [
+            {"fraction": fraction, "score": score}
+            for score, fraction, _, _ in depth_choices
+        ]
+        transform = selected_depth_step @ transform
+    else:
+        initial = analytic_initial.copy()
+        registered = analytic_registered
+        transform = analytic_initial.copy()
+        trace = {"before": analytic_score, "after": analytic_score, "trace": []}
+        mask_translation_info = {"accepted": False, "reason": "disabled_analytic_only"}
+        depth_info = {"accepted": False, "reason": "disabled_analytic_only"}
     stem = args.output_dir / "pixal_native_moge"
     target_cloud = o3d.geometry.PointCloud()
     target_cloud.points = o3d.utility.Vector3dVector(moge)
@@ -236,7 +262,10 @@ def main() -> None:
         Path(f"{stem}_projection.png"), args.pixal_input, moge, registered, projector
     )
     record = {
-        "method": "pixal_camera_anchored_native_moge_local_render_sim3",
+        "method": (
+            "pixal_camera_anchored_native_moge_local_render_sim3"
+            if args.refine else "pixal_camera_analytic_native_moge_sim3"
+        ),
         "strict_zero_shot": True,
         "ground_truth_cd_emd_used": False,
         "pixal_input": str(args.pixal_input.resolve()),
@@ -245,6 +274,7 @@ def main() -> None:
         "prior": str(args.prior.resolve()),
         "moge": moge_info,
         "registration": trace, "analytic_initial": analytic_initial,
+        "residual_refinement_enabled": bool(args.refine),
         "mask_translation": mask_translation_info, "camera_initialized": initial,
         "visible_ray_depth_scale": depth_info,
         "photometric_auxiliary": bool(prior_colors is not None and len(moge_colors) == len(moge)),

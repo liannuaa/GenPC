@@ -1,222 +1,157 @@
-# GenPC+: zero-shot complete point clouds from partial scans
+# GenPC++: zero-shot point-cloud completion with regenerated 3D priors
 
-GenPC+ recovers a complete 100k-point object from a single partial point
-cloud, without training or test-time ground truth. It keeps GenPC's
-deterministic saved-view depth construction, uses a Pixal3D image-conditioned
-prior, aligns it through a fixed two-camera 2D+3D Sim(3) procedure, and uses
-the partial only as anchored evidence for a smooth Gaussian edit.
+GenPC++ completes an object from a partial point cloud without task-specific
+training or test-time ground truth. The current object mainline first obtains
+a complete image-conditioned prior, exposes its discrepancy with the observed
+scan in three consistent views, regenerates a corrected complete 3D asset, and
+registers that asset back to the physical partial observation.
 
 ```text
 partial point cloud
-  → saved-view grayscale depth + Qwen semantic image
-  → external GPT clarity edit
-  → Pixal3D textured GLB + complete 100k-point prior
-  → native Pixal–MoGe alignment + two-camera bridge + Camera-1 Sim(3)
-  → partial-anchored multiview Gaussian edit/decode
-  → complete 100k-point prediction
+  -> saved-view depth and semantic completion
+  -> clarity-preserving image edit
+  -> initial textured Pixal prior
+  -> Pixal--MoGe--partial camera-aware Sim(3)
+  -> front/side/back residual evidence
+  -> shared low-frequency edit, then residual-only local edits
+  -> TRELLIS multi-image complete prior
+  -> semantic basin capture + Camera-1 visible 2D+3D Sim(3)
+  -> complete 100k-point prediction
 ```
 
-The method is one fixed route: it has no training stage, GT/CD/EMD-guided
-selection, category-specific parameter sets, or per-sample fallback branch.
+The released route currently ends at registration. It does not fuse partial
+points, delete prior points, or run Gaussian/non-rigid post-processing. Ground
+truth, CD, and EMD are available only to the separate offline evaluator.
 
 ## Documentation
 
 - [Installation](docs/installation.md)
 - [External model assets](docs/models.md)
-- [Fixed method and frozen parameters](docs/core_registration_pipeline.md)
-- [Scene-level instance completion](docs/scene_completion.md)
+- [Object mainline and fixed geometry](docs/core_registration_pipeline.md)
+- [Scene-level textured reconstruction](docs/scene_completion.md)
 - [Documentation index](docs/README.md)
 
 ## Repository layout
 
 ```text
-configs/mainline_redwood.yaml       fixed saved-view and Qwen configuration
-data/redwood/partial/               inference partial scans
-data/redwood/gt/                    offline-only ground truth
-scripts/run_semantic_stage.py       partial → depth/Qwen/camera assets
-scripts/run_pixal3d_gpt_batch.py    GPT image → Pixal GLB/100k prior
+configs/mainline_redwood.yaml          saved-view and semantic configuration
+data/redwood/{partial,gt}/             inference scans / offline-only GT
+scripts/run_object_mainline.py         resumable object-level entry point
+scripts/run_semantic_stage.py          partial -> depth and semantic image
+scripts/run_pixal3d_gpt_batch.py       image -> initial textured 3D prior
 scripts/run_fixed_pixal_moge_registration.py
-                                    fixed Pixal–MoGe–partial registration
-scripts/run_mainline_gaussian.py    partial-anchored edit and 100k decode
-scripts/evaluate_mainline_redwood.py offline CD-L1/EMD only
-scripts/run_scene_completion.py     separate scene-level instance wrapper
+                                       camera-aware initial-prior registration
+scripts/build_shared_local_residual_cards.py
+                                       three-view geometric edit evidence
+scripts/run_trellis_multiview_regeneration.py
+                                       edited views -> complete TRELLIS asset
+scripts/run_nvdiffrast_multiview_registration.py
+                                       rendered semantic basin capture
+scripts/run_partial_supported_sim3.py  final Camera-1 visible 2D+3D Sim(3)
+scripts/evaluate_mainline_redwood.py    offline CD-L1/EMD only
+scripts/run_scene_completion.py        independent scene-level wrapper
 ```
 
-## Data contract
+## Object mainline
 
-For a Redwood sample ID `<id>`, inference reads:
-
-```text
-data/redwood/partial/<id>.ply
-```
-
-Ground truth has the parallel path below, but is read exclusively by the
-offline evaluator after a prediction is frozen:
-
-```text
-data/redwood/gt/<id>.ply
-```
-
-The released fixed batch contains:
-
-```text
-01184  05117  05452  06127  06145
-06188  06830  07136  07306  09639
-```
-
-Other datasets may be run by arranging one partial PLY plus the same workspace
-artifact contract. Copy `configs/mainline_redwood.yaml`, add a semantic
-`prompt_overrides` label for each new sample ID, and pass that config to the
-semantic stage. The registration and Gaussian parameters remain shared; the
-pipeline never reads a category label during those stages.
-
-## End-to-end run
-
-Set the interpreter after following [Installation](docs/installation.md):
+The runner accepts any dataset path and an object-name prompt; its geometry is
+category independent. For example:
 
 ```bash
-PY=python
+PY=/opt/data/private/cr/miniconda3/envs/genpc/bin/python
 RUN=workspace/example_01184
-ID=01184
+
+CUDA_VISIBLE_DEVICES=0 $PY scripts/run_object_mainline.py \
+  --sample 01184 \
+  --object-type "blue wheeled trash bin" \
+  --partial data/redwood/partial/01184.ply \
+  --run-root "$RUN" \
+  --stage all
 ```
 
-### 1. Saved-view depth and Qwen semantic image
+`--stage all` resumes completed artifacts and pauses at either external image
+checkpoint. Calling the same command again continues from the newly supplied
+images. `--stage status` reports every checkpoint without loading a model.
 
-```bash
-CUDA_VISIBLE_DEVICES=0 $PY scripts/run_semantic_stage.py \
-  --output-root "$RUN/inputs/camera" \
-  --partial-root data/redwood/partial \
-  --samples "$ID"
-```
+### External image checkpoint 1: clarity
 
-This saves `depth.png`, `raw_depth.png`, `img.png`, `camera.pth`,
-`point_uv.npy`, and the Camera-1 foreground mask under
-`$RUN/inputs/camera/$ID/`.
-
-### 2. External GPT clarity edit
-
-Create the Pixal input directory and save the GPT result there:
-
-```bash
-mkdir -p "$RUN/inputs/pixal/$ID"
-# Save the geometry-preserving GPT edit as:
-#   $RUN/inputs/pixal/$ID/gpt_image.png
-# Save its exact prompt as:
-#   $RUN/inputs/pixal/$ID/prompt.txt
-```
-
-`img.png` is the geometry authority. GPT may clarify material/detail but must
-not rotate, mirror, recrop, rescale, recenter, add/remove parts, or change an
-articulated local pose. See [Model assets](docs/models.md#qwen-and-gpt-image-inputs).
-
-### 3. Pixal3D complete prior
-
-```bash
-CUDA_VISIBLE_DEVICES=0 $PY scripts/run_pixal3d_gpt_batch.py \
-  --input-root "$RUN/inputs/pixal" \
-  --output-root "$RUN/inputs/pixal" \
-  --ids "$ID"
-```
-
-Outputs include `pixal3d.glb`, `pixal3d_sampled_100k.ply`, camera metadata,
-the preprocessed input, and a hash-checked native FP16 MoGe observation.
-
-### 4. Fixed two-camera registration
-
-The Gaussian stage keeps a self-contained copy of the partial scan:
-
-```bash
-mkdir -p "$RUN/inputs/partial"
-cp "data/redwood/partial/$ID.ply" "$RUN/inputs/partial/$ID.ply"
-
-CUDA_VISIBLE_DEVICES=0 $PY scripts/run_fixed_pixal_moge_registration.py \
-  --samples "$ID" \
-  --pixal-root "$RUN/inputs/pixal" \
-  --camera-root "$RUN/inputs/camera" \
-  --partial-root "$RUN/inputs/partial" \
-  --output-root "$RUN/registration"
-```
-
-Registration always runs the globally shared broad Camera-1 pixel-Sim(3)
-capture before the narrow residual and continuations. The fixed visible
-2-D+3-D objective selects from identity and five shared residual fractions;
-it does not use a category route or ground truth. Pass
-`--no-coarse-basin-recovery` only for an ablation.
-
-The registered complete prior is:
+After the semantic stage, edit
+`$RUN/inputs/camera/01184/img.png` while preserving its camera, silhouette,
+pose, scale, crop, and articulated state. Save the result and exact prompt as:
 
 ```text
-$RUN/registration/<id>/final/camera1_amplified_registered_100k.ply
+$RUN/inputs/pixal/01184/gpt_image.png
+$RUN/inputs/pixal/01184/prompt.txt
 ```
 
-### 5. Partial-anchored Gaussian edit and decode
-
-```bash
-CUDA_VISIBLE_DEVICES=0 $PY scripts/run_mainline_gaussian.py \
-  --root "$RUN" \
-  --registration-root "$RUN/registration" \
-  --samples "$ID"
-```
-
-The final prediction is:
+The next run generates and registers the initial Pixal prior, renders its
+front/side/back views, and writes the residual evidence and prompts under:
 
 ```text
-$RUN/gaussian/<id>/decoded/partial_anchored_gaussian_decoded_100k.ply
+$RUN/multiview/01184/render/
+$RUN/multiview/01184/evidence/
 ```
 
-It always contains 100,000 slots. The unobserved Pixal body is retained rather
-than discarded or naively concatenated with the partial scan.
+### External image checkpoint 2: prior regeneration
+
+The second checkpoint is a two-stage edit so that global extent is not applied
+three times independently:
+
+1. Use the original three-view strip, residual board, and
+   `stage1_shared_low_frequency_prompt.txt` to create one shared edit at
+   `$RUN/multiview/01184/edits/shared_low_frequency_front_side_back.png`.
+2. For each view, use its split stage-1 image, residual card, full stage-1
+   strip, and per-view prompt. Save raw outputs as
+   `$RUN/multiview/01184/edits/local_raw/{front,side,back}.png`.
+
+The runner restores foreground centre and isotropic framing, generates the
+TRELLIS asset, and performs the fixed registration chain. The prediction and
+complete hash/provenance manifest are:
+
+```text
+$RUN/final/01184/complete_100k.ply
+$RUN/manifests/01184.json
+```
+
+Individual stages can be resumed with `upstream`, `prepare-edits`,
+`materialize-edits`, `trellis`, and `register`. No stage accepts a ground-truth
+path.
 
 ## Offline evaluation
 
-Compile the optional CUDA metric extensions first, as described in
-[Installation](docs/installation.md#optional-offline-cdemd-extensions). Then
-evaluate only after predictions are frozen:
+Only after predictions are frozen:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 $PY scripts/evaluate_mainline_redwood.py \
-  --prediction-root "$RUN/gaussian" \
+  --prediction-root "$RUN" \
   --ground-truth-root data/redwood/gt \
-  --samples "$ID" \
-  --output "$RUN/metrics"
+  --samples 01184 \
+  --output "$RUN/metrics/redwood"
 ```
 
-The evaluator is never called by inference and cannot affect image generation,
-Pixal3D, registration, or Gaussian-edit parameters.
+The evaluator is not imported or called by the mainline runner.
 
-## Scene-level RGB completion
+## Scene-level route
 
-The object mainline above remains unchanged.  For one RGB scene image,
-[`scripts/run_scene_completion.py`](scripts/run_scene_completion.py) provides
-an isolated instance wrapper: one shared Pixal MoGe scene cloud is split by
-saved GPT binary masks, each crop receives a pose-locked direct GPT semantic
-completion, and Pixal generates one textured mesh per object. Native
-Pixal--MoGe plus the two-camera bridge returns every mesh to the shared scene
-frame; the meshes are then composed directly into a textured GLB. There is no
-Qwen depth completion, Gaussian point fusion, or GT use in this route.
+The scene wrapper remains independent. It segments one scene observation,
+generates and camera-places one textured instance mesh at a time in the shared
+scene-MoGe frame, and resolves collisions with minimum depth-axis motion. It
+does not invoke the object-level TRELLIS regeneration or modify its outputs.
+See [scene completion](docs/scene_completion.md).
 
-The wrapper also detects exact mesh contacts with `python-fcl`. It preserves
-each mesh's rotation, scale, and image-plane position, moving only the
-scene-MoGe-farther mesh along the source camera's depth axis by the smallest
-collision-free amount. See [Scene-level instance completion](docs/scene_completion.md)
-for the manifest, saved-GPT asset contract, commands, and complete artifact
-layout.
+## Reproducibility boundary
 
-## Reproducibility and scope
-
-- The Qwen stage uses the frozen configuration in
-  `configs/mainline_redwood.yaml`.
-- Pixal3D uses seed 42, the 1024 cascade, 12 sampling steps per stage, and a
-  100k surface sampling target.
-- Registration uses only proper isotropic Sim(3); its Camera-1 candidate set
-  and continuation schedule are fixed for every sample.
-- Gaussian edit uses the shared parameters documented in
-  [the method specification](docs/core_registration_pipeline.md).
-- `PROJECT_STATE.md` records accepted internal experiment assets. It is not an
-  inference branch and should not be used for test-time selection.
+- Qwen, Pixal, TRELLIS, and every geometric solver use the shared settings
+  documented in the method specification.
+- The official TRELLIS multi-image interface does not receive camera
+  extrinsics. The three images constrain regenerated shape; physical pose and
+  scale are recovered afterwards from the saved partial camera and 3D scan.
+- External GPT images and their exact prompts are first-class artifacts. A run
+  is not exactly reproducible if they are missing.
+- `PROJECT_STATE.md` records accepted internal experiments but is never read by
+  inference.
 
 ## Licence
 
-GenPC+ code is released under the [MIT License](LICENSE). External models,
-checkpoints, CUDA extensions, and datasets retain their own licences; see
-[Model assets](docs/models.md#licences-and-redistribution).
+GenPC++ code is released under the [MIT License](LICENSE). External models,
+checkpoints, CUDA extensions, and datasets retain their own licences.

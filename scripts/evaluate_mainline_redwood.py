@@ -17,7 +17,7 @@ if str(ROOT) not in sys.path:
 
 from src.mainline_paths import (
     REDWOOD10_SAMPLE_IDS,
-    locate_gaussian_prediction,
+    locate_mainline_prediction,
     redwood_ground_truth_root,
 )
 from src.offline_metrics import evaluate_cd_emd
@@ -36,7 +36,7 @@ def main() -> None:
 
     rows = []
     for sample in args.samples:
-        prediction = locate_gaussian_prediction(args.prediction_root, sample)
+        prediction = locate_mainline_prediction(args.prediction_root, sample)
         cd, emd = evaluate_cd_emd(prediction, args.ground_truth_root / f"{sample}.ply", count=args.count, seed=args.seed)
         rows.append({"sample_id": sample, "cd_l1_x1e2": 100.0 * cd, "emd_x1e2": 100.0 * emd})
     summary = {

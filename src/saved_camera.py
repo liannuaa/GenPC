@@ -51,6 +51,27 @@ class SavedCameraProjector:
         return uv * np.array([width - 1, height - 1], dtype=np.float64), camera_points[:, 2]
 
 
+def world_to_camera_axes(camera) -> np.ndarray:
+    """Return the orthonormal Camera-1 row axes used by a saved Kaolin camera.
+
+    For world-space row vectors, ``world @ axes.T`` expresses displacements in
+    the saved camera frame.  Translation cancels for local scale estimates,
+    so this is exactly the frame in which image-plane and depth constraints
+    are observed.
+    """
+    rotation = getattr(camera, "R", None)
+    if rotation is None:
+        raise ValueError("saved camera does not expose an extrinsic rotation R")
+    if hasattr(rotation, "detach"):
+        rotation = rotation.detach().float().cpu().numpy()
+    axes = np.asarray(rotation, dtype=np.float64)
+    if axes.ndim == 3 and axes.shape[0] == 1:
+        axes = axes[0]
+    if axes.shape != (3, 3) or not np.allclose(axes @ axes.T, np.eye(3), rtol=1e-4, atol=1e-5):
+        raise ValueError("saved camera rotation is not a valid orthonormal (3, 3) frame")
+    return axes
+
+
 def draw_projection_overlay(path: Path, image_path: Path, partial_points, generated_points, projector) -> None:
     image = np.asarray(Image.open(image_path).convert("RGB"), dtype=np.uint8)
     height, width = projector.image_shape

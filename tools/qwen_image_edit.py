@@ -1,6 +1,7 @@
 import gc
 import logging
 from pathlib import Path
+from collections.abc import Sequence
 
 import torch
 from diffusers import QwenImageEditPlusPipeline
@@ -98,10 +99,13 @@ class QwenImageEdit:
         pipeline. Agent actions use this method so their bounded text action
         is consumed by the image editor and can be persisted beside the target.
         """
-        if isinstance(image, str):
-            image = Image.open(image).convert("RGB")
-        else:
-            image = image.convert("RGB")
+        inputs = image if isinstance(image, Sequence) and not isinstance(image, (str, Path)) else [image]
+        images = [
+            Image.open(item).convert("RGB") if isinstance(item, (str, Path)) else item.convert("RGB")
+            for item in inputs
+        ]
+        if not images:
+            raise ValueError("Qwen image edit requires at least one input image")
         prompt = str(prompt).strip()
         if not prompt:
             raise ValueError("Qwen image-edit prompt must be non-empty")
@@ -109,7 +113,7 @@ class QwenImageEdit:
         if seed is not None and str(self.device).startswith("cuda"):
             generator = torch.Generator(device="cuda").manual_seed(int(seed))
         output = self.pipeline(
-            image=[image.convert("RGB")],
+            image=images,
             prompt=prompt,
             true_cfg_scale=self.true_cfg_scale,
             negative_prompt=self.negative_prompt,

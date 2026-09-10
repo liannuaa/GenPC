@@ -46,6 +46,8 @@ def main() -> None:
                         default=ROOT / "workspace" / "single_view_boundary_gaussian_redwood10_20260904")
     parser.add_argument("--registration-root", type=Path,
                         help="Optional frozen registration root. Defaults to <root>/registration.")
+    parser.add_argument("--gaussian-subdir", default="gaussian",
+                        help="Output child directory for a comparable Gaussian candidate (default: gaussian).")
     parser.add_argument("--samples", nargs="+", default=list(REDWOOD10_SAMPLE_IDS),
                         help="Sample identifiers with materialized partial, camera, Pixal, and registration assets.")
     parser.add_argument("--max-pixel-distance", type=float, default=1.0)
@@ -64,12 +66,24 @@ def main() -> None:
     parser.add_argument("--remote-gain", type=float, default=1.0)
     parser.add_argument("--remote-gain-radius-ratio", type=float, default=.08)
     parser.add_argument("--remote-displacement-cap-multiplier", type=float, default=1.0)
+    parser.add_argument("--camera-axis-scale", action="store_true",
+                        help="Generate one whole-carrier Camera-1 relative-axis scale candidate before local Gaussian editing.")
+    parser.add_argument("--axis-scale-max-log", type=float, default=.16)
+    parser.add_argument("--axis-scale-minimum-pairs", type=int, default=512)
+    parser.add_argument("--axis-scale-minimum-anisotropy", type=float, default=.025)
+    parser.add_argument("--axis-scale-minimum-residual-reduction", type=float, default=.03)
+    parser.add_argument("--axis-scale-trim-quantile", type=float, default=.75)
+    parser.add_argument("--axis-scale-iterations", type=int, default=3)
+    parser.add_argument("--axis-scale-retain-isotropic-component", action="store_true")
     parser.add_argument("--graph-cg-tolerance", type=float, default=1e-5)
     parser.add_argument("--graph-cg-max-iterations", type=int, default=240)
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     root = args.root.resolve()
+    gaussian_subdir = Path(str(args.gaussian_subdir))
+    if gaussian_subdir.is_absolute() or len(gaussian_subdir.parts) != 1 or gaussian_subdir.name in {"", ".", ".."}:
+        raise ValueError("--gaussian-subdir must be one safe child directory name")
     registration_root = (root / "registration" if args.registration_root is None
                          else args.registration_root.resolve())
     python = sys.executable
@@ -90,10 +104,18 @@ def main() -> None:
         "remote_gain": args.remote_gain,
         "remote_gain_radius_ratio": args.remote_gain_radius_ratio,
         "remote_displacement_cap_multiplier": args.remote_displacement_cap_multiplier,
+        "camera_axis_scale": args.camera_axis_scale,
+        "axis_scale_max_log": args.axis_scale_max_log,
+        "axis_scale_minimum_pairs": args.axis_scale_minimum_pairs,
+        "axis_scale_minimum_anisotropy": args.axis_scale_minimum_anisotropy,
+        "axis_scale_minimum_residual_reduction": args.axis_scale_minimum_residual_reduction,
+        "axis_scale_trim_quantile": args.axis_scale_trim_quantile,
+        "axis_scale_iterations": args.axis_scale_iterations,
+        "axis_scale_retain_isotropic_component": args.axis_scale_retain_isotropic_component,
         "graph_cg_tolerance": args.graph_cg_tolerance,
         "graph_cg_max_iterations": args.graph_cg_max_iterations,
     }
-    manifest_path = root / "gaussian" / "batch_manifest.json"
+    manifest_path = root / gaussian_subdir / "batch_manifest.json"
     manifest: dict[str, object] = {
         "method": "multiview_positive_overlap_boundary_conditioned_gaussian_edit",
         "strict_zero_shot": True, "ground_truth_cd_emd_used": False,
@@ -116,8 +138,10 @@ def main() -> None:
         partial = root / "inputs" / "partial" / f"{sample}.ply"
         camera = root / "inputs" / "camera" / sample / "camera.pth"
         semantic = root / "inputs" / "camera" / sample / "img.png"
-        edit_root = root / "gaussian" / sample / "edit"
-        decode_root = root / "gaussian" / sample / "decoded"
+        scale_root = root / gaussian_subdir / sample / "camera_axis_scale"
+        edit_root = root / gaussian_subdir / sample / "edit"
+        decode_root = root / gaussian_subdir / sample / "decoded"
+        scaled_prior = scale_root / "camera_axis_scaled_prior_100k.ply"
         edited = edit_root / "partial_anchored_gaussian_edit_editable_prior_100k.ply"
         prediction = decode_root / GAUSSIAN_PREDICTION_FILENAME
         try:
@@ -125,10 +149,29 @@ def main() -> None:
             missing = [str(path) for path in required if not _complete(path)]
             if missing:
                 raise FileNotFoundError("missing required input: " + ", ".join(missing))
+            edit_prior = registered
+            if args.camera_axis_scale:
+                if not (args.resume and _complete(scaled_prior)):
+                    _run([
+                        python, "scripts/run_camera_axis_scale.py",
+                        "--prior", str(registered), "--partial", str(partial), "--camera", str(camera),
+                        "--output-dir", str(scale_root), "--device", "cpu",
+                        "--max-pixel-distance", str(args.max_pixel_distance),
+                        "--max-anchor-residual-ratio", str(args.max_anchor_residual_ratio),
+                        "--max-log-stretch", str(args.axis_scale_max_log),
+                        "--minimum-pairs", str(args.axis_scale_minimum_pairs),
+                        "--minimum-anisotropy", str(args.axis_scale_minimum_anisotropy),
+                        "--minimum-residual-reduction", str(args.axis_scale_minimum_residual_reduction),
+                        "--trim-quantile", str(args.axis_scale_trim_quantile),
+                        "--iterations", str(args.axis_scale_iterations),
+                        *(["--retain-isotropic-component"]
+                          if args.axis_scale_retain_isotropic_component else []),
+                    ], log=scale_root / "stage.log", dry_run=args.dry_run)
+                edit_prior = scaled_prior
             if not (args.resume and _complete(edited)):
                 _run([
                     python, "scripts/run_partial_anchored_gaussian_edit.py",
-                    "--prior", str(registered), "--partial", str(partial), "--camera", str(camera),
+                    "--prior", str(edit_prior), "--partial", str(partial), "--camera", str(camera),
                     "--semantic", str(semantic), "--output-dir", str(edit_root), "--device", "cpu",
                     "--max-pixel-distance", str(args.max_pixel_distance),
                     "--virtual-positive-views", str(args.virtual_positive_views),
@@ -153,7 +196,7 @@ def main() -> None:
                 _run([
                     python, "scripts/run_partial_anchored_gaussian_decode.py",
                     "--edited-prior", str(edited), "--partial", str(partial), "--camera", str(camera),
-                    "--semantic", str(semantic), "--view-reference", str(registered),
+                    "--semantic", str(semantic), "--view-reference", str(edit_prior),
                     "--output-dir", str(decode_root), "--device", "cpu",
                     "--max-pixel-distance", str(args.max_pixel_distance),
                     "--virtual-positive-views", str(args.virtual_positive_views),
@@ -161,7 +204,10 @@ def main() -> None:
                     "--virtual-max-pixel-distance", str(args.virtual_max_pixel_distance),
                     "--max-anchor-residual-ratio", str(args.max_anchor_residual_ratio),
                 ], log=decode_root / "stage.log", dry_run=args.dry_run)
-            manifest["samples"][sample] = {"state": "complete", "prediction": str(prediction)}
+            manifest["samples"][sample] = {
+                "state": "complete", "prediction": str(prediction),
+                "edit_prior": str(edit_prior),
+            }
         except Exception as exc:
             manifest["samples"][sample] = {"state": "failed", "error": str(exc)}
         manifest_path.parent.mkdir(parents=True, exist_ok=True)

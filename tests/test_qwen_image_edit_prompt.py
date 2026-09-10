@@ -114,6 +114,27 @@ class QwenImageEditPromptTest(unittest.TestCase):
         self.assertEqual(calls[0]["prompt"], prompt)
         self.assertEqual(editor.last_stage1_prompt, prompt)
 
+    def test_generate_with_prompt_preserves_multi_image_order(self):
+        with (
+            patch.object(Path, "exists", return_value=True),
+            patch("tools.qwen_image_edit.NunchakuQwenImageTransformer2DModel"),
+            patch("tools.qwen_image_edit.QwenImageEditPlusPipeline"),
+        ):
+            editor = QwenImageEdit(
+                device="cuda", transformer_path="/tmp/transformer.safetensors",
+                pipeline_path="/tmp/pipeline", step=16, generation_size=512,
+                true_cfg_scale=4.0, negative_prompt=" ",
+            )
+        calls = []
+        editor.pipeline = lambda **kwargs: (calls.append(kwargs) or SimpleNamespace(
+            images=[Image.new("RGB", (512, 512), "white")]))
+        first = Image.new("RGB", (512, 512), "red")
+        second = Image.new("RGB", (512, 512), "blue")
+        editor.generate_with_prompt([first, second], "Use Image 2 as evidence.")
+        self.assertEqual(len(calls[0]["image"]), 2)
+        self.assertEqual(calls[0]["image"][0].getpixel((0, 0)), (255, 0, 0))
+        self.assertEqual(calls[0]["image"][1].getpixel((0, 0)), (0, 0, 255))
+
     def test_generate_with_prompt_rejects_empty_instruction(self):
         with (
             patch.object(Path, "exists", return_value=True),

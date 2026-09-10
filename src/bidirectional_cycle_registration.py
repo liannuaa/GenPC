@@ -143,6 +143,12 @@ def _zbuffer(projector, points):
     )
     xy = xy[valid]
     depth = np.asarray(depth, dtype=np.float64)[valid]
+    # A deliberately broad Sim(3) proposal may place the whole complete prior
+    # outside Camera-1.  That candidate should receive no silhouette/depth
+    # support, rather than making the candidate scorer fail before it can rank
+    # the remaining proposals.
+    if len(depth) == 0:
+        return np.full((height, width), np.inf, dtype=np.float64)
     flat = xy[:, 1] * width + xy[:, 0]
     order = np.lexsort((depth, flat))
     flat_sorted = flat[order]

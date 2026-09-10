@@ -136,45 +136,60 @@ def main() -> None:
         "after": None,
     }
     if args.coarse_basin_recovery:
-        coarse_candidates, coarse_search = pixel_pair_residual_candidates(
-            partial, active_partial, partial_projector, diagonal=diagonal,
-            max_pairs=args.pixel_pair_max_points, trials=args.pixel_pair_trials,
-            fractions=(.125, .25, .50, .75, 1.0),
-            max_rotation_deg=30., scale_bounds=(.45, 2.40), max_translation_ratio=1.25,
-        )
-        coarse_trials = []
-        for action, partial_residual in coarse_candidates:
-            candidate = apply_transform(active_partial, partial_residual)
-            native_residual = invert_proper_sim3(active_bridge) @ partial_residual @ active_bridge
-            coarse_trials.append({
-                "action": action, "partial_residual": partial_residual,
-                "native_residual": native_residual,
-                "partial": _compact_visible(visible_score(
-                    partial, candidate, partial_projector, diagonal, pixel_radius=5.
-                )),
+        try:
+            coarse_candidates, coarse_search = pixel_pair_residual_candidates(
+                partial, active_partial, partial_projector, diagonal=diagonal,
+                max_pairs=args.pixel_pair_max_points, trials=args.pixel_pair_trials,
+                fractions=(.125, .25, .50, .75, 1.0),
+                max_rotation_deg=30., scale_bounds=(.45, 2.40), max_translation_ratio=1.25,
+            )
+        except ValueError as exc:
+            # A sparse partial may provide no reliable Camera-1 surface pairs.
+            # The fixed, evidence-free action is identity; do not manufacture a
+            # residual or abort the rest of the two-camera route.
+            coarse_record.update({
+                "enabled": True, "selection": "identity_without_visible_Camera1_pairs",
+                "selected_action": "identity", "search": {"available": False, "reason": str(exc)},
+                "trials": [], "after": coarse_record["before"],
             })
-        selected_coarse = min(coarse_trials, key=lambda item: item["partial"]["objective"])
-        active_partial = apply_transform(active_partial, selected_coarse["partial_residual"])
-        active_native = apply_transform(active_native, selected_coarse["native_residual"])
-        active_total = selected_coarse["partial_residual"] @ active_total
-        coarse_record = {
-            "enabled": True,
-            "applied": bool(selected_coarse["action"] != "identity"),
-            "selection": "minimum_Camera1_visible_2D3D_objective_over_shared_broad_pixel_Sim3_lattice",
-            "selected_action": selected_coarse["action"],
-            "search": coarse_search, "trials": coarse_trials,
-            "before": coarse_record["before"], "after": selected_coarse["partial"],
-        }
+        else:
+            coarse_trials = []
+            for action, partial_residual in coarse_candidates:
+                candidate = apply_transform(active_partial, partial_residual)
+                native_residual = invert_proper_sim3(active_bridge) @ partial_residual @ active_bridge
+                coarse_trials.append({
+                    "action": action, "partial_residual": partial_residual,
+                    "native_residual": native_residual,
+                    "partial": _compact_visible(visible_score(
+                        partial, candidate, partial_projector, diagonal, pixel_radius=5.
+                    )),
+                })
+            selected_coarse = min(coarse_trials, key=lambda item: item["partial"]["objective"])
+            active_partial = apply_transform(active_partial, selected_coarse["partial_residual"])
+            active_native = apply_transform(active_native, selected_coarse["native_residual"])
+            active_total = selected_coarse["partial_residual"] @ active_total
+            coarse_record = {
+                "enabled": True,
+                "applied": bool(selected_coarse["action"] != "identity"),
+                "selection": "minimum_Camera1_visible_2D3D_objective_over_shared_broad_pixel_Sim3_lattice",
+                "selected_action": selected_coarse["action"],
+                "search": coarse_search, "trials": coarse_trials,
+                "before": coarse_record["before"], "after": selected_coarse["partial"],
+            }
 
     # MoGe's successful correction is a robust 3-D fit on pixel-indexed
     # visible surfaces, not a silhouette-only shift.  Apply that exact
     # principle to Pixal/partial in Camera-1.  Camera-2 evidence is always
     # recorded after conjugation as a diagnostic term; the two views have
     # different monocular gauges and neither creates a fallback branch.
-    pixel_candidates, pixel_search = pixel_pair_residual_candidates(
-        partial, active_partial, partial_projector, diagonal=diagonal,
-        max_pairs=args.pixel_pair_max_points, trials=args.pixel_pair_trials,
-    )
+    try:
+        pixel_candidates, pixel_search = pixel_pair_residual_candidates(
+            partial, active_partial, partial_projector, diagonal=diagonal,
+            max_pairs=args.pixel_pair_max_points, trials=args.pixel_pair_trials,
+        )
+    except ValueError as exc:
+        pixel_candidates = [("identity", np.eye(4, dtype=np.float64))]
+        pixel_search = {"available": False, "reason": str(exc)}
     pixel_trials = []
     for action, partial_residual in pixel_candidates:
         candidate = apply_transform(active_partial, partial_residual)
