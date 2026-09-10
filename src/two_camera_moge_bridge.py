@@ -17,6 +17,7 @@ by the camera-anchored analytic registration.
 from __future__ import annotations
 
 import numpy as np
+from scipy.ndimage import binary_dilation
 from scipy.spatial import cKDTree
 
 
@@ -90,6 +91,44 @@ def partial_uv_to_image_pixels(
     pixels[:, 0] *= max(width - 1, 1)
     pixels[:, 1] *= max(height - 1, 1)
     return pixels, valid
+
+
+def infer_point_uv_flip_y(
+    point_uv: np.ndarray,
+    source_mask: np.ndarray,
+    *,
+    dilation_pixels: int = 2,
+) -> tuple[bool, dict[str, float]]:
+    """Infer whether normalized Camera-1 UV needs a vertical flip.
+
+    Kaolin/DepthPrompting assets use a bottom-left origin, while standard
+    pinhole rasters use a top-left origin.  Select the convention whose scan
+    samples receive more Camera-1 foreground support.  This relies only on
+    saved observation evidence and has no dataset/category-specific branch.
+    """
+    foreground = _binary_mask(source_mask)
+    if int(dilation_pixels) > 0:
+        foreground = binary_dilation(
+            foreground,
+            structure=np.ones((2 * int(dilation_pixels) + 1,) * 2, dtype=bool),
+        )
+    scores: dict[str, float] = {}
+    for name, flip in (("top_left", False), ("bottom_left", True)):
+        pixels, valid = partial_uv_to_image_pixels(
+            point_uv, foreground.shape, flip_y=flip,
+        )
+        rounded = np.rint(pixels).astype(np.int64)
+        inside = (
+            valid
+            & (rounded[:, 0] >= 0) & (rounded[:, 0] < foreground.shape[1])
+            & (rounded[:, 1] >= 0) & (rounded[:, 1] < foreground.shape[0])
+        )
+        hits = np.zeros(len(rounded), dtype=bool)
+        hits[inside] = foreground[rounded[inside, 1], rounded[inside, 0]]
+        scores[name] = float(hits.sum() / max(int(valid.sum()), 1))
+    # Preserve the historical convention if a symmetric object causes a tie.
+    flip_y = scores["bottom_left"] >= scores["top_left"]
+    return bool(flip_y), scores
 
 
 def transferred_partial_to_moge_matches(

@@ -16,8 +16,7 @@ REDWOOD10_SAMPLE_IDS = (
 )
 
 REGISTERED_PRIOR_FILENAME = "camera1_amplified_registered_100k.ply"
-GAUSSIAN_PREDICTION_FILENAME = "partial_anchored_gaussian_decoded_100k.ply"
-TRELLIS_PREDICTION_FILENAME = "complete_100k.ply"
+POSTERIOR_PREDICTION_FILENAME = "posterior_prior_100k.ply"
 
 
 def redwood_partial_root(project_root: Path) -> Path:
@@ -47,32 +46,18 @@ def locate_registered_prior(registration_root: Path, sample: str) -> Path:
     return legacy if legacy.is_file() else registered_prior_path(registration_root, sample)
 
 
-def gaussian_prediction_path(prediction_root: Path, sample: str) -> Path:
-    """Canonical decoded 100k Gaussian prediction artifact for ``sample``."""
-    return Path(prediction_root) / str(sample) / "decoded" / GAUSSIAN_PREDICTION_FILENAME
-
-
-def locate_gaussian_prediction(prediction_root: Path, sample: str) -> Path:
-    """Return a decoded prediction, retaining the historical flat-path fallback."""
-    canonical = gaussian_prediction_path(prediction_root, sample)
-    if canonical.is_file():
-        return canonical
-    return Path(prediction_root) / str(sample) / GAUSSIAN_PREDICTION_FILENAME
-
-
-def trellis_prediction_path(run_root: Path, sample: str) -> Path:
-    """Canonical fusion-free prediction produced by the object mainline."""
-    return Path(run_root) / "final" / str(sample) / TRELLIS_PREDICTION_FILENAME
+def posterior_prediction_path(run_root: Path, sample: str) -> Path:
+    """Canonical complete carrier produced by PosteriorAdapter."""
+    return Path(run_root) / str(sample) / POSTERIOR_PREDICTION_FILENAME
 
 
 def locate_mainline_prediction(prediction_root: Path, sample: str) -> Path:
-    """Locate the current prediction while accepting a direct ``final`` root."""
+    """Locate the current posterior prediction."""
     root = Path(prediction_root)
-    canonical = trellis_prediction_path(root, sample)
+    canonical = posterior_prediction_path(root, sample)
     if canonical.is_file():
         return canonical
-    direct = root / str(sample) / TRELLIS_PREDICTION_FILENAME
-    return direct if direct.is_file() else canonical
+    return canonical
 
 
 def sample_dir(cfg, sample: str) -> Path:

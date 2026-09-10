@@ -23,6 +23,35 @@ from src.zbuffer import zbuffer_depth_with_indices
 VIEW_ORDER = ("front", "side", "back", "right")
 
 
+class PoseProjector:
+    """Perspective projector reconstructed from a saved diagnostic camera."""
+
+    def __init__(self, pose: np.ndarray, field_of_view_degrees: float, resolution: int):
+        self.pose = np.asarray(pose, dtype=np.float64)
+        self.field_of_view_degrees = float(field_of_view_degrees)
+        self.image_shape = (int(resolution), int(resolution))
+        if self.pose.shape != (4, 4) or min(self.image_shape) < 8:
+            raise ValueError("pose must be 4x4 and resolution must be at least eight")
+
+    def project(self, points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        return _project(
+            points, self.pose, self.field_of_view_degrees, self.image_shape[0],
+        )
+
+
+def load_manifest_projectors(manifest_path: Path, *, resolution: int = 512) -> list[PoseProjector]:
+    """Load ordered, GT-free camera projectors from a render manifest."""
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    fov = float(manifest["field_of_view_degrees"])
+    views = list(manifest.get("views", []))
+    if not views:
+        raise ValueError("render manifest contains no views")
+    return [
+        PoseProjector(np.asarray(view["camera_pose"], dtype=np.float64), fov, int(resolution))
+        for view in views
+    ]
+
+
 def _project(
     points: np.ndarray,
     pose: np.ndarray,

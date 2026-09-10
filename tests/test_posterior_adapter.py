@@ -67,6 +67,18 @@ def test_partial_transport_can_leave_an_unrelated_observation_unmatched():
     assert result.diagnostics["unmatched_partial_fraction"] > 0.
 
 
+def test_partial_transport_records_every_visibility_valid_view():
+    prior, partial, _ = _connected_shape()
+    projector = OrthographicProjector(partial)
+    result = partial_optimal_transport(
+        prior, partial, projector, config=_test_config(), device="cpu",
+        view_projectors=(projector, projector),
+    )
+    assert result.diagnostics["view_count"] == 2
+    assert len(result.diagnostics["view_evidence"]) == 2
+    assert result.diagnostics["method"].startswith("multiview_")
+
+
 def test_embedded_posterior_preserves_slots_and_continuously_moves_supported_structure():
     prior, partial, moved_ids = _connected_shape()
     stable = np.zeros(len(prior), dtype=bool)

@@ -1,5 +1,57 @@
 # Accepted project state
 
+## 2026-09-11 00:04:06 CST — integrated PosteriorAdapter observation fusion
+
+**User approval.** “确实 效果好特别多.” The approved experiment integrates
+physical partial evidence into the smooth PosteriorAdapter deformation instead
+of replacing points after deformation. Preserve these two outputs and the
+shared configuration while running the remaining samples; do not overwrite
+them with hard carrier-slot replacement.
+
+**Outputs and inputs.** Approved predictions are
+`workspace/from_scratch_01184_debug_20260910/posterior_integrated_fusion_v2/01184/posterior_prior_100k.ply`
+and
+`workspace/from_scratch_01184_debug_20260910/posterior_integrated_fusion_v2/07136/posterior_prior_100k.ply`.
+Their partial overlays and four-view overlays are beside each prediction as
+`partial_gray_integrated_red.ply` and `integrated_four_view_projection.png`.
+Inputs are `data/redwood/partial/{01184,07136}.ply`, the registered priors under
+`workspace/from_scratch_01184_debug_20260910/registration/<id>/final/`, and the
+four-camera manifests under `residuals/<id>/render/render_manifest.json`.
+
+**Upstream model record.** This experiment did not regenerate images or 3-D
+priors. It reuses Pixal3D `models/Pixal3D-weights`, DINOv3
+`models/dinov3-vitl16-pretrain-lvd1689m`, MoGe-2
+`models/moge-2-vitl/model.pt`, and RMBG-2.0 `models/RMBG-2.0`; generation
+resolution/seed/steps/guidance remain the saved upstream values in
+`inputs/pixal/<id>/pixal3d_metadata.json`. New model call, scheduler, seed, CFG,
+negative prompt, and semantic postprocessing: `NOT RUN` / `NOT APPLICABLE`.
+The exact already-saved semantic prompt for 01184 is:
+
+> Use case: sketch-to-render
+> Asset type: camera-consistent semantic conditioning image for single-image 3D generation
+> Primary request: Generate a complete, realistic RGB image by completing the object represented by Image 1, which is an incomplete depth map. The object category is a blue wheeled rubbish bin / outdoor garbage bin.
+> Input images: Image 1 is the sole geometric and camera authority: an occluded depth rendering from a partial 3D scan.
+> Scene/backdrop: pure white studio background, no floor clutter.
+> Subject: one complete blue wheeled rubbish bin with a rectangular tapered bin body, closed hinged lid, rear handle/hinge structure, and exactly two black wheels mounted on the same axle. The two wheels must be front/back parallel wheels as implied by the depth image, not side-by-side decorations.
+> Style/medium: clean realistic product photograph, coherent plastic and rubber materials, sharp boundaries, sufficient local detail for image-to-3D reconstruction.
+> Composition/framing: preserve exactly Image 1's camera viewpoint, perspective, object orientation, apparent scale, image-plane center, crop, silhouette, body proportions, lid pose, and visible wheel locations. Complete only genuinely missing or occluded surfaces.
+> Constraints: follow the depth silhouette and depth ordering closely; keep both wheels parallel and structurally attached; retain the slight three-quarter view; output one complete connected object. Do not rotate, mirror, recrop, rescale, recenter, tilt, shorten, widen, or redesign the bin. Do not add extra wheels, pedals, handles, text, logos, shadows that alter the silhouette, or any secondary object.
+> Avoid: stylization, malformed geometry, detached parts, duplicated wheels, changed pose, changed camera, black background, text, watermark.
+
+The exact already-saved semantic prompt for 07136 is:
+
+> Use case: sketch-to-render. Create one complete, realistic RGB product image of a long black leather sofa from the supplied incomplete depth map. Image 1 is the sole geometric, camera, and foreground-mask authority. Treat every non-black depth pixel and its silhouette as a hard ControlNet-like spatial constraint: preserve exactly the oblique end-on camera viewpoint, perspective, image-plane center, apparent width and height, crop, orientation, depth ordering, visible sofa end, seat plane, backrest line, and the strong foreshortening of the long sofa body. Complete only genuinely missing or occluded surfaces along the depth direction. Keep one coherent full-length sofa with a continuous seat, continuous backrest, two end armrests, and short attached feet, in dark leather on a pure white background. Do not turn it into a single chair or sectional sofa, do not shorten or widen the body, and do not rotate, mirror, recenter, rescale, tilt, redesign, or move observed surfaces. Sharp realistic boundaries and upholstery; no cushions detached from the sofa, text, logo, watermark, secondary object, clutter, or silhouette-changing shadow.
+
+**Frozen integrated-fusion configuration.** Four saved cameras; 6144 spatially
+sampled observation anchors; 1 px proposal radius; 2 px cross-view radius;
+depth and metric anchor limits `.075` of partial diagonal; data weight `2.0`;
+screening `.004`; three iterations; displacement cap `.05` of partial
+diagonal; hidden coverage at least `.95`. The anchors enter the same embedded
+ARAP carrier as soft targets with no hard point replacement, concatenation,
+category rule, part rule, GT, CD, or EMD. Both outputs retain exactly 100,000
+points and no new connected component. Offline-only CD-L1/EMD x100 are
+`1.0650/2.0588` for 01184 and `1.7763/3.4295` for 07136.
+
 ## 2026-09-04 CST — Redwood-10 fixed registration + relaxed-anchor Gaussian edit
 
 **User approval.** “效果非常好了 可以保存代码 提交到github上.” This is the
@@ -886,3 +938,50 @@ result under `four_view_broad_to_narrow_v2/` is diagnostic only.
 view selection, image editing, OT, ARAP, or the verifier. Offline-only evaluation
 at 16,384 points and seed 6145 gives CD-L1x100 `1.47515414` and EMDx100
 `1.84783079` (the CUDA EMD approximation may vary slightly between runs).
+
+## 2026-09-10 — accepted 01184 mask-locked direct-GPT from-scratch flow
+
+**User approval.** The user judged the result “效果很好” and directed that the
+same pipeline be run on the remaining Redwood samples. Preserve the saved
+Camera-1 depth as the sole camera/framing authority, the direct-GPT semantic,
+the mask audit, the Pixal prior, registration, four-view OT evidence, and the
+complete 100k carrier. Do not restore the failed Qwen image as the active
+semantic input.
+
+**Exact artifacts.** The run root is
+`workspace/from_scratch_01184_debug_20260910`. Input partial is
+`data/redwood/partial/01184.ply`; depth/camera are
+`inputs/camera/01184/{depth.png,camera.pth}`; direct-GPT source and installed
+semantic are `inputs/pixal/01184/gpt_image.png` and
+`inputs/camera/01184/img.png`. Prompt and framing audit are
+`inputs/pixal/01184/gpt_depth_completion_prompt.txt` and
+`inputs/camera/01184/semantic_install_manifest.json`. Pixal model outputs are
+`inputs/pixal/01184/{pixal3d.glb,pixal3d_sampled_100k.ply,pixal3d_metadata.json,pixal_moge_fp16_observation.npz}`.
+Registered and final outputs are
+`registration/01184/final/camera1_amplified_registered_100k.ply` and
+`final/01184/complete_100k.ply`. Four-view evidence is under
+`residuals/01184/`; exact run metadata is `run_manifest.json`.
+
+**Generation record.** The exact direct-GPT prompt is copied verbatim in the
+prompt artifact and the semantic-install manifest. It constrains the image to
+one blue wheeled rubbish bin, the saved depth camera/framing, exactly two
+parallel wheels on one axle, and a white background. GPT image model/version,
+seed, steps, CFG, scheduler, and native resize policy are `UNKNOWN`; therefore
+the saved source image (SHA-256
+`8bc8822cff48ff60b34261ff7c1a2228151639f468e8bf041277259c790052a3`) is required
+for exact replay. Installation resizes to 512 square with Lanczos, then uses
+`models/RMBG-2.0`. The audit reports center-offset ratio `.005259`, width/height
+ratios `1.00909/1.01928`, mask IoU `.83034`, and depth coverage `.97212`.
+Pixal3D source/checkpoint and DINO/MoGe paths are those recorded in
+`inputs/pixal/01184/pixal3d_metadata.json`; no unrecorded model substitution is
+allowed.
+
+**Geometry and evaluation.** Registration uses the shared native
+Pixal--MoGe, two-camera bridge, joint, and Camera-1 continuation implementation;
+all exact transforms and stage settings are serialized under
+`registration/01184`. Four visibility-valid views enter Partial OT through
+`residuals/01184/render/render_manifest.json`. PosteriorAdapter preserves all
+100,000 points and makes no deformation for this case because reliable
+localized residual transport is insufficient; this is not a verifier rollback.
+Offline-only CD-L1x100/EMDx100 are `1.34141147/2.33711749` and are not exposed
+to generation, registration, OT, or stopping.

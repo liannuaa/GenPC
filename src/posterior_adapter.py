@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 import math
+from collections.abc import Sequence
 
 import numpy as np
 from scipy import sparse
@@ -27,9 +28,11 @@ import torch
 from fpsample import fps_sampling
 
 from src.bidirectional_cycle_registration import visible_score
-from src.camera_conditioned_gaussian_adaptation import (
-    _edge_strain,
-    _local_gaussian_graph,
+from src.deformation_graph import edge_strain, local_surface_graph
+from src.observation_anchored_fusion import (
+    ObservationAnchoredFusionConfig,
+    collision_free_anchor_pairs,
+    positive_multiview_pairs,
 )
 from src.zbuffer import zbuffer_depth_with_indices
 
@@ -85,6 +88,13 @@ class PosteriorAdapterConfig:
     maximum_edge_stretch: float = 2.80
     minimum_hidden_coverage: float = .95
     coverage_resolution: int = 160
+    integrated_observation_fusion: bool = False
+    assimilation_samples: int = 6_144
+    assimilation_data_weight: float = 2.0
+    assimilation_screening: float = .004
+    assimilation_iterations: int = 3
+    assimilation_displacement_ratio: float = .050
+    assimilation_anchor_residual_ratio: float = .075
 
     def validate(self) -> None:
         if min(self.partial_samples, self.prior_samples) < 32:
@@ -123,6 +133,15 @@ class PosteriorAdapterConfig:
             raise ValueError("invalid deformation graph node bounds")
         if self.skinning_neighbours < 1:
             raise ValueError("skinning_neighbours must be positive")
+        if self.assimilation_samples < 32 or self.assimilation_iterations < 1:
+            raise ValueError("observation assimilation controls are invalid")
+        if min(
+            self.assimilation_data_weight,
+            self.assimilation_screening,
+            self.assimilation_displacement_ratio,
+            self.assimilation_anchor_residual_ratio,
+        ) <= 0.:
+            raise ValueError("observation assimilation weights must be positive")
 
 
 @dataclass(frozen=True)
@@ -255,6 +274,7 @@ def partial_optimal_transport(
     *,
     config: PosteriorAdapterConfig,
     device: str = "cuda",
+    view_projectors: Sequence | None = None,
 ) -> TransportResult:
     """Estimate capacity-aware, positive-only partial-to-prior evidence."""
     config.validate()
@@ -264,7 +284,12 @@ def partial_optimal_transport(
         raise ValueError("prior and partial must be shaped (N, 3)")
     diagonal = max(float(np.linalg.norm(np.ptp(partial, axis=0))), 1e-9)
     spacing = _median_spacing(partial)
-    visible_ids = _visible_prior_ids(prior, projector)
+    projectors = tuple(view_projectors or (projector,))
+    if not projectors:
+        raise ValueError("at least one view projector is required")
+    visible_ids = np.unique(np.concatenate([
+        _visible_prior_ids(prior, item) for item in projectors
+    ])).astype(np.int64)
     if len(visible_ids) < int(config.minimum_transport_pairs):
         raise ValueError("too few camera-visible prior surfels for partial transport")
     partial_sample_ids = _sample_ids(partial, int(config.partial_samples))
@@ -277,46 +302,103 @@ def partial_optimal_transport(
     prior_normal, prior_shape = _local_surface_features(
         prior, prior_sample_ids, int(config.normal_neighbours),
     )
-    partial_uv_all, partial_depth_all = projector.project(partial)
-    prior_uv_all, prior_depth_all = projector.project(prior)
-    partial_uv, prior_uv = partial_uv_all[partial_sample_ids], prior_uv_all[prior_sample_ids]
-    partial_depth, prior_depth = partial_depth_all[partial_sample_ids], prior_depth_all[prior_sample_ids]
-    uv_low, uv_high = np.quantile(partial_uv, [.01, .99], axis=0)
-    screen_extent = max(float(np.max(uv_high - uv_low)), 1.)
-    depth_low, depth_high = np.quantile(partial_depth, [.01, .99])
-    depth_extent = max(float(depth_high - depth_low), spacing)
-
     actual_device = str(device)
     if actual_device.startswith("cuda") and not torch.cuda.is_available():
         actual_device = "cpu"
     dtype = torch.float32
     pp = torch.as_tensor(partial[partial_sample_ids] / diagonal, dtype=dtype, device=actual_device)
     qp = torch.as_tensor(prior[prior_sample_ids] / diagonal, dtype=dtype, device=actual_device)
-    pu = torch.as_tensor(partial_uv / screen_extent, dtype=dtype, device=actual_device)
-    qu = torch.as_tensor(prior_uv / screen_extent, dtype=dtype, device=actual_device)
-    pz = torch.as_tensor(partial_depth / depth_extent, dtype=dtype, device=actual_device)
-    qz = torch.as_tensor(prior_depth / depth_extent, dtype=dtype, device=actual_device)
     pn = torch.as_tensor(partial_normal, dtype=dtype, device=actual_device)
     qn = torch.as_tensor(prior_normal, dtype=dtype, device=actual_device)
     ps = torch.as_tensor(partial_shape, dtype=dtype, device=actual_device)
     qs = torch.as_tensor(prior_shape, dtype=dtype, device=actual_device)
     with torch.no_grad():
         distance_3d = torch.cdist(pp, qp)
-        distance_uv = torch.cdist(pu, qu)
-        distance_depth = torch.abs(pz[:, None] - qz[None, :])
+        multiview_screen = torch.zeros_like(distance_3d)
+        multiview_depth = torch.zeros_like(distance_3d)
+        multiview_weight = torch.zeros_like(distance_3d)
+        multiview_valid = torch.zeros_like(distance_3d, dtype=torch.bool)
+        per_view_diagnostics = []
+        for view_id, view_projector in enumerate(projectors):
+            partial_uv_all, partial_depth_all = view_projector.project(partial)
+            prior_uv_all, prior_depth_all = view_projector.project(prior)
+            partial_uv = partial_uv_all[partial_sample_ids]
+            prior_uv = prior_uv_all[prior_sample_ids]
+            partial_depth = partial_depth_all[partial_sample_ids]
+            prior_depth = prior_depth_all[prior_sample_ids]
+            partial_visible_ids = _visible_prior_ids(partial, view_projector)
+            prior_visible_ids = _visible_prior_ids(prior, view_projector)
+            partial_visible = np.isin(partial_sample_ids, partial_visible_ids)
+            prior_visible = np.isin(prior_sample_ids, prior_visible_ids)
+            partial_visible &= (
+                np.isfinite(partial_uv).all(axis=1)
+                & np.isfinite(partial_depth) & (partial_depth > 1e-8)
+            )
+            prior_visible &= (
+                np.isfinite(prior_uv).all(axis=1)
+                & np.isfinite(prior_depth) & (prior_depth > 1e-8)
+            )
+            evidence = torch.as_tensor(
+                partial_visible[:, None] & prior_visible[None, :],
+                dtype=torch.bool, device=actual_device,
+            )
+            if not bool(evidence.any()):
+                per_view_diagnostics.append({
+                    "view": int(view_id), "partial_visible": int(partial_visible.sum()),
+                    "prior_visible": int(prior_visible.sum()), "supported_pairs": 0,
+                })
+                continue
+            visible_partial_uv = partial_uv[partial_visible]
+            visible_partial_depth = partial_depth[partial_visible]
+            uv_low, uv_high = np.quantile(visible_partial_uv, [.01, .99], axis=0)
+            screen_extent = max(float(np.max(uv_high - uv_low)), 1.)
+            depth_low, depth_high = np.quantile(visible_partial_depth, [.01, .99])
+            depth_extent = max(float(depth_high - depth_low), spacing)
+            partial_uv_tensor = torch.as_tensor(
+                partial_uv / screen_extent, dtype=dtype, device=actual_device,
+            )
+            prior_uv_tensor = torch.as_tensor(
+                prior_uv / screen_extent, dtype=dtype, device=actual_device,
+            )
+            partial_depth_tensor = torch.as_tensor(
+                partial_depth / depth_extent, dtype=dtype, device=actual_device,
+            )
+            prior_depth_tensor = torch.as_tensor(
+                prior_depth / depth_extent, dtype=dtype, device=actual_device,
+            )
+            distance_uv_view = torch.cdist(partial_uv_tensor, prior_uv_tensor)
+            distance_depth_view = torch.abs(
+                partial_depth_tensor[:, None] - prior_depth_tensor[None, :]
+            )
+            weight = evidence.to(dtype)
+            multiview_screen += weight * distance_uv_view.square()
+            multiview_depth += weight * distance_depth_view.square()
+            multiview_weight += weight
+            multiview_valid |= evidence & (
+                (distance_uv_view <= float(config.maximum_screen_ratio))
+                & (distance_depth_view <= float(config.maximum_depth_ratio))
+            )
+            per_view_diagnostics.append({
+                "view": int(view_id), "partial_visible": int(partial_visible.sum()),
+                "prior_visible": int(prior_visible.sum()),
+                "supported_pairs": int(evidence.sum().item()),
+            })
+        has_view_support = multiview_weight > 0.
+        multiview_screen /= torch.clamp(multiview_weight, min=1.)
+        multiview_depth /= torch.clamp(multiview_weight, min=1.)
         normal_cost = 1. - torch.abs(pn @ qn.T)
         shape_cost = torch.cdist(ps, qs)
         cost = (
             .46 * distance_3d.square()
-            + .23 * distance_uv.square()
-            + .18 * distance_depth.square()
+            + .23 * multiview_screen
+            + .18 * multiview_depth
             + .08 * normal_cost
             + .05 * shape_cost
         )
         valid = (
             (distance_3d <= float(config.maximum_3d_ratio))
-            & (distance_uv <= float(config.maximum_screen_ratio))
-            & (distance_depth <= float(config.maximum_depth_ratio))
+            & has_view_support
+            & multiview_valid
             & (normal_cost <= .92)
         )
         plan, temperature = _unbalanced_log_transport(
@@ -469,8 +551,10 @@ def partial_optimal_transport(
         unsupported_prior_mask=unsupported,
         diagnostics={
             "active": bool(residual_mask.any()),
-            "method": "camera_structure_unbalanced_partial_transport",
+            "method": "multiview_camera_structure_unbalanced_partial_transport",
             "device": actual_device,
+            "view_count": int(len(projectors)),
+            "view_evidence": per_view_diagnostics,
             "partial_diagonal": diagonal,
             "partial_spacing": spacing,
             "visible_prior": int(len(visible_ids)),
@@ -683,7 +767,7 @@ def _soft_full_surface_arap(
     targets = np.asarray(targets, dtype=np.float64)
     target_weights = np.asarray(target_weights, dtype=np.float64)
     stable_mask = np.asarray(stable_mask, dtype=bool)
-    graph, metric, original_edges = _local_gaussian_graph(prior, neighbours=int(neighbours), edge_ratio=float(edge_ratio))
+    graph, metric, original_edges = local_surface_graph(prior, neighbours=int(neighbours), edge_ratio=float(edge_ratio))
     graph, metric, attachment_edges = _augment_attachment_edges(
         graph, metric, prior, edge_ratio=float(attachment_edge_ratio),
     )
@@ -771,7 +855,7 @@ def _soft_full_surface_arap(
         before_median = _weighted_median(initial_residual, weights_unique)
         after_median = _weighted_median(after, weights_unique)
         improvement = 1. - after_median / max(before_median, 1e-12)
-        strain = _edge_strain(prior, candidate, graph)
+        strain = edge_strain(prior, candidate, graph)
         coverage, per_view = _orthographic_coverage(prior, candidate, resolution=int(coverage_resolution))
         effective_graph = graph.copy().tolil()
         edge_ratio_now = np.linalg.norm(candidate[rows] - candidate[cols], axis=1) / np.maximum(
@@ -856,6 +940,7 @@ def _embedded_arap_posterior(
     maximum_edge_stretch: float,
     minimum_hidden_coverage: float,
     coverage_resolution: int,
+    coherent_component_targets: bool = True,
 ) -> tuple[np.ndarray, dict, np.ndarray]:
     """Deform the full carrier with a sparse, rotation-aware ARAP graph.
 
@@ -889,9 +974,11 @@ def _embedded_arap_posterior(
         return prior.copy(), {"active": False, "reason": "all_transport_targets_are_stable"}, np.zeros(len(prior), dtype=bool)
 
     diagonal = max(float(np.linalg.norm(np.ptp(np.concatenate((prior, unique_targets), axis=0), axis=0))), 1e-9)
-    unique_targets, coherence_info = _coherent_targets(
-        prior[unique_target_ids], unique_targets, diagonal=diagonal,
-    )
+    coherence_info = {"components": 0, "regularized_targets": 0}
+    if bool(coherent_component_targets):
+        unique_targets, coherence_info = _coherent_targets(
+            prior[unique_target_ids], unique_targets, diagonal=diagonal,
+        )
 
     requested_nodes = int(np.clip(
         math.ceil(float(node_fraction) * len(prior)), int(minimum_nodes), int(maximum_nodes),
@@ -933,7 +1020,7 @@ def _embedded_arap_posterior(
             "coherent_targets": coherence_info,
         }, np.zeros(len(prior), dtype=bool)
 
-    node_graph, _, node_edges = _local_gaussian_graph(
+    node_graph, _, node_edges = local_surface_graph(
         nodes, neighbours=int(neighbours), edge_ratio=float(edge_ratio),
     )
     node_graph, _, attachment_edges = _augment_attachment_edges(
@@ -978,7 +1065,7 @@ def _embedded_arap_posterior(
         transition = max(2.0 * _median_spacing(prior), _median_spacing(prior[stable_mask]))
         release = 1. - np.exp(-.5 * np.square(stable_distance / max(transition, 1e-12)))
         warped = prior + release[:, None] * (warped - prior)
-    carrier_graph, _, carrier_edges = _local_gaussian_graph(
+    carrier_graph, _, carrier_edges = local_surface_graph(
         prior, neighbours=int(neighbours), edge_ratio=float(edge_ratio),
     )
     carrier_graph, _, carrier_attachment_edges = _augment_attachment_edges(
@@ -998,7 +1085,7 @@ def _embedded_arap_posterior(
         before_median = _weighted_median(initial_residual, unique_weights)
         after_median = _weighted_median(after, unique_weights)
         improvement = 1. - after_median / max(before_median, 1e-12)
-        strain = _edge_strain(prior, candidate, carrier_graph)
+        strain = edge_strain(prior, candidate, carrier_graph)
         coverage, per_view = _orthographic_coverage(prior, candidate, resolution=int(coverage_resolution))
         edge_ratio_now = np.linalg.norm(candidate[carrier_rows] - candidate[carrier_cols], axis=1) / np.maximum(
             np.linalg.norm(prior[carrier_rows] - prior[carrier_cols], axis=1), 1e-12,
@@ -1084,7 +1171,7 @@ def _project_small_topology_breaks(
     initial = np.asarray(initial, dtype=np.float64)
     projected = np.asarray(candidate, dtype=np.float64).copy()
     stable_mask = np.asarray(stable_mask, dtype=bool)
-    rest_graph, _, _ = _local_gaussian_graph(
+    rest_graph, _, _ = local_surface_graph(
         initial, neighbours=int(neighbours), edge_ratio=float(edge_ratio),
     )
     input_components, input_labels = csgraph.connected_components(rest_graph, directed=False)
@@ -1092,7 +1179,7 @@ def _project_small_topology_breaks(
     corrected: set[int] = set()
     trace: list[dict] = []
     for pass_id in range(max(1, int(maximum_passes))):
-        output_graph, _, _ = _local_gaussian_graph(
+        output_graph, _, _ = local_surface_graph(
             projected, neighbours=int(neighbours), edge_ratio=float(edge_ratio),
         )
         output_components, output_labels = csgraph.connected_components(output_graph, directed=False)
@@ -1160,7 +1247,14 @@ class PosteriorAdapter:
         self.config.validate()
         self.device = str(device)
 
-    def run(self, prior: np.ndarray, partial: np.ndarray, projector) -> tuple[np.ndarray, dict, dict[str, np.ndarray]]:
+    def run(
+        self,
+        prior: np.ndarray,
+        partial: np.ndarray,
+        projector,
+        *,
+        view_projectors: Sequence | None = None,
+    ) -> tuple[np.ndarray, dict, dict[str, np.ndarray]]:
         prior = np.asarray(prior, dtype=np.float64)
         partial = np.asarray(partial, dtype=np.float64)
         initial = prior.copy()
@@ -1183,6 +1277,7 @@ class PosteriorAdapter:
         for name, neighbours, edge_ratio, data_weight, screening, iterations, displacement_ratio, node_fraction in stage_specs:
             transport = partial_optimal_transport(
                 current, partial, projector, config=self.config, device=self.device,
+                view_projectors=view_projectors,
             )
             transports.append(transport)
             stable = inherited_stable | transport.stable_prior_mask
@@ -1229,39 +1324,133 @@ class PosteriorAdapter:
             edge_ratio=float(self.config.fine_edge_ratio),
             component_threshold=int(component_threshold),
         )
+        assimilation_displacement = np.zeros_like(current)
+        assimilation_anchor_mask = np.zeros(len(current), dtype=bool)
+        assimilation_info: dict = {
+            "active": False,
+            "reason": "disabled",
+            "method": "integrated_four_view_observation_assimilation",
+        }
+        if bool(self.config.integrated_observation_fusion):
+            if view_projectors is None or len(view_projectors) != 4:
+                raise ValueError(
+                    "integrated observation fusion requires exactly four view projectors"
+                )
+            fusion_config = ObservationAnchoredFusionConfig(
+                num_views=4,
+                pixel_radius=1.0,
+                cross_view_pixel_radius=2.0,
+                cross_view_depth_ratio=float(self.config.assimilation_anchor_residual_ratio),
+                anchor_residual_ratio=float(self.config.assimilation_anchor_residual_ratio),
+            )
+            positive_pairs, pair_info = positive_multiview_pairs(
+                partial,
+                current,
+                list(view_projectors),
+                config=fusion_config,
+                diagonal=diagonal,
+            )
+            anchors, assignment_info = collision_free_anchor_pairs(
+                positive_pairs,
+                partial,
+                current,
+                max_residual=float(self.config.assimilation_anchor_residual_ratio) * diagonal,
+            )
+            if len(anchors) > int(self.config.assimilation_samples):
+                retained = _sample_ids(
+                    partial[anchors[:, 0]], int(self.config.assimilation_samples),
+                )
+                anchors = anchors[retained]
+            if len(anchors) >= int(self.config.minimum_transport_pairs):
+                partial_ids, prior_ids = anchors[:, 0], anchors[:, 1]
+                residual = np.linalg.norm(partial[partial_ids] - current[prior_ids], axis=1)
+                residual_scale = max(float(np.quantile(residual, .50)), _median_spacing(partial))
+                weights = np.exp(-.5 * np.square(residual / max(3.0 * residual_scale, 1e-12)))
+                weights = np.clip(weights, .20, 1.0)
+                assimilated, solve_info, assimilated_mask = _embedded_arap_posterior(
+                    current,
+                    prior_ids,
+                    partial[partial_ids],
+                    weights,
+                    np.zeros(len(current), dtype=bool),
+                    node_fraction=float(self.config.fine_node_fraction),
+                    minimum_nodes=int(self.config.minimum_graph_nodes),
+                    maximum_nodes=int(self.config.maximum_graph_nodes),
+                    skinning_neighbours=int(self.config.skinning_neighbours),
+                    neighbours=int(self.config.fine_neighbours),
+                    edge_ratio=float(self.config.fine_edge_ratio),
+                    attachment_edge_ratio=float(self.config.attachment_edge_ratio),
+                    data_weight=float(self.config.assimilation_data_weight),
+                    screening=float(self.config.assimilation_screening),
+                    iterations=int(self.config.assimilation_iterations),
+                    maximum_displacement=(
+                        float(self.config.assimilation_displacement_ratio) * diagonal
+                    ),
+                    minimum_improvement=max(
+                        .25 * float(self.config.minimum_observed_improvement), .0025,
+                    ),
+                    minimum_edge_compression=float(self.config.minimum_edge_compression),
+                    maximum_edge_stretch=float(self.config.maximum_edge_stretch),
+                    minimum_hidden_coverage=float(self.config.minimum_hidden_coverage),
+                    coverage_resolution=int(self.config.coverage_resolution),
+                    coherent_component_targets=False,
+                )
+                if solve_info.get("active"):
+                    before_assimilation = current
+                    current = assimilated
+                    assimilation_displacement = current - before_assimilation
+                    assimilation_anchor_mask[prior_ids] = True
+                    current, assimilation_topology = _project_small_topology_breaks(
+                        before_assimilation,
+                        current,
+                        np.zeros(len(current), dtype=bool),
+                        neighbours=int(self.config.fine_neighbours),
+                        edge_ratio=float(self.config.fine_edge_ratio),
+                        component_threshold=int(component_threshold),
+                    )
+                    assimilation_displacement = current - before_assimilation
+                else:
+                    assimilation_topology = {"active": False, "reason": "solver_rejected"}
+                assimilation_info = {
+                    "active": bool(solve_info.get("active")),
+                    "method": "integrated_four_view_observation_assimilation",
+                    "positive_evidence": pair_info,
+                    "assignment": assignment_info,
+                    "retained_anchors": int(len(anchors)),
+                    "solver": solve_info,
+                    "topology_projection": assimilation_topology,
+                }
+            else:
+                assimilation_info = {
+                    "active": False,
+                    "reason": "insufficient_observation_anchors",
+                    "method": "integrated_four_view_observation_assimilation",
+                    "positive_evidence": pair_info,
+                    "assignment": assignment_info,
+                    "retained_anchors": int(len(anchors)),
+                }
         initial_visible = visible_score(partial, initial, projector, diagonal)
         posterior_visible = visible_score(partial, current, projector, diagonal)
-        # The local OT objective is intentionally one-sided.  A candidate is
-        # therefore accepted only on the Pareto frontier: it must improve its
-        # transported residual (enforced inside the solver) without worsening
-        # the full visible observation.  This strict comparison introduces no
-        # dataset, category, scale, or hand-tuned acceptance threshold.
-        visible_pareto_accepted = bool(
-            not np.any(np.linalg.norm(current - initial, axis=1) > 1e-8)
-            or float(posterior_visible["objective"]) <= float(initial_visible["objective"])
-        )
-        posterior_verifier = {
-            "criterion": "local_transport_improves_and_global_visible_score_does_not_worsen",
-            "accepted": visible_pareto_accepted,
+        # Keep global visible evidence as an audit signal only.  The posterior
+        # solver already enforces its structural constraints internally; this
+        # diagnostic must not revert a successfully solved deformation.
+        posterior_diagnostics = {
+            "selection_gate_used": False,
             "initial": _compact_visible_score(initial_visible),
             "candidate": _compact_visible_score(posterior_visible),
             "objective_delta": float(posterior_visible["objective"] - initial_visible["objective"]),
             "ground_truth_cd_emd_used": False,
         }
-        if not visible_pareto_accepted:
-            current = initial.copy()
-            displacements = [np.zeros_like(initial), np.zeros_like(initial)]
-            topology_projection = {**topology_projection, "candidate_reverted_by_visible_pareto": True}
         final_coverage, final_coverage_views = _orthographic_coverage(
             initial, current, resolution=int(self.config.coverage_resolution),
         )
-        final_graph, _, _ = _local_gaussian_graph(
+        final_graph, _, _ = local_surface_graph(
             initial, neighbours=int(self.config.fine_neighbours), edge_ratio=float(self.config.fine_edge_ratio),
         )
-        posterior_graph, _, _ = _local_gaussian_graph(
+        posterior_graph, _, _ = local_surface_graph(
             current, neighbours=int(self.config.fine_neighbours), edge_ratio=float(self.config.fine_edge_ratio),
         )
-        final_strain = _edge_strain(initial, current, final_graph)
+        final_strain = edge_strain(initial, current, final_graph)
         input_components, input_labels = csgraph.connected_components(final_graph, directed=False)
         output_components, output_labels = csgraph.connected_components(posterior_graph, directed=False)
         input_sizes = np.bincount(input_labels, minlength=input_components)
@@ -1309,6 +1498,8 @@ class PosteriorAdapter:
             "moved": np.linalg.norm(current - initial, axis=1) > 1e-8,
             "coarse_displacement": displacements[0],
             "fine_displacement": displacements[1],
+            "assimilation_displacement": assimilation_displacement,
+            "assimilation_anchor": assimilation_anchor_mask,
             "transport_partial_ids": final_transport.partial_ids,
             "transport_prior_ids": final_transport.prior_ids,
             "transport_weights": final_transport.weights,
@@ -1334,7 +1525,8 @@ class PosteriorAdapter:
             "hidden_coverage_per_view": final_coverage_views,
             "integrity": integrity,
             "topology_projection": topology_projection,
-            "posterior_verifier": posterior_verifier,
+            "observation_assimilation": assimilation_info,
+            "posterior_diagnostics": posterior_diagnostics,
             **final_strain,
         }
         return current, info, masks

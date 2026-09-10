@@ -176,14 +176,3 @@ def registration_command(
     if bridge_only:
         command.append("--bridge-only")
     return command, root / "logs" / "registration.log"
-
-
-def gaussian_command(*, root: Path, manifest: SceneManifest) -> tuple[list[str], Path]:
-    return (
-        [
-            sys.executable, "scripts/run_mainline_gaussian.py",
-            "--root", str(root), "--registration-root", str(root / "registration"),
-            "--samples", *manifest.instance_ids,
-        ],
-        root / "logs" / "gaussian.log",
-    )

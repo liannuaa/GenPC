@@ -142,6 +142,8 @@ def _raycast_partial(mesh: trimesh.Trimesh, spec: SampleSpec) -> tuple[np.ndarra
                 "extrinsic_world_to_camera": extrinsic.tolist(),
                 "visible_surface_points": int(valid.sum()),
                 "sampler": "Open3D RaycastingScene pinhole",
+                "projection_model": "pinhole",
+                "point_uv_origin": "top-left",
             }
             return hits.astype(np.float64), depth, camera
     raise RuntimeError(f"{spec.label}: fewer than {POINT_COUNT} ray hits at 2048 px")

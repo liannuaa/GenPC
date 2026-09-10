@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage 1 of the mainline: partial scan -> depth -> Qwen semantic image."""
+"""Stage 1: saved-camera depth, with an optional local Qwen baseline."""
 
 from __future__ import annotations
 
@@ -33,12 +33,11 @@ def _load_config(path: Path, *, output_root: Path, partial_root: Path, models_ro
     return cfg
 
 
-def _complete(cfg: Munch, sample: str) -> bool:
-    return all(path.is_file() for path in (
-        sample_file(cfg, sample, "depth.png"),
-        sample_file(cfg, sample, "img.png"),
-        sample_file(cfg, sample, f"{sample}_moge_to_raw_partial_object_mask.png"),
-    ))
+def _complete(cfg: Munch, sample: str, *, depth_only: bool) -> bool:
+    names = ("depth.png", "raw_depth.png", "camera.pth", "point_uv.npy", "viewpoint.npy")
+    if not depth_only:
+        names += ("img.png", f"{sample}_moge_to_raw_partial_object_mask.png")
+    return all(sample_file(cfg, sample, name).is_file() for name in names)
 
 
 def main() -> None:
@@ -60,20 +59,27 @@ def main() -> None:
     parser.add_argument("--samples", nargs="+", default=list(REDWOOD10_SAMPLE_IDS),
                         help="Sample identifiers; add prompt_overrides in the config for new objects.")
     parser.add_argument("--resume", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument(
+        "--depth-only", action="store_true",
+        help="Save the selected camera and depth observation without loading Qwen.",
+    )
     args = parser.parse_args()
 
     cfg = _load_config(args.config, output_root=args.output_root, partial_root=args.partial_root, models_root=args.models_root)
     manifest_path = args.output_root / "semantic_stage_manifest.json"
     manifest = {
-        "method": "saved_view_depth_then_qwen_semantic_completion",
+        "method": (
+            "saved_view_depth_observation"
+            if args.depth_only else "saved_view_depth_then_qwen_semantic_completion"
+        ),
         "strict_zero_shot": True,
         "ground_truth_cd_emd_used": False,
         "samples": {},
         "config": {
             "depth_projection": cfg.depth_projection,
             "camera_resolution": int(cfg.cam_res),
-            "qwen_steps": int(cfg.qwen_edit_steps),
-            "qwen_size": int(cfg.qwen_edit_generate_res),
+            "qwen_steps": None if args.depth_only else int(cfg.qwen_edit_steps),
+            "qwen_size": None if args.depth_only else int(cfg.qwen_edit_generate_res),
         },
     }
     editor = None
@@ -82,8 +88,12 @@ def main() -> None:
             partial = args.partial_root / f"{sample}.ply"
             if not partial.is_file():
                 raise FileNotFoundError(partial)
-            if args.resume and _complete(cfg, sample):
-                manifest["samples"][sample] = {"state": "reused", "semantic": str(sample_file(cfg, sample, "img.png"))}
+            if args.resume and _complete(cfg, sample, depth_only=bool(args.depth_only)):
+                manifest["samples"][sample] = {
+                    "state": "reused",
+                    "depth": str(sample_file(cfg, sample, "depth.png")),
+                    "semantic": None if args.depth_only else str(sample_file(cfg, sample, "img.png")),
+                }
                 continue
             if editor is None:
                 editor = DepthPrompting(cfg)
@@ -100,26 +110,36 @@ def main() -> None:
                     )
                 viewpoint = np.load(viewpoint_path).astype(np.float32)
                 viewpoint_source = str(viewpoint_path.resolve())
-            editor.getImage(
-                xyz=xyz,
-                flag=sample,
-                rgb=rgb,
-                depth_gen=True,
-                img_gen=True,
-                viewpoint_override=viewpoint,
-            )
-            semantic = sample_file(cfg, sample, "img.png")
-            alpha = run_rmbg_mask(
-                semantic,
-                sample_file(cfg, sample, "img_rmbg.png"),
-                args.models_root / cfg.models.rmbg_model_path,
-            )
-            save_mask_png(sample_file(cfg, sample, f"{sample}_moge_to_raw_partial_object_mask.png"), alpha)
-            manifest["samples"][sample] = {
-                "state": "complete",
-                "semantic": str(sample_file(cfg, sample, "img.png")),
-                "viewpoint_source": viewpoint_source,
-            }
+            if args.depth_only:
+                editor.save_depth_observation(
+                    xyz=xyz, flag=sample, rgb=rgb, viewpoint_override=viewpoint,
+                )
+                manifest["samples"][sample] = {
+                    "state": "depth_complete",
+                    "depth": str(sample_file(cfg, sample, "depth.png")),
+                    "viewpoint_source": viewpoint_source,
+                }
+            else:
+                editor.getImage(
+                    xyz=xyz,
+                    flag=sample,
+                    rgb=rgb,
+                    depth_gen=True,
+                    img_gen=True,
+                    viewpoint_override=viewpoint,
+                )
+                semantic = sample_file(cfg, sample, "img.png")
+                alpha = run_rmbg_mask(
+                    semantic,
+                    sample_file(cfg, sample, "img_rmbg.png"),
+                    args.models_root / cfg.models.rmbg_model_path,
+                )
+                save_mask_png(sample_file(cfg, sample, f"{sample}_moge_to_raw_partial_object_mask.png"), alpha)
+                manifest["samples"][sample] = {
+                    "state": "complete",
+                    "semantic": str(semantic),
+                    "viewpoint_source": viewpoint_source,
+                }
             del xyz, rgb, points, colors
             gc.collect()
             if torch.cuda.is_available():

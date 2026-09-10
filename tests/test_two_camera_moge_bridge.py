@@ -6,6 +6,7 @@ from src.two_camera_moge_bridge import (
     bbox_affine,
     conjugate_native_residual_to_partial,
     conjugate_partial_residual_to_native,
+    infer_point_uv_flip_y,
     partial_uv_to_image_pixels,
     transferred_partial_to_moge_matches,
 )
@@ -38,6 +39,23 @@ def test_partial_uv_flip_and_transferred_moge_matches():
     assert info["matched_partial_pixels"] == 3
     assert np.array_equal(matches[:, 0], np.array((0., 1., 2.)))
     assert np.array_equal(matches[:, 1], np.array((0., 1., 2.)))
+
+
+def test_uv_origin_is_inferred_from_observed_foreground_support():
+    mask = np.zeros((101, 101), dtype=np.uint8)
+    mask[70:91, 20:81] = 255
+    top_left_uv = np.array(((.25, .75), (.50, .80), (.75, .85)))
+    flip, scores = infer_point_uv_flip_y(top_left_uv, mask, dilation_pixels=0)
+    assert not flip
+    assert scores["top_left"] == 1.0
+    assert scores["bottom_left"] == 0.0
+
+    bottom_left_uv = top_left_uv.copy()
+    bottom_left_uv[:, 1] = 1.0 - bottom_left_uv[:, 1]
+    flip, scores = infer_point_uv_flip_y(bottom_left_uv, mask, dilation_pixels=0)
+    assert flip
+    assert scores["bottom_left"] == 1.0
+    assert scores["top_left"] == 0.0
 
 
 def test_native_residual_conjugation_is_equivalent_after_camera_bridge():

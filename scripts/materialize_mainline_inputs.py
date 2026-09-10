@@ -26,6 +26,7 @@ from src.mainline_paths import REDWOOD10_SAMPLE_IDS, redwood_partial_root
 
 CAMERA_FILES = (
     "depth.png", "raw_depth.png", "img.png", "img_sam.png", "camera.pth", "point_uv.npy",
+    "camera.json",
     "qwen_edit_prompt.txt", "qwen_edit_stage1.png", "qwen_edit_stage1_prompt.txt",
 )
 PIXAL_FILES = (

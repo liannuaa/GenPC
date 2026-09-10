@@ -9,7 +9,7 @@ description = "Zero-shot point-cloud completion with regenerated 3D priors"
 readme = "README.md"
 requires-python = ">=3.10,<3.11"
 license = {text = "MIT"}
-keywords = ["point-cloud", "completion", "zero-shot", "image-to-3d", "registration", "trellis"]
+keywords = ["point-cloud", "completion", "zero-shot", "image-to-3d", "registration"]
 classifiers = [
   "Development Status :: 4 - Beta",
   "Intended Audience :: Science/Research",
@@ -58,11 +58,7 @@ pixal = [
 metrics = ["ninja==1.13.0"]
 download = ["huggingface-hub==0.36.2", "modelscope==1.37.1"]
 dev = ["pytest==9.1.1"]
-differentiable-registration = [
-  "nvdiffrast @ git+https://github.com/NVlabs/nvdiffrast.git@v0.4.0",
-  "pytorch3d @ git+https://github.com/facebookresearch/pytorch3d.git@v0.7.9",
-  "pyrender==0.1.45",
-]
+diagnostics = ["pyrender==0.1.45"]
 
 [project.urls]
 Repository = "https://github.com/liannuaa/GenPC"

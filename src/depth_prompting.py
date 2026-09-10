@@ -1,8 +1,7 @@
-"""Frozen saved-view depth rasterisation and Qwen semantic completion.
+"""Frozen saved-view depth rasterisation and optional Qwen completion.
 
-The project previously carried several experimental view selectors, inpainters,
-and image backends. The mainline uses only this deterministic reference view,
-OpenCV depth-hole fill, and Qwen-Image-Edit.
+The direct-GPT mainline uses this deterministic reference view and OpenCV
+depth-hole fill. Qwen remains callable only as a local comparison baseline.
 """
 
 from __future__ import annotations
@@ -24,7 +23,7 @@ from src.mainline_paths import model_path, sample_dir, sample_file
 
 
 class DepthPrompting:
-    """Generate one saved-view depth image and its Qwen semantic completion."""
+    """Generate a saved-view depth image and optionally a Qwen baseline."""
 
     def __init__(self, cfg):
         if str(cfg.depth_projection) != "view_select":
@@ -259,4 +258,17 @@ class DepthPrompting:
                 f"num_inference_steps: {editor.step}",
             ]) + "\n",
             encoding="utf-8",
+        )
+
+    def save_depth_observation(
+        self,
+        xyz: torch.Tensor,
+        flag: str,
+        rgb: torch.Tensor,
+        *,
+        viewpoint_override: np.ndarray | None = None,
+    ) -> None:
+        """Save the camera/depth checkpoint without loading an image model."""
+        self._save_depth(
+            xyz, rgb, flag, viewpoint_override=viewpoint_override,
         )
