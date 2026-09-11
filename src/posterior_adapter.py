@@ -1254,6 +1254,7 @@ class PosteriorAdapter:
         projector,
         *,
         view_projectors: Sequence | None = None,
+        transport_projectors: Sequence | None = None,
     ) -> tuple[np.ndarray, dict, dict[str, np.ndarray]]:
         prior = np.asarray(prior, dtype=np.float64)
         partial = np.asarray(partial, dtype=np.float64)
@@ -1274,10 +1275,11 @@ class PosteriorAdapter:
              self.config.fine_node_fraction),
         )
         current = prior.copy()
+        transport_views = transport_projectors if transport_projectors is not None else view_projectors
         for name, neighbours, edge_ratio, data_weight, screening, iterations, displacement_ratio, node_fraction in stage_specs:
             transport = partial_optimal_transport(
                 current, partial, projector, config=self.config, device=self.device,
-                view_projectors=view_projectors,
+                view_projectors=transport_views,
             )
             transports.append(transport)
             stable = inherited_stable | transport.stable_prior_mask

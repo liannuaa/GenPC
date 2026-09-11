@@ -242,6 +242,19 @@ def _load_world_mesh(glb_path: Path) -> trimesh.Trimesh:
 
 
 def _camera_vectors(camera_path: Path) -> tuple[np.ndarray, np.ndarray]:
+    sidecar = Path(camera_path).with_name("camera.json")
+    if sidecar.is_file():
+        metadata = json.loads(sidecar.read_text(encoding="utf-8"))
+        world_to_camera = np.asarray(
+            metadata.get("extrinsic_world_to_camera"), dtype=np.float64,
+        )
+        if world_to_camera.shape == (4, 4):
+            rotation = world_to_camera[:3, :3]
+            translation = world_to_camera[:3, 3]
+            camera_position = -rotation.T @ translation
+            # Open3D pinhole coordinates use +y down, whereas the orbit
+            # renderer expects a world-space camera-up vector.
+            return camera_position, _normalise(-rotation[1])
     # Kaolin is imported lazily so geometry-only unit tests do not require it.
     import torch
 

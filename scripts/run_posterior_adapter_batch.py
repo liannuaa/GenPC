@@ -171,6 +171,7 @@ def main() -> None:
         "sample_workers": int(args.sample_workers), "samples": records,
         "integrated_observation_fusion": bool(args.integrated_observation_fusion),
         "posterior_config": str(config_json) if config_json is not None else None,
+        "transport_policy": "exact_camera1",
     }
     (output_root / "batch_manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     if failures:

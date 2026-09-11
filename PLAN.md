@@ -14,8 +14,9 @@ mainline work.
   chain.
 - [x] Diagnose the registered prior with Camera-1 plus three views selected by
   incremental partial visibility. Treat absent partial pixels as unknown.
-- [x] Apply one category-independent `PosteriorAdapter`: structure-aware
-  Partial OT followed by coarse-to-fine embedded ARAP deformation.
+- [x] Use exact Camera-1 for structure-aware Partial OT, then apply the same
+  category-independent `PosteriorAdapter` and coarse-to-fine embedded ARAP
+  deformation; the four diagnostic views remain local assimilation evidence.
 - [x] Fuse the deformed complete posterior with physical partial samples using
   exactly the four saved diagnostic cameras and collision-free carrier-slot
   replacement; no concatenation, deletion, or second deformation is used.
@@ -129,3 +130,28 @@ mainline work.
   Do not claim the remaining ~0.02 Custom CD difference is a registration
   regression: this from-scratch run uses different cameras, semantic images,
   and generated priors from the old `2.0118/2.9994` run.
+- [x] Diagnose the weak current Pig deformation as an evidence-role regression:
+  four reframed orbit projectors can dilute the exact saved Camera-1 extent and
+  depth signal. The exact-Camera-1 probe keeps Camera-1 as the
+  sole structural-transport authority while retaining the four homogeneous
+  manifest views for local positive observation assimilation. On unchanged Pig
+  inputs this improves offline CD-L1/EMD x100 from `3.7756/3.5845` to
+  `1.6403/2.1470`, preserves all 100k slots and one connected component, and
+  retains hidden coverage `1.1194`. No class, part, GT, CD, or EMD logic enters
+  inference.
+- [x] Run the same Camera-1 transport probe over Custom10 and Redwood10 without
+  changing inputs or parameters. Direct replacement changes Custom mean from
+  `2.0316/2.6529` to `1.9921/2.5377` and Redwood mean from
+  `1.5631/2.5336` to `1.5380/2.4848`. The gain is concentrated in Pig, Wolf,
+  and Redwood 06830; mirrorless camera, drill, and Redwood 05452 regress, and
+  four cases fall slightly below 95% hidden coverage despite retaining 100k
+  slots and introducing no connected component. Therefore keep the policy
+  opt-in rather than replacing the four-view default. Outputs are under
+  `workspace/custom_from_scratch_integrated_tuning_20260911/`
+  `posterior_camera1_transport_manifest_assimilation_20260911`.
+- [x] A two-hypothesis no-GT policy probe was evaluated but not retained: the
+  user selected exact Camera-1 transport as the single mainline action to keep
+  inference simple and avoid doubled runtime. The frozen full-batch result is
+  `1.9921/2.5377` on Custom10 and `1.5380/2.4848` on Redwood10; the known
+  mirrorless-camera, drill, and 05452 regressions remain documented rather than
+  hidden behind category-specific branches.

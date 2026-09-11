@@ -1,0 +1,4 @@
+{
+  "integrated_observation_fusion": true,
+  "assimilation_anchor_residual_ratio": 0.03
+}

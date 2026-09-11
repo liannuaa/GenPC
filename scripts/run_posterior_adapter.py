@@ -31,7 +31,10 @@ def main() -> None:
     parser.add_argument("--semantic", type=Path, required=True)
     parser.add_argument(
         "--multiview-manifest", type=Path,
-        help="Camera manifest whose visibility-valid views enter Partial OT.",
+        help=(
+            "Camera manifest providing four consistently reframed views for local "
+            "observation assimilation; exact Camera-1 remains the transport view."
+        ),
     )
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--device", default="cuda")
@@ -70,15 +73,28 @@ def main() -> None:
     adapter = PosteriorAdapter(config, device=args.device)
     view_projectors = None
     if args.multiview_manifest is not None:
-        view_projectors = load_manifest_projectors(
+        manifest_projectors = load_manifest_projectors(
             args.multiview_manifest, resolution=int(args.render_size),
         )
-    posterior, info, masks = adapter.run(
-        prior, partial, projector, view_projectors=view_projectors,
-    )
-
+        if len(manifest_projectors) != 4:
+            raise ValueError(
+                "multiview posterior adaptation requires exactly four saved diagnostic views"
+            )
+        # Keep local assimilation in the consistently reframed diagnostic
+        # camera family. The exact acquisition camera has a separate role in
+        # structural transport below and must not silently replace one of the
+        # four local views.
+        view_projectors = manifest_projectors
     output = args.output_dir
     output.mkdir(parents=True, exist_ok=True)
+    posterior, info, masks = adapter.run(
+        prior, partial, projector,
+        view_projectors=view_projectors,
+        # Exact physical Camera-1 is the structural correspondence authority.
+        # The four consistently reframed views remain local assimilation views.
+        transport_projectors=(projector,),
+    )
+
     write_points(output / "posterior_prior_100k.ply", posterior)
     write_points(output / "coarse_prior_100k.ply", prior + masks["coarse_displacement"])
     write_compare(output / "partial_gray_posterior_red.ply", partial, posterior)
@@ -113,6 +129,7 @@ def main() -> None:
         "strict_zero_shot": True,
         "ground_truth_cd_emd_used": False,
         "category_or_part_rules_used": False,
+        "transport_policy": "exact_camera1",
         "posterior_config": asdict(config),
         "posterior_config_source": (
             str(args.config_json.resolve()) if args.config_json is not None else None

@@ -1,6 +1,9 @@
+import json
+
 import numpy as np
 
 from src.multiview_diagnostics import (
+    _camera_vectors,
     apply_transform,
     estimate_ordered_similarity,
     look_at_pose,
@@ -10,6 +13,22 @@ from src.multiview_diagnostics import (
 from src.multiview_partial_evidence import (
     VIEW_ORDER, build_prompt, compose_contact_sheet, compose_grid, split_grid,
 )
+
+
+def test_camera_vectors_reuse_pinhole_sidecar(tmp_path):
+    camera_path = tmp_path / "camera.pth"
+    camera_path.write_bytes(b"sidecar makes this payload irrelevant")
+    rotation = np.array(((1., 0., 0.), (0., -1., 0.), (0., 0., 1.)))
+    eye = np.array((1., 2., 3.))
+    world_to_camera = np.eye(4)
+    world_to_camera[:3, :3] = rotation
+    world_to_camera[:3, 3] = -(rotation @ eye)
+    (tmp_path / "camera.json").write_text(json.dumps({
+        "extrinsic_world_to_camera": world_to_camera.tolist(),
+    }))
+    recovered_eye, recovered_up = _camera_vectors(camera_path)
+    assert np.allclose(recovered_eye, eye)
+    assert np.allclose(recovered_up, (0., 1., 0.))
 
 
 def test_ordered_similarity_recovers_proper_sim3():

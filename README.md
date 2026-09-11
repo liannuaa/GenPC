@@ -14,7 +14,7 @@ partial point cloud
   -> textured Pixal3D prior and native MoGe observation
   -> camera-aware Pixal--MoGe--partial Sim(3) registration
   -> four informative prior/partial residual views
-  -> structure-aware Partial OT
+  -> exact Camera-1 structure-aware Partial OT
   -> coarse-to-fine prior-preserving posterior deformation
   -> four-view observation-anchored carrier fusion
   -> complete 100k-point prediction
@@ -52,9 +52,10 @@ $PY scripts/install_depth_conditioned_semantic.py \
 ```
 
 The four-view observation exposes where the registered prior disagrees with
-positive partial evidence and contributes visibility-valid pixel/depth costs
-directly to Partial OT. One category-independent `PosteriorAdapter` performs
-the physical update. It preserves every prior
+positive partial evidence. Exact physical Camera-1 supplies the structural
+Partial-OT correspondence authority, while the four consistently reframed
+diagnostic views supply local observation assimilation. One category-
+independent `PosteriorAdapter` performs the physical update and preserves every prior
 carrier slot, anchors already aligned surface, propagates reliable residuals
 through a deformation graph, and protects unobserved structure. Missing
 partial pixels are unknown rather than deletion evidence.
@@ -79,6 +80,7 @@ CUDA_VISIBLE_DEVICES=0 $PY scripts/run_posterior_adapter.py \
   --camera workspace/run/inputs/camera/01184/camera.pth \
   --semantic workspace/run/inputs/camera/01184/img.png \
   --multiview-manifest workspace/run/residuals/01184/render/render_manifest.json \
+  --config-json configs/posterior_mainline.json \
   --output-dir workspace/posterior_run/01184
 
 $PY scripts/run_observation_anchored_fusion.py \

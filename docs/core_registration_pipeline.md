@@ -65,10 +65,12 @@ z-buffer.
 
 Only visible partial samples are positive evidence. Missing pixels are unknown
 and never imply that prior geometry should be removed. Residual arrows point
-from the current prior surface toward the supported partial target. These
-visibility-valid pixel and depth residuals from every view enter Partial OT.
-The physical deformation is still solved in 3D by one shared action rather
-than independent per-view edits.
+from the current prior surface toward the supported partial target. Exact
+physical Camera-1 proposes the low-frequency structural transport, while the
+four consistently reframed diagnostic views provide local observation
+assimilation. This separates acquisition-view scale and depth from auxiliary
+view reframing. The physical deformation is solved in 3D by one shared action
+rather than independent per-view edits.
 
 ## 4. Structure-aware Partial OT
 
@@ -157,17 +159,16 @@ and offline metrics are not available to correspondence construction.
 
 ## 7. No-GT posterior diagnostics
 
-The posterior output is not selected or reverted by a separate verifier.
-Instead, the runner records the full saved-view objective and these integrity
+The runner records the full saved-view objective and these integrity
 diagnostics for inspection:
 
 - no new significant connected component;
 - bounded robust graph-edge strain;
 - stable-support motion near zero;
-- hidden-view coverage at least 95% of the input prior.
+- normalized hidden-view coverage.
 
-These values never choose between the registered and adapted prior. GT metrics
-are computed later by a separate process and cannot affect inference.
+GT metrics are computed later by a separate process and cannot affect
+inference.
 
 ## 8. Artifact contract
 
@@ -187,6 +188,9 @@ posterior_info.json
 
 `posterior_info.json` records the fixed configuration, support counts,
 deformation diagnostics and absolute input/output paths.
+The released mainline parameters are stored in
+`configs/posterior_mainline.json`; they enable integrated observation
+assimilation with a dimensionless anchor residual ratio of 0.03.
 
 The final fusion runner additionally writes:
 
